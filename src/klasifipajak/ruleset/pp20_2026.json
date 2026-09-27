@@ -1,0 +1,13 @@
+{
+    "ruleset_id": "pp20-2026-academic-1",
+    "as_of_date": "2026-09-26",
+    "currency": "IDR",
+    "final_rate_numerator": 1,
+    "final_rate_denominator": 200,
+    "rate_label": "0.5%",
+    "exemption_band_idr": 500000000,
+    "eligibility_cap_idr": 4800000000,
+    "ineligible_when": "gt",
+    "kap_kjs": "ACADEMIC-PLACEHOLDER",
+    "kap_kjs_note": "Not a live DJP billing code. Printed as text only when export exists."
+}
