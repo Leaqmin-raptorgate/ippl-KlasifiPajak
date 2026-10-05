@@ -72,12 +72,12 @@ These do not change without the developer saying so.
 
 Full detail in `backend/README.md`. In short:
 
-| Layer | May do |
-|---|---|
-| `app/engine/` | Pure maths. No framework, no ORM, no HTTP |
-| `app/classify/` | Rules, BM25, model client interface + fake |
+| Layer           | May do                                                   |
+| --------------- | -------------------------------------------------------- |
+| `app/engine/`   | Pure maths. No framework, no ORM, no HTTP                |
+| `app/classify/` | Rules, BM25, model client interface + fake               |
 | `app/services/` | One function per use case. Owns the transaction boundary |
-| `app/api/` | Validate, call one service, return |
+| `app/api/`      | Validate, call one service, return                       |
 
 ## Style
 
@@ -99,20 +99,61 @@ Full detail in `backend/README.md`. In short:
 - Sandbox environments only. Do not run anything against production keys.
 - Do not push unless asked.
 
+## Git Conventions
+
+- Atomic commits/PRs — one logical change, nothing unrelated bundled in.
+- Branch naming: `<type>/<short-kebab-description>` (e.g. `feat/classify-rules`), where `<type>` matches Conventional Commits types.
+- Commit message format:
+  ```
+  <type>[optional scope]: <description>
+
+  [optional body]
+
+  [optional footer(s)]
+  ```
+  - Blank line REQUIRED before body (if present) and before footer(s) (if present).
+  - `<type>` MUST be one of: `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`, `style`, `test`.
+  - `body-max-line-length` is disabled (per `commitlint.config.js`).
+
 ## Commands
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
-pytest
+pip install -r requirements-dev.txt   # requirements.txt plus ruff
+
+npm ci   # ALWAYS npm ci, never npm install (lockfile-locked)
 ```
+
+npm scripts (Node is dev tooling only, never runtime):
+
+| Task                        | Command                 |
+| --------------------------- | ----------------------- |
+| Run tests                   | `npm run test`          |
+| Tests with coverage gate    | `npm run test:coverage` |
+| Run ruff lint               | `npm run lint`          |
+| Fix ruff lint issues        | `npm run lint:fix`      |
+| Fix Python + doc formatting | `npm run format`        |
+| Check formatting (both)     | `npm run format:check`  |
 
 Docker runs the same suite:
 
 ```bash
 docker compose run --rm test
 ```
+
+### Pre-commit gates (all MUST pass)
+
+`.husky/pre-commit` runs in order: `lint`, `format:check`. Quick fix before committing:
+
+```bash
+npm run lint:fix && npm run format
+```
+
+Commit messages are validated by commitlint (`.husky/commit-msg`, Conventional
+Commits). CI (`.github/workflows/ci.yml`) runs the same checks first, then the
+pytest suite with the 80% branch coverage gate (NFR-14) and the Docker test
+image.
 
 ## Open decisions
 

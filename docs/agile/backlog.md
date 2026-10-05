@@ -15,15 +15,15 @@ in no committed document, so nothing here cites them as requirements.
 
 ## Modules
 
-| Module | Covers |
-|---|---|
-| Engine | FR-4.1 to FR-4.9 |
-| Classification | FR-3.1 to FR-3.8, NFR-Q1 to NFR-Q3 |
-| Storage | FR-1.x, FR-2.x, FR-5.x |
-| Payments | Gateway, webhooks, renewal. No SRS anchor yet |
-| UI | Vue 3 frontend |
-| Quality | Tests, Docker, CI |
-| SRS, SDD | Documentation, existing |
+| Module         | Covers                                        |
+| -------------- | --------------------------------------------- |
+| Engine         | FR-4.1 to FR-4.9                              |
+| Classification | FR-3.1 to FR-3.8, NFR-Q1 to NFR-Q3            |
+| Storage        | FR-1.x, FR-2.x, FR-5.x                        |
+| Payments       | Gateway, webhooks, renewal. No SRS anchor yet |
+| UI             | Vue 3 frontend                                |
+| Quality        | Tests, Docker, CI                             |
+| SRS, SDD       | Documentation, existing                       |
 
 ## Labels
 
@@ -82,12 +82,15 @@ v1.0 exclusion EX-02 removes the gateway the lecturer now requires.
 
 ## Quality gates
 
-- [x] GitHub Actions CI on push and PR to `main`: pytest with a branch
-  coverage gate of 80% on `backend/app/engine` (NFR-14), plus the same suite
-  inside the Docker test image (`.github/workflows/ci.yml`)
-- [ ] Lint job (`ruff`) — blocked on lint setup, not configured yet
+- [x] Lint and format: ruff (`npm run lint`) and ruff format + Prettier
+      (`npm run format:check`), enforced by the Husky pre-commit hook and in CI
+- [x] Conventional Commits enforced by commitlint (`.husky/commit-msg`)
+- [x] GitHub Actions CI on push and PR to `main`: lint and format first, then
+      pytest with a branch coverage gate of 80% on `backend/app/engine` (NFR-14),
+      plus the same suite inside the Docker test image
+      (`.github/workflows/ci.yml`)
 - [ ] CD to CasaOS — undecided; needs a self-hosted runner or SSH deploy
-  decision first
+      decision first
 
 ## Definition of done
 

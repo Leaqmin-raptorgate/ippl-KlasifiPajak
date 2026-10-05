@@ -1,0 +1,34 @@
+name: Feature Request
+description: Propose an improvement to KlasifiPajak
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: What should the system do instead?
+    validations:
+      required: true
+  - type: textarea
+    id: requirement
+    attributes:
+      label: Requirement source
+      description: Cite the SRS requirement id (FR-…, UC-…, NFR-…) if one exists. If none exists, say so — do not invent one.
+    validations:
+      required: true
+  - type: dropdown
+    id: tier
+    attributes:
+      label: Which account tier is affected?
+      options:
+        - Free
+        - Paid
+        - Both
+        - Not sure

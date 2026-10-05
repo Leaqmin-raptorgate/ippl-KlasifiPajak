@@ -1,0 +1,52 @@
+name: Bug Report
+description: Report incorrect behaviour in KlasifiPajak
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Clear description of the bug.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Numbered steps, starting from a clean state.
+      placeholder: |
+        1. Record a transaction with ...
+        2. Classify it as ...
+        3. Open the workpaper ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: Include numbers when relevant (amounts, counters, statuses).
+    validations:
+      required: true
+  - type: textarea
+    id: figures
+    attributes:
+      label: Figures and ruleset
+      description: If a tax amount is wrong, what was produced and what the elucidation says. Mention the `ruleset_id` shown on the workpaper.
+  - type: input
+    id: commit
+    attributes:
+      label: Commit SHA or version
+      placeholder: e.g. 761def5
+  - type: checkboxes
+    id: pii
+    attributes:
+      label: Privacy check
+      options:
+        - label: I have removed real NIB numbers, names, emails, and images from this report.
+          required: true
