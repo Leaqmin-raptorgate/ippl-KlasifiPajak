@@ -34,12 +34,12 @@ Two blockers sit in Sprint 1 and both need the developer, not more code:
 
 ## Parallel tracks
 
-| Track | Where | Runs |
-|---|---|---|
-| Docs | SRS v2.3, SDD, Plane SRS/SDD modules | Sprint 1 |
-| Build | `backend/app/`, `frontend/` | Sprints 2 to 5 |
-| Payments | `backend/app/payments/` | after gateway docs |
-| Coursework | FP, MBD, Keprof, IMK, PCD | continuously |
+| Track      | Where                                | Runs               |
+| ---------- | ------------------------------------ | ------------------ |
+| Docs       | SRS v2.3, SDD, Plane SRS/SDD modules | Sprint 1           |
+| Build      | `backend/app/`, `frontend/`          | Sprints 2 to 5     |
+| Payments   | `backend/app/payments/`              | after gateway docs |
+| Coursework | FP, MBD, Keprof, IMK, PCD            | continuously       |
 
 Do not start a new IPPL story while a sprint is unfinished.
 
@@ -84,14 +84,14 @@ the docs risks encoding a wrong assumption into a test that then looks correct.
 
 ## Risks
 
-| Risk | Response |
-|---|---|
-| SRS keeps changing | Engine invariants are frozen. Only wording changes land. |
-| Coursework spikes mid-November | Sprints 2 to 4 are independent. A paused sprint costs one story. |
-| Elucidation values never arrive | Engine ships with invariant tests only. Say so in the report rather than implying golden coverage. |
-| Model cost or outage | Heuristic path must work with the model down. |
-| Payments guesswork | Do not code the adapter before the docs are read. |
-| Scope creep into chat, OCR, export | Stretch list only, cut first. |
+| Risk                               | Response                                                                                           |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------- |
+| SRS keeps changing                 | Engine invariants are frozen. Only wording changes land.                                           |
+| Coursework spikes mid-November     | Sprints 2 to 4 are independent. A paused sprint costs one story.                                   |
+| Elucidation values never arrive    | Engine ships with invariant tests only. Say so in the report rather than implying golden coverage. |
+| Model cost or outage               | Heuristic path must work with the model down.                                                      |
+| Payments guesswork                 | Do not code the adapter before the docs are read.                                                  |
+| Scope creep into chat, OCR, export | Stretch list only, cut first.                                                                      |
 
 ## Open decisions
 

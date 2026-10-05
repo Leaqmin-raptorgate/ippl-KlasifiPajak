@@ -63,14 +63,14 @@ configurable; tax rates and bands do not, because they belong to the ruleset.
 These directories are placeholders with a stated purpose, not empty ceremony.
 Nothing in them is required for the engine to work.
 
-| Directory | Lands when |
-|---|---|
-| `app/classify/` | Sprint 2, keyword table and accuracy report |
-| `app/models/`, `app/schemas/` | Sprint 3, storage |
-| `app/services/`, `app/api/` | Sprint 3, first real endpoint |
-| `app/payments/` | Payment work, once the gateway interface is agreed |
-| `app/config/` | Sprint 2, threshold and quota settings |
-| `backend/alembic/` | Sprint 3, first migration |
-| `backend/tests/data/` | Sprint 2, labeled classification set |
-| `frontend/` | After the backend serves real numbers |
-| `nginx/` | Deploy time. Only service with a published port |
+| Directory                     | Lands when                                         |
+| ----------------------------- | -------------------------------------------------- |
+| `app/classify/`               | Sprint 2, keyword table and accuracy report        |
+| `app/models/`, `app/schemas/` | Sprint 3, storage                                  |
+| `app/services/`, `app/api/`   | Sprint 3, first real endpoint                      |
+| `app/payments/`               | Payment work, once the gateway interface is agreed |
+| `app/config/`                 | Sprint 2, threshold and quota settings             |
+| `backend/alembic/`            | Sprint 3, first migration                          |
+| `backend/tests/data/`         | Sprint 2, labeled classification set               |
+| `frontend/`                   | After the backend serves real numbers              |
+| `nginx/`                      | Deploy time. Only service with a published port    |

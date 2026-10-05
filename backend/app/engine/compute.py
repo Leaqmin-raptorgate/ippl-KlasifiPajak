@@ -34,9 +34,7 @@ from app.engine.types import (
     Transaction,
 )
 
-_CATEGORIES = frozenset(
-    {"usaha", "pekerjaan_bebas", "already_final", "non_object"}
-)
+_CATEGORIES = frozenset({"usaha", "pekerjaan_bebas", "already_final", "non_object"})
 _SPOUSE_FLAGS = frozenset({"yes", "no", "unknown"})
 
 
@@ -60,11 +58,7 @@ def compute(
     labeled_as_of = _date_str(ruleset.as_of_date if as_of_date is None else as_of_date)
     normalized = tuple(_normalize(tx) for tx in transactions)
     ordered = tuple(sorted(normalized, key=lambda tx: (tx.date, tx.id)))
-    spouse = (
-        profile.spouse_usaha_omzet_ytd
-        if profile.spouse_has_usaha_income == "yes"
-        else 0
-    )
+    spouse = profile.spouse_usaha_omzet_ytd if profile.spouse_has_usaha_income == "yes" else 0
     prior_ineligible = _over_cap(
         profile.prior_year_usaha_omzet,
         ruleset.eligibility_cap_idr,
@@ -100,19 +94,13 @@ def compute(
         taxable_omzet=taxable,
         scheme_ineligible_omzet=ineligible_amt,
         final_tax=sum(line.final_tax for line in lines),
-        withheld=sum(
-            line.withheld_tax_amount for line in lines if line.category == "usaha"
-        ),
+        withheld=sum(line.withheld_tax_amount for line in lines if line.category == "usaha"),
         self_paid=sum(line.self_paid for line in lines),
         pekerjaan_bebas_total=sum(
             line.amount for line in lines if line.category == "pekerjaan_bebas"
         ),
-        already_final_total=sum(
-            line.amount for line in lines if line.category == "already_final"
-        ),
-        non_object_total=sum(
-            line.amount for line in lines if line.category == "non_object"
-        ),
+        already_final_total=sum(line.amount for line in lines if line.category == "already_final"),
+        non_object_total=sum(line.amount for line in lines if line.category == "non_object"),
         lines=lines,
         months=months,
     )
