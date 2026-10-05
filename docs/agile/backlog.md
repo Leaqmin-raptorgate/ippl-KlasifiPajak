@@ -80,6 +80,15 @@ v1.0 exclusion EX-02 removes the gateway the lecturer now requires.
 - [ ] `GatewayAdapter` plus `FakeGatewayAdapter`
 - [ ] Webhook idempotency, monotonic status, renewal arithmetic
 
+## Quality gates
+
+- [x] GitHub Actions CI on push and PR to `main`: pytest with a branch
+  coverage gate of 80% on `backend/app/engine` (NFR-14), plus the same suite
+  inside the Docker test image (`.github/workflows/ci.yml`)
+- [ ] Lint job (`ruff`) — blocked on lint setup, not configured yet
+- [ ] CD to CasaOS — undecided; needs a self-hosted runner or SSH deploy
+  decision first
+
 ## Definition of done
 
 See [definition-of-done.md](definition-of-done.md).
