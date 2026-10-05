@@ -1,0 +1,3 @@
+#!/usr/bin/env sh
+# Conventional Commits, enforced by commitlint (commitlint.config.js).
+npx --no -- commitlint --edit "$1"

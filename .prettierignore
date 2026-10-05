@@ -1,0 +1,12 @@
+node_modules
+dist
+.venv
+venv
+__pycache__
+.pytest_cache
+.ruff_cache
+.coverage
+.coverage.*
+htmlcov
+package-lock.json
+*.py

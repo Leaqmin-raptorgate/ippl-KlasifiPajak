@@ -1,0 +1,26 @@
+{
+  "name": "klasifipajak",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Dev tooling for KlasifiPajak: commitlint, Husky hooks, Prettier, and the npm script surface.",
+  "scripts": {
+    "lint": "ruff check backend",
+    "lint:fix": "ruff check --fix backend",
+    "format": "ruff format backend && prettier --write .",
+    "format:check": "ruff format --check backend && prettier --check .",
+    "test": "python3 -m pytest",
+    "test:coverage": "python3 -m pytest --cov --cov-fail-under=80 --cov-report=term-missing",
+    "prepare": "husky",
+    "commitlint": "commitlint --edit"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^20.5.0",
+    "@commitlint/config-conventional": "^20.5.0",
+    "husky": "^9.1.7",
+    "prettier": "^3.6.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

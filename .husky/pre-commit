@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+# Pre-commit gates, in order: lint, format:check. All must pass to commit.
+# Same gates run in CI (.github/workflows/ci.yml).
+if [ -d .venv/bin ]; then PATH="$(pwd)/.venv/bin:$PATH"; fi
+export PATH
+
+npm run lint && npm run format:check
