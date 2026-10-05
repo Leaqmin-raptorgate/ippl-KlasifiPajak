@@ -1,7 +1,7 @@
 """Tax calculation. No language-model calls."""
 
-from klasifipajak.engine.compute import compute, disclaimer
-from klasifipajak.engine.types import (
+from app.engine.compute import compute, disclaimer
+from app.engine.types import (
     Line,
     MonthSummary,
     Profile,

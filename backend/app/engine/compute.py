@@ -25,7 +25,7 @@ import hashlib
 import json
 from datetime import date, datetime
 
-from klasifipajak.engine.types import (
+from app.engine.types import (
     Line,
     MonthSummary,
     Profile,

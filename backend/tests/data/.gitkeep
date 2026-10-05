@@ -1,0 +1,4 @@
+# Placeholder for the labeled classification set.
+
+CSV of transactions with an expected category, used later for precision, recall
+and threshold calibration. Lands in Sprint 2.

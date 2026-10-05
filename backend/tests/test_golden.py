@@ -13,7 +13,7 @@ follow the requirements:
   the taxable slice.
 """
 
-from klasifipajak.engine import Profile, Transaction, compute
+from app.engine import Profile, Transaction, compute
 
 BAND = 500_000_000
 

@@ -2,7 +2,7 @@
 
 import pytest
 
-from klasifipajak.ruleset import load_ruleset
+from app.engine.ruleset import load_ruleset
 
 
 @pytest.fixture

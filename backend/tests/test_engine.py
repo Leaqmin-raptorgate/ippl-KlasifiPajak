@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from klasifipajak.engine import Profile, Transaction, compute
+from app.engine import Profile, Transaction, compute
 
 BAND = 500_000_000
 
@@ -108,7 +108,7 @@ def test_accepts_date_object(ruleset):
 
 
 def test_engine_source_has_no_network_or_rate_literals():
-    root = Path(__file__).resolve().parents[1] / "src" / "klasifipajak" / "engine"
+    root = Path(__file__).resolve().parents[1] / "app" / "engine"
     text = "\n".join(path.read_text(encoding="utf-8") for path in root.glob("*.py"))
     for banned in ("httpx", "requests", "urllib", "openai", "openrouter", "socket"):
         assert banned not in text

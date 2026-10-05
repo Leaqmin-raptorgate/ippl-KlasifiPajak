@@ -1,0 +1,10 @@
+# Development-only override. Use with:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# mysql is normally reachable only by service name on the internal network.
+# This file binds it to 127.0.0.1 so a local client or migration tool can
+# connect without publishing the port to the network.
+services:
+  mysql:
+    ports:
+      - "127.0.0.1:3306:3306"

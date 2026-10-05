@@ -1,8 +1,8 @@
-# ippl-KlasifiPajak
+# KlasifiPajak
 
-Indonesian UMKM / freelancer tax calculator. Each transaction is classified first. A deterministic engine then computes Final PPh. A language model never produces a tax amount.
-
-This slice is the tax engine and its golden tests. No web UI yet.
+Indonesian UMKM / freelancer tax calculator. Each transaction is classified
+first. A deterministic engine then computes Final PPh. A language model never
+produces a tax amount.
 
 Not a filed return. Not authorized DJP software.
 
@@ -15,13 +15,32 @@ pip install -r requirements.txt
 pytest
 ```
 
+Docker runs the same tests. No web server yet.
+
+```bash
+docker compose run --rm test
+```
+
 ## Layout
 
-- `src/klasifipajak/ruleset/` — rates, exemption band, eligibility cap
-- `src/klasifipajak/engine/` — calculation only
-- `tests/` — `TC-GOLDEN-*` and engine checks
-- `docs/STYLE.md` — how code in this repo is written
+- `backend/app/engine/` — tax calculation. Pure Python, no framework, no model
+- `backend/app/engine/ruleset/` — rate, exemption band, eligibility cap, KAP/KJS
+- `backend/app/classify/` — rules, BM25, model client interface (planned)
+- `backend/app/services/` — one function per use case (planned)
+- `backend/app/api/` — thin routes (planned)
+- `backend/app/payments/` — gateway adapter (planned)
+- `backend/tests/` — engine tests and `TC-GOLDEN-*`
+- `backend/alembic/` — migrations (planned)
+- `frontend/` — Vue 3 + Vite (planned)
+- `nginx/` — serves the built frontend (planned)
+
+Layering rules and what lands when: [backend/README.md](backend/README.md).
 
 ## Docs
 
-Stable project docs live in [docs/](docs/). The course SRS stays outside this repository.
+- [AGENTS.md](AGENTS.md) — rules for coding agents. Read before changing code.
+- [docs/STYLE.md](docs/STYLE.md) — style authority
+- [docs/agile/backlog.md](docs/agile/backlog.md) — sprint status
+- [docs/agile/roadmap.md](docs/agile/roadmap.md) — sequence, risks, open decisions
+
+The course SRS stays outside this repository and is never pushed.

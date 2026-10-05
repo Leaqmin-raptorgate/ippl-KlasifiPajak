@@ -1,0 +1,4 @@
+# Alembic migration environment.
+
+Versions land in backend/alembic/versions/ when the first migration is written
+in Sprint 3.

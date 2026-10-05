@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from klasifipajak.engine.types import Ruleset
+from app.engine.types import Ruleset
 
 
 def default_ruleset_path() -> Path:
