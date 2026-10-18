@@ -36,7 +36,7 @@ npm ci   # ALWAYS npm ci, never npm install — lockfile-locked versions
 - `npm run test` — run the pytest suite (18 engine tests today).
 - `npm run test:coverage` — same suite with the 80% branch coverage gate.
 - `docker compose run --rm test` — run the suite inside the Docker test image.
-- There is no web server yet; `frontend/` and `nginx/` are placeholders.
+- The API binds to `127.0.0.1:8000`; the frontend is served by its own container.
 
 ## Branching
 

@@ -1,0 +1,157 @@
+@import "./tokens.css";
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--ink);
+  font: var(--t-body);
+  letter-spacing: var(--track-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  /* Rubber-band at the top, and keep the address bar out of sticky-header math. */
+  overscroll-behavior-y: none;
+  min-height: 100svh;
+}
+
+h1,
+h2,
+h3,
+h4,
+p,
+figure,
+blockquote,
+dl,
+dd {
+  margin: 0;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-weight: 600;
+  text-wrap: balance;
+}
+
+p {
+  text-wrap: pretty;
+}
+
+ul,
+ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+img,
+svg {
+  display: block;
+  max-width: 100%;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+}
+
+button {
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  /* Nothing in this app is a text selection target, but keep long-press sane. */
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--r-xs);
+}
+
+/* Every figure in this app is money, a rate, or a count. Tabular figures stop
+   the digits from shifting as values change, and align columns in the ledger. */
+.figure,
+td.num,
+th.num,
+input[inputmode="numeric"] {
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings:
+    "tnum" 1,
+    "cv05" 1;
+  letter-spacing: -0.01em;
+}
+
+/* ---- Utility --------------------------------------------------------- */
+
+.u-label {
+  font: var(--t-label-sm);
+  letter-spacing: var(--track-label-sm);
+  color: var(--ink-3);
+}
+
+.u-eyebrow {
+  font: var(--t-caption);
+  font-weight: 600;
+  letter-spacing: var(--track-caption);
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.u-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Where floating chrome overlaps scrolling content, fade the content out
+   instead of drawing a divider under the bar. */
+@supports (mask-image: linear-gradient(#000, #000)) {
+  .u-scroll-edge {
+    mask-image: linear-gradient(to bottom, transparent 0, #000 var(--edge, 1.5rem));
+  }
+}
+
+.u-hairline-top {
+  box-shadow: 0 -0.5px 0 var(--hairline);
+}

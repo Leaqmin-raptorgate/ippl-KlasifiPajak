@@ -1,0 +1,141 @@
+/* Shared motion. Every rule here is interruptible: CSS transitions restart from
+   the element's current computed value, so re-targeting mid-flight retargets
+   instead of jumping. Nothing locks input while a transition runs. */
+
+/* Press feedback lives on pointer-down, not on release. Waiting for click feels
+   dead. Cancelled on pointerup-out so a drag away from a target does not fire. */
+.press {
+  transition:
+    transform var(--t-press) var(--ease-out-soft),
+    background-color var(--t-fast) var(--ease-out-soft),
+    border-color var(--t-fast) var(--ease-out-soft),
+    opacity var(--t-fast) linear;
+}
+
+.press:active:not([disabled]) {
+  transform: scale(0.975);
+}
+
+@media (hover: hover) {
+  .press:hover:not([disabled]) {
+    transform: none;
+  }
+}
+
+/* Materialize: a translucent surface animates its blur and scale together, so
+   it reads as an arriving material rather than a plain opacity fade. */
+@keyframes kp-materialize {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.kp-materialize {
+  animation: kp-materialize var(--t-base) var(--ease-out-soft) both;
+}
+
+@keyframes kp-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.kp-rise {
+  animation: kp-rise var(--t-slow) var(--ease-out-soft) both;
+}
+
+/* Staggered entrance for a list that arrives as one gesture. */
+.kp-stagger > * {
+  animation: kp-rise var(--t-slow) var(--ease-out-soft) both;
+}
+
+.kp-stagger > *:nth-child(1) {
+  animation-delay: 0ms;
+}
+.kp-stagger > *:nth-child(2) {
+  animation-delay: 34ms;
+}
+.kp-stagger > *:nth-child(3) {
+  animation-delay: 68ms;
+}
+.kp-stagger > *:nth-child(4) {
+  animation-delay: 102ms;
+}
+.kp-stagger > *:nth-child(5) {
+  animation-delay: 136ms;
+}
+.kp-stagger > *:nth-child(6) {
+  animation-delay: 170ms;
+}
+.kp-stagger > *:nth-child(n + 7) {
+  animation-delay: 200ms;
+}
+
+/* A meter fill that grows from zero communicates accumulation; one that fades in
+   at its final width does not. */
+@keyframes kp-meter-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(var(--meter-ratio, 1));
+  }
+}
+
+.kp-meter-fill {
+  transform-origin: left center;
+  animation: kp-meter-fill 620ms var(--ease-out-soft) both;
+}
+
+/* Indeterminate progress. Suppressed entirely under reduced motion. */
+@keyframes kp-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(320%);
+  }
+}
+
+.kp-sweep {
+  animation: kp-sweep 1.15s var(--ease-in-out-soft) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Reduced motion is not the absence of feedback: swap physical movement for
+     short opacity cross-fades and keep every state change legible. */
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 120ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .press:active:not([disabled]) {
+    transform: none;
+  }
+
+  .kp-stagger > *,
+  .kp-rise,
+  .kp-materialize {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .kp-sweep {
+    display: none;
+  }
+}

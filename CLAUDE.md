@@ -6,8 +6,9 @@ This file exists only as a pointer, so the two cannot drift apart.
 
 Quick reference:
 
-- Requirements come from `SPEC/`, which is **not** in this repository. The only
-  SRS present is `KP-SRS-001` v1.0. v2.3 is planned and does not exist yet.
+- Requirements come from `SPEC/`, which lives beside this repository. The SRS of
+  record is **v2.6** (18 Okt 2026), with ERD v1.2.2 and API v1.2.2 on disk. See
+  `AGENTS.md` for provenance.
 - Never invent a requirement, threshold, tax figure, or expected test value.
   Leave a `TODO` instead.
 - The tax engine is pure Python and never calls a language model.

@@ -73,4 +73,3 @@ Nothing in them is required for the engine to work.
 | `backend/alembic/`            | Sprint 3, first migration                          |
 | `backend/tests/data/`         | Sprint 2, labeled classification set               |
 | `frontend/`                   | After the backend serves real numbers              |
-| `nginx/`                      | Deploy time. Only service with a published port    |

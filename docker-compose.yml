@@ -1,3 +1,45 @@
 services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: klasifipajak
+      MYSQL_USER: klasifipajak
+      MYSQL_PASSWORD: klasifipajak
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./docker/mysql-init.sql:/docker-entrypoint-initdb.d/01-test-database.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   test:
     build: .
+    environment:
+      APP_ENV: test
+      DATABASE_URL: mysql+pymysql://klasifipajak:klasifipajak@mysql:3306/klasifipajak_test
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  # Development API. It binds to localhost and must never be published.
+  api:
+    build: .
+    command: uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      APP_ENV: development
+      DATABASE_URL: mysql+pymysql://klasifipajak:klasifipajak@mysql:3306/klasifipajak
+    volumes:
+      - ./backend:/app/backend
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+volumes:
+  mysql_data:

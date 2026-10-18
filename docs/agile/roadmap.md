@@ -5,38 +5,62 @@ Goal: working demo before December. Optimize for finishing, not for completeness
 Tracking lives in Plane, project IPPL. This file explains the sequence and the
 reasoning; Plane holds the items.
 
-## Current state (5 Oct 2026)
+## Current state (18 Okt 2026)
 
 Done:
 
 - Tax engine at the specified architecture path, `backend/app/engine/`, pure
   Python, no framework, no model.
-- Ruleset as data at `backend/app/engine/ruleset/pp20_2026.json`.
-- 18 passing pytest tests, runnable on the host or in Docker.
-- Sprint structure in Plane: 5 cycles, 6 modules, 9 labels, 24 stories,
-  92 sub-tasks.
+- Ruleset as data at `backend/app/engine/ruleset/pp20_2026.json`, now carrying
+  `tax_year` and `effective_date`.
+- **SRS v2.6, ERD v1.2.2, and API v1.2.2 are on disk under
+  `SPEC/KlasifiPajak/`.** Both Sprint 1 provenance blockers are closed.
+- **Bagian A is aligned to API v1.2.2.** `/health` returns only
+  `{"status": "ok"}`, `/ruleset` speaks the contract field names, and
+  `POST /snapshot` emits the section 3.3 shape. The January digest equals the
+  document's normative vector.
+- **First storage slice (12 of 39 endpoints, about 31%).** Register, login,
+  logout, `GET /auth/me`, profile GET/PUT, transaction list/create with keyword
+  classification, and the dashboard read from stored snapshots.
+- MySQL 8 service in `docker-compose.yml`, for the API and the test suite.
+  `nginx/` is removed because ingress lives in the deployment container.
 
-Not started: classification, storage, UI, AI, payments.
+Not started: OCR, clarification/override, transaction edit/delete, recap/PDF,
+assistant, quotas, payments, frontend wiring.
 
-Two blockers sit in Sprint 1 and both need the developer, not more code:
+### Recorded deviations
 
-1. **Golden values.** SRS v1.0 NFR-T1 wants every worked example from the PP
-   20/2026 elucidation as a golden test. No elucidation figures have been
-   supplied. The eight `TC-GOLDEN-*` cases currently assert numbers derived
-   from the SRS appendix, which is not the same thing, so they must become
-   `TODO(ELUCIDATION)` stubs. Until then, golden coverage is zero and only
-   invariant tests remain.
-2. **SRS v2.3.** Planning notes cite `FR-17` to `FR-23a`, `FR-44`, `UC-19a`,
-   `UC-20`, `UC-23`, `NFR-04`, `NFR-12`, `NFR-13`. None exist in a committed
-   document. v2.3 has to define payments, OCR, the Pasal 17 question, paid
-   quota caps, the `input_hash` field list, and the `effective_date` versus
-   `as_of_date` naming.
+- Storage uses SQLAlchemy 2.0, not the stored-procedure tier of invariant 13.
+  Recorded in `AGENTS.md`; move one use case at a time onto the tier.
+- Tables are created with `Base.metadata.create_all` for the slice. The first
+  Alembic revision is still pending.
+- The classifier is the keyword table only. A miss is stored as provisional
+  `usaha` with `requires_clarification`; no model call in this slice.
+
+### Blocker — golden values — **CLOSED**
+
+SRS v2.6 §4.5 supplies an explicit table of inputs and expectations for every
+`TC-GOLDEN-*` case, with provenance from the PP 20/2026 elucidation and PMK
+164/2023 Lampiran B.
+
+### Blocker — SRS definition gaps — **CLOSED**
+
+v2.6 defines payments (FR-PAY-01 to -09), OCR (FR-06), the Pasal 17 question
+(excluded, §1.3), paid quota caps (FR-43), and the exact `input_hash` field list
+(FR-22). `effective_date` versus `as_of_date` is resolved by API v1.2.2: the
+stamp and the cutoff are different fields.
+
+### Residual risk
+
+The stored-procedure tier is still absent. Every query currently runs through
+SQLAlchemy in `app/services/`; that is the deviation to retire before the
+database rules can be called satisfied.
 
 ## Parallel tracks
 
 | Track      | Where                                | Runs               |
 | ---------- | ------------------------------------ | ------------------ |
-| Docs       | SRS v2.3, SDD, Plane SRS/SDD modules | Sprint 1           |
+| Docs       | SRS v2.6, SDD, Plane SRS/SDD modules | Sprint 1           |
 | Build      | `backend/app/`, `frontend/`          | Sprints 2 to 5     |
 | Payments   | `backend/app/payments/`              | after gateway docs |
 | Coursework | FP, MBD, Keprof, IMK, PCD            | continuously       |
@@ -46,11 +70,10 @@ Do not start a new IPPL story while a sprint is unfinished.
 ## Why payments is not in a sprint
 
 Payments is a lecturer requirement, so it is in scope. It is also the largest
-single item and the only one with no requirement to code against. Building it
-before the gateway documentation is read means guessing field names, which
-fails at runtime against a real gateway. The signature rule and the amount
-comparison are pure logic and could start earlier, but sequencing them ahead of
-the docs risks encoding a wrong assumption into a test that then looks correct.
+single item. API v1.2.2 now fixes the webhook contract (HMAC-SHA256 over
+`order_id`, status, and `amount_str`), so the guessing risk is gone; the item is
+still sequenced last because it is the biggest surface and the demo does not
+depend on it. Never run anything against production keys.
 
 ## Sprint order and why
 

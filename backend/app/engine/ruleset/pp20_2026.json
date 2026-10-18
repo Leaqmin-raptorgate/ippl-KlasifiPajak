@@ -1,6 +1,7 @@
 {
   "ruleset_id": "pp20-2026-academic-1",
-  "as_of_date": "2026-09-26",
+  "tax_year": 2026,
+  "effective_date": "2026-09-26",
   "currency": "IDR",
   "final_rate_numerator": 1,
   "final_rate_denominator": 200,
@@ -8,6 +9,12 @@
   "exemption_band_idr": 500000000,
   "eligibility_cap_idr": 4800000000,
   "ineligible_when": "gt",
+  "rounding_rule": "floor",
+  "spouse_in_band": false,
+  "spouse_in_cap": true,
+  "spouse_switch_note": "PMK 164/2023 Lampiran B. Each PH/MT partner holds an independent Rp 500 juta band, so spouse omzet never reduces the band; it joins only the Rp 4,8 miliar eligibility cap.",
+  "quota_ai_classification": 200,
+  "quota_assistant_chat": 200,
   "kap_kjs": "ACADEMIC-PLACEHOLDER",
   "kap_kjs_note": "Not a live DJP billing code. Printed as text only when export exists."
 }

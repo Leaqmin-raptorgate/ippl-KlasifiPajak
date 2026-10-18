@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f5f6f4" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#101413" media="(prefers-color-scheme: dark)" />
+    <meta
+      name="description"
+      content="KlasifiPajak memisahkan omzet usaha dan pekerjaan bebas, lalu menyusun kertas kerja pajak UMKM berdasarkan PP 20/2026."
+    />
+    <title>KlasifiPajak — Kertas Kerja Pajak UMKM</title>
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("kp-theme");
+          if (t === "dark" || t === "light") {
+            document.documentElement.dataset.theme = t;
+          } else {
+            document.documentElement.dataset.theme = window.matchMedia(
+              "(prefers-color-scheme: dark)",
+            ).matches
+              ? "dark"
+              : "light";
+          }
+        } catch (e) {
+          document.documentElement.dataset.theme = "light";
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
