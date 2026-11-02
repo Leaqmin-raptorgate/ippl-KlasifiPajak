@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.config.settings import _jwt_secret
 from app.db import SessionLocal
@@ -625,8 +625,24 @@ def test_tc_4_10_44_delete_account_cascades_profile_tx_and_pii(client):
             )
             == 0
         )
-        # receipt_images is out of this slice (Storage); cascade no-ops when absent.
-        assert not auth_service._table_exists(db, "receipt_images")
+        # Since PR #1 the ERD stub tables exist; the cascade must leave no rows behind.
+        for table in ("receipt_images", "quota_counters"):
+            assert auth_service._table_exists(db, table)
+            assert (
+                db.execute(
+                    text(f"SELECT COUNT(*) FROM {table} WHERE user_id = :uid"),
+                    {"uid": user_id},
+                ).scalar()
+                == 0
+            )
+        for table in ("subscription_orders", "payment_events"):
+            assert (
+                db.execute(
+                    text(f"SELECT COUNT(*) FROM {table} WHERE user_id = :uid"),
+                    {"uid": user_id},
+                ).scalar()
+                == 0
+            )
     finally:
         db.close()
 

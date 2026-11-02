@@ -94,3 +94,60 @@ class TransactionListOut(BaseModel):
 
     items: tuple[TransactionOut, ...]
     pagination: PaginationOut
+
+
+class TransactionUpdate(BaseModel):
+    """Body of ``PUT /transactions/{id}`` — create fields plus ``version``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    amount_idr: StrictInt = Field(gt=0)
+    tx_date: date
+    client_name: str = ""
+    description: str = ""
+    invoice_no: str | None = None
+    withheld_tax_amount_idr: StrictInt = Field(default=0, ge=0)
+    source_channel: SourceChannel = "other"
+    version: int = Field(ge=1)
+
+
+class OverrideIn(BaseModel):
+    """Body of ``POST /transactions/{id}/override``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    new_category: Literal["usaha", "pekerjaan_bebas", "already_final", "non_object"]
+    note: str | None = None
+
+
+class ReclassifyIn(BaseModel):
+    """Body of ``POST /transactions/reclassify``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    transaction_ids: list[str] = Field(min_length=1)
+
+
+class AuditEventOut(BaseModel):
+    """One classification_events row on the audit-trail wire (API §5.19 / D-02)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    timestamp: str
+    source: str
+    rule_id: str = ""
+    citation: str = ""
+    assigned_category: str = ""
+    old_category: str = ""
+    new_category: str = ""
+    note: str = ""
+    ytd_usaha_omzet_before_idr: int = 0
+    ytd_usaha_omzet_after_idr: int = 0
+    ruleset_id: str = ""
+    effective_date: str = ""
+
+
+class AuditTrailOut(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    events: tuple[AuditEventOut, ...]

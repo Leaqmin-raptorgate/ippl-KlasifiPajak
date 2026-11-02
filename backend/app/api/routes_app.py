@@ -32,11 +32,15 @@ from app.schemas.account import (
     SessionListOut,
 )
 from app.schemas.transaction import (
+    AuditTrailOut,
     ClarificationAnswer,
     ClarificationOut,
+    OverrideIn,
+    ReclassifyIn,
     TransactionCreate,
     TransactionListOut,
     TransactionOut,
+    TransactionUpdate,
 )
 from app.security import iso_utc
 from app.services import auth as auth_service
@@ -387,9 +391,10 @@ def dashboard(
 @router.get("/quotas")
 def get_quotas(
     context: AuthContext = Depends(current_session),
+    db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> dict:
-    return subscription_service.quotas(active_ruleset(settings.ruleset_path))
+    return subscription_service.quotas(db, context.user, active_ruleset(settings.ruleset_path))
 
 
 @router.get("/subscriptions/status")
@@ -397,3 +402,120 @@ def get_subscription_status(
     context: AuthContext = Depends(current_session),
 ) -> dict:
     return subscription_service.subscription_status(context.user)
+
+
+@router.put("/transactions/{transaction_id}", response_model=TransactionOut)
+def update_transaction(
+    transaction_id: str,
+    payload: TransactionUpdate,
+    context: AuthContext = Depends(current_session),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> TransactionOut:
+    """Edit one owned row with optimistic concurrency (FR-08 / API §5.12)."""
+    ruleset = active_ruleset(settings.ruleset_path)
+    return transaction_service.update_transaction(
+        db, context.user, transaction_id, payload, ruleset
+    )
+
+
+@router.delete("/transactions/{transaction_id}")
+def delete_transaction(
+    transaction_id: str,
+    context: AuthContext = Depends(current_session),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    """Delete one owned row and cascade its classification events (FR-09)."""
+    ruleset = active_ruleset(settings.ruleset_path)
+    return transaction_service.delete_transaction(db, context.user, transaction_id, ruleset)
+
+
+@router.post("/transactions/{transaction_id}/override", response_model=TransactionOut)
+def override_transaction(
+    transaction_id: str,
+    payload: OverrideIn,
+    context: AuthContext = Depends(current_session),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> TransactionOut:
+    """Manual category override without a model call (API §5.18)."""
+    ruleset = active_ruleset(settings.ruleset_path)
+    return transaction_service.override_category(db, context.user, transaction_id, payload, ruleset)
+
+
+@router.post("/transactions/reclassify")
+def reclassify_transactions(
+    payload: ReclassifyIn,
+    context: AuthContext = Depends(current_session),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    """Re-run the keyword pipeline on a list of owned rows (API §5.9)."""
+    ruleset = active_ruleset(settings.ruleset_path)
+    return transaction_service.reclassify_transactions(db, context.user, payload, ruleset)
+
+
+@router.get("/transactions/{transaction_id}/audit-trail", response_model=AuditTrailOut)
+def get_audit_trail(
+    transaction_id: str,
+    context: AuthContext = Depends(current_session),
+    db: Session = Depends(get_db),
+) -> AuditTrailOut:
+    """Per-transaction classification jejak (FR-16a / API §5.19)."""
+    return transaction_service.audit_trail(db, context.user, transaction_id)
+
+
+@router.post("/tax/snapshots/{tax_year}/recalculate")
+def recalculate_snapshots(
+    tax_year: int,
+    context: AuthContext = Depends(current_session),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    """Mark usang then insert versioned berlaku rows (FR-23a / API §5.22)."""
+    ruleset = active_ruleset(settings.ruleset_path)
+    return transaction_service.recalculate_snapshots(db, context.user, tax_year, ruleset)
+
+
+@router.get("/tax/snapshots/{tax_year}/{month}")
+def get_month_snapshot(
+    tax_year: int,
+    month: str,
+    context: AuthContext = Depends(current_session),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    """Monthly snapshot jejak for one month (FR-47 / API §5.21)."""
+    ruleset = active_ruleset(settings.ruleset_path)
+    return transaction_service.month_snapshot(db, context.user, tax_year, month, ruleset)
+
+
+@router.post("/test-support/subscription-override", response_model=None)
+def subscription_override(
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    """HB-29 / API §5.31 — fail-closed outside APP_ENV=test on loopback."""
+    if not settings.is_test:
+        return Response(status_code=404)
+    host = (request.client.host if request.client else "") or ""
+    if host not in {"127.0.0.1", "::1", "testclient", "localhost"}:
+        return Response(status_code=404)
+    from datetime import datetime
+
+    user_id = payload.get("user_id")
+    if not user_id:
+        raise ApiError(404, "USER_NOT_FOUND", "Pengguna tidak ditemukan.")
+    raw = payload.get("valid_until")
+    valid_until = None
+    if raw:
+        valid_until = datetime.fromisoformat(str(raw).replace("Z", "+00:00")).replace(tzinfo=None)
+    return subscription_service.set_subscription_override(
+        db,
+        user_id=str(user_id),
+        paid_flag=bool(payload.get("paid_flag")),
+        valid_until=valid_until,
+    )
