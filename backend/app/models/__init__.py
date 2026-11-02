@@ -150,9 +150,7 @@ class ReceiptImage(Base):
 
 class Transaction(Base):
     __tablename__ = "transactions"
-    __table_args__ = (
-        UniqueConstraint("duplicate_key", name="uq_transactions_duplicate_key"),
-    )
+    __table_args__ = (UniqueConstraint("duplicate_key", name="uq_transactions_duplicate_key"),)
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
@@ -163,9 +161,7 @@ class Transaction(Base):
     amount_idr: Mapped[int] = mapped_column(BigInteger, nullable=False)
     withheld_tax_amount_idr: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     client_name: Mapped[str] = mapped_column(String(255), default="", nullable=False)
-    client_name_norm: Mapped[str] = mapped_column(
-        String(255, **_NORM), default="", nullable=False
-    )
+    client_name_norm: Mapped[str] = mapped_column(String(255, **_NORM), default="", nullable=False)
     description: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     invoice_no: Mapped[str | None] = mapped_column(String(64), nullable=True)
     invoice_no_norm: Mapped[str | None] = mapped_column(String(64, **_NORM), nullable=True)
@@ -248,7 +244,9 @@ class QuotaCounter(Base):
     """ERD ``quota_counters`` (D-02 column names)."""
 
     __tablename__ = "quota_counters"
-    __table_args__ = (UniqueConstraint("user_id", "month_key", name="uq_quota_counters_user_month"),)
+    __table_args__ = (
+        UniqueConstraint("user_id", "month_key", name="uq_quota_counters_user_month"),
+    )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
@@ -261,9 +259,7 @@ class SubscriptionOrder(Base):
     """ERD ``subscription_orders`` (stub until Midtrans; pending_slot deferred)."""
 
     __tablename__ = "subscription_orders"
-    __table_args__ = (
-        UniqueConstraint("pending_slot", name="uq_subscription_orders_pending_slot"),
-    )
+    __table_args__ = (UniqueConstraint("pending_slot", name="uq_subscription_orders_pending_slot"),)
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)

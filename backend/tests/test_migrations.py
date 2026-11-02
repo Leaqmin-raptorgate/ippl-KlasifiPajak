@@ -391,7 +391,6 @@ def test_tc_hard_26_dockerfile_healthcheck():
     assert "/health" in text
 
 
-
 def test_init_db_create_all_fail_closed_allowlist(monkeypatch):
     """create_all runs only when APP_ENV casefolded is development or test."""
     import app.db as db_mod
