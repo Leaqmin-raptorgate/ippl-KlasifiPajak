@@ -1,14 +1,18 @@
 """Persist month snapshots from stored transactions.
 
 The engine remains the only calculator. This module maps stored rows onto engine
-inputs, runs it once, and writes one row per month from January through today's
-Asia/Jakarta month. A write replaces the range inside the caller's transaction.
+inputs, runs it once, and writes one *berlaku* row per month from January
+through today's Asia/Jakarta month.
+
+D-11 / HB-16: a write never overwrites a berlaku row in place. The prior berlaku
+row is marked ``usang`` and a new row is inserted with ``version + 1``. The
+input_hash and ruleset stamp travel with every new row (B-08 H-07/H-08).
 """
 
 from datetime import date
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.engine import Profile as EngineProfile
@@ -60,8 +64,31 @@ def transaction_to_engine(row: TransactionRow) -> EngineTransaction:
     )
 
 
+def mark_usang(db: Session, profile: ProfileRow, month_keys: list[str] | None = None) -> int:
+    """Mark berlaku rows ``usang`` for FR-23a stale signalling.
+
+    When ``month_keys`` is None every berlaku row for the profile is marked.
+    Returns how many rows flipped.
+    """
+    conditions = [
+        MonthSnapshot.profile_id == profile.id,
+        MonthSnapshot.status == "berlaku",
+    ]
+    if month_keys is not None:
+        conditions.append(MonthSnapshot.month_key.in_(month_keys))
+    rows = db.scalars(select(MonthSnapshot).where(*conditions)).all()
+    for row in rows:
+        row.status = "usang"
+    db.flush()
+    return len(rows)
+
+
 def rebuild(db: Session, profile: ProfileRow, ruleset: Ruleset) -> list[MonthSnapshot]:
-    """Recompute every month through today for one stored profile."""
+    """Recompute every month through today for one stored profile.
+
+    Each month that already has a berlaku row is versioned: the old row becomes
+    ``usang`` and a new ``berlaku`` row is inserted with ``version + 1``.
+    """
     rows = db.scalars(
         select(TransactionRow).where(
             TransactionRow.user_id == profile.user_id,
@@ -75,19 +102,15 @@ def rebuild(db: Session, profile: ProfileRow, ruleset: Ruleset) -> list[MonthSna
     snapshot = compute(engine_rows, engine_profile, ruleset, as_of)
 
     if snapshot.prior_year_resolution_source == "unverifiable":
-        status = "unverifiable"
+        scheme_status = "unverifiable"
         annotation = UNVERIFIABLE_ANNOTATION
     elif snapshot.prior_year_ineligible:
-        status = "scheme_ineligible"
+        scheme_status = "scheme_ineligible"
         annotation = INELIGIBLE_ANNOTATION
     else:
-        status = "scheme_eligible"
+        scheme_status = "scheme_eligible"
         annotation = ""
 
-    existing = {
-        row.month_key: row
-        for row in db.scalars(select(MonthSnapshot).where(MonthSnapshot.profile_id == profile.id))
-    }
     last_month = min(as_of.month, 12) if as_of.year == ruleset.tax_year else 12
     written: list[MonthSnapshot] = []
     engine_months = {month.month: month for month in snapshot.months}
@@ -101,22 +124,7 @@ def rebuild(db: Session, profile: ProfileRow, ruleset: Ruleset) -> list[MonthSna
             if row.category in categories:
                 categories[row.category] += row.amount_idr
 
-        snapshot_row = existing.get(month_key)
-        if snapshot_row is None:
-            snapshot_row = MonthSnapshot(
-                id=new_id("snap_"), profile_id=profile.id, month_key=month_key
-            )
-            db.add(snapshot_row)
-            existing[month_key] = snapshot_row
-
-        snapshot_row.status = "berlaku"
-        snapshot_row.ruleset_id = ruleset.ruleset_id
-        snapshot_row.effective_date = date.fromisoformat(ruleset.effective_date)
-        snapshot_row.rounding_rule = ruleset.rounding_rule
-        snapshot_row.scheme_eligibility_status = status
-        snapshot_row.next_year_ineligible = snapshot.next_year_at_risk
-        snapshot_row.prior_year_resolution_source = snapshot.prior_year_resolution_source
-        snapshot_row.input_hash = (
+        input_hash = (
             engine_month.input_hash
             if engine_month
             else month_input_hash(
@@ -126,25 +134,76 @@ def rebuild(db: Session, profile: ProfileRow, ruleset: Ruleset) -> list[MonthSna
                 month_key,
             )
         )
-        snapshot_row.usaha_omzet_idr = engine_month.usaha_omzet if engine_month else 0
-        snapshot_row.porsi_bebas_idr = engine_month.exempt if engine_month else 0
-        snapshot_row.porsi_kena_idr = engine_month.taxable if engine_month else 0
-        snapshot_row.tax_0_5_pct_idr = engine_month.final_tax if engine_month else 0
-        snapshot_row.withheld_tax_idr = engine_month.withheld if engine_month else 0
-        snapshot_row.sisa_bayar_idr = engine_month.sisa_bayar_idr if engine_month else 0
-        snapshot_row.overwithheld_excess_idr = (
-            engine_month.overwithheld_excess_idr if engine_month else 0
+
+        prior = db.scalar(
+            select(MonthSnapshot).where(
+                MonthSnapshot.profile_id == profile.id,
+                MonthSnapshot.month_key == month_key,
+                MonthSnapshot.status == "berlaku",
+            )
         )
-        snapshot_row.overwithheld_status = engine_month.withhold_status if engine_month else "nihil"
-        snapshot_row.pekerjaan_bebas_omzet_idr = categories["pekerjaan_bebas"]
-        snapshot_row.already_final_omzet_idr = categories["already_final"]
-        snapshot_row.non_object_omzet_idr = categories["non_object"]
-        snapshot_row.annotation = annotation
+        max_version = db.scalar(
+            select(func.coalesce(func.max(MonthSnapshot.version), 0)).where(
+                MonthSnapshot.profile_id == profile.id,
+                MonthSnapshot.month_key == month_key,
+            )
+        )
+        next_version = int(max_version or 0) + 1
+        if prior is not None:
+            prior.status = "usang"
+
+        snapshot_row = MonthSnapshot(
+            id=new_id("snap_"),
+            profile_id=profile.id,
+            month_key=month_key,
+            version=next_version,
+            status="berlaku",
+            ruleset_id=ruleset.ruleset_id,
+            effective_date=date.fromisoformat(ruleset.effective_date),
+            rounding_rule=ruleset.rounding_rule,
+            scheme_eligibility_status=scheme_status,
+            next_year_ineligible=snapshot.next_year_at_risk,
+            prior_year_resolution_source=snapshot.prior_year_resolution_source,
+            input_hash=input_hash,
+            usaha_omzet_idr=engine_month.usaha_omzet if engine_month else 0,
+            porsi_bebas_idr=engine_month.exempt if engine_month else 0,
+            porsi_kena_idr=engine_month.taxable if engine_month else 0,
+            tax_0_5_pct_idr=engine_month.final_tax if engine_month else 0,
+            withheld_tax_idr=engine_month.withheld if engine_month else 0,
+            sisa_bayar_idr=engine_month.sisa_bayar_idr if engine_month else 0,
+            overwithheld_excess_idr=(engine_month.overwithheld_excess_idr if engine_month else 0),
+            overwithheld_status=engine_month.withhold_status if engine_month else "nihil",
+            pekerjaan_bebas_omzet_idr=categories["pekerjaan_bebas"],
+            already_final_omzet_idr=categories["already_final"],
+            non_object_omzet_idr=categories["non_object"],
+            annotation=annotation,
+        )
+        db.add(snapshot_row)
         written.append(snapshot_row)
 
-    # Months beyond the current Jakarta month do not exist yet.
-    stale = [row for key, row in existing.items() if key > f"{ruleset.tax_year}-{last_month:02d}"]
-    if stale:
-        db.execute(delete(MonthSnapshot).where(MonthSnapshot.id.in_([r.id for r in stale])))
+    # Months beyond the current Jakarta month do not exist yet — drop future
+    # berlaku placeholders left from an earlier as_of (keep usang history).
+    future_berlaku = db.scalars(
+        select(MonthSnapshot).where(
+            MonthSnapshot.profile_id == profile.id,
+            MonthSnapshot.status == "berlaku",
+            MonthSnapshot.month_key > f"{ruleset.tax_year}-{last_month:02d}",
+        )
+    ).all()
+    if future_berlaku:
+        db.execute(
+            delete(MonthSnapshot).where(MonthSnapshot.id.in_([r.id for r in future_berlaku]))
+        )
     db.flush()
     return written
+
+
+def get_berlaku(db: Session, profile: ProfileRow, month_key: str) -> MonthSnapshot | None:
+    """The current berlaku row for one month, or None."""
+    return db.scalar(
+        select(MonthSnapshot).where(
+            MonthSnapshot.profile_id == profile.id,
+            MonthSnapshot.month_key == month_key,
+            MonthSnapshot.status == "berlaku",
+        )
+    )

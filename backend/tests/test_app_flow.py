@@ -213,8 +213,9 @@ def test_subscription_status_and_quota_limits(client):
 
     quotas = client.get("/api/v1/quotas").json()
     assert quotas["timezone"] == "Asia/Jakarta"
-    assert quotas["ai_classification"]["limit"] == 200
-    assert quotas["assistant_chat"]["limit"] == 200
+    # Free tier: AI 10 / assistant 15 (API §2.7 / §5.26). Paid ceilings are 200.
+    assert quotas["ai_classification"]["limit"] == 10
+    assert quotas["assistant_chat"]["limit"] == 15
     assert quotas["ai_classification"]["used"] == 0
 
 

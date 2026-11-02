@@ -1,9 +1,10 @@
 """SQLAlchemy tables for the slice that stores accounts and tax data.
 
 Names and columns follow ERD v1.2.2. Money is ``BIGINT`` rupiah; instants are
-UTC ``DateTime`` values written by the application. Tables outside today's
-slice (password reset, receipts, quotas, orders, payment events) are not
-declared yet.
+UTC ``DateTime`` values written by the application. Quota counters are declared so the Tax lane can persist FR-34/39 usage.
+MonthSnapshot carries the D-11 ``version`` column (Storage owns the Alembic
+migration; this is the minimal model shim so writers can land first).
+Password reset, receipts, orders, and payment events remain Storage/Security.
 """
 
 from datetime import date, datetime
@@ -15,6 +16,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     UniqueConstraint,
@@ -145,12 +147,24 @@ class ClassificationEvent(Base):
 
 
 class MonthSnapshot(Base):
+    """Per-month tax workpaper row.
+
+    D-11 / HB-16: uniqueness is ``(profile_id, month_key, version)``. Writers
+    mark the prior ``berlaku`` row ``usang`` and insert ``version + 1``. Reads
+    filter ``status == "berlaku"``. Storage owns the Alembic revision that
+    lands this UK in environments that already have data.
+    """
+
     __tablename__ = "month_snapshots"
-    __table_args__ = (UniqueConstraint("profile_id", "month_key"),)
+    __table_args__ = (
+        UniqueConstraint("profile_id", "month_key", "version"),
+        Index("ix_month_snapshots_profile_month_status", "profile_id", "month_key", "status"),
+    )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     profile_id: Mapped[str] = mapped_column(ForeignKey("profiles.id"), nullable=False, index=True)
     month_key: Mapped[str] = mapped_column(String(7), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     status: Mapped[str] = mapped_column(String(16), default="berlaku", nullable=False)
     ruleset_id: Mapped[str] = mapped_column(String(64), nullable=False)
     effective_date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -173,11 +187,25 @@ class MonthSnapshot(Base):
     annotation: Mapped[str] = mapped_column(String(255), default="", nullable=False)
 
 
+class QuotaCounter(Base):
+    """Asia/Jakarta calendar-month AI / assistant usage (ERD r3 / D-02)."""
+
+    __tablename__ = "quota_counters"
+    __table_args__ = (UniqueConstraint("user_id", "month_key"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    month_key: Mapped[str] = mapped_column(String(7), nullable=False)
+    ai_classification_used: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    assistant_chat_used: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+
 __all__ = [
     "ClassificationEvent",
     "MonthSnapshot",
     "Profile",
     "ProfileChange",
+    "QuotaCounter",
     "Session",
     "Transaction",
     "User",

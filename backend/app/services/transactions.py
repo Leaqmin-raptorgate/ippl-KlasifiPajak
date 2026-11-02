@@ -14,18 +14,24 @@ from app.engine import Ruleset
 from app.models import ClassificationEvent, User
 from app.models import Transaction as TransactionRow
 from app.schemas.transaction import (
+    AuditEventOut,
+    AuditTrailOut,
     ClarificationAnswer,
     ClarificationOption,
     ClarificationOut,
     ClassificationOut,
+    OverrideIn,
     PaginationOut,
+    ReclassifyIn,
     TransactionCreate,
     TransactionListOut,
     TransactionOut,
+    TransactionUpdate,
 )
-from app.security import new_id, now_utc
+from app.security import iso_utc, new_id, now_utc
 from app.services.profile import find_profile
-from app.services.snapshots_store import rebuild
+from app.services.snapshot import DISCLAIMER
+from app.services.snapshots_store import get_berlaku, rebuild
 
 _SOURCE_CHANNELS = frozenset({"marketplace", "corporate_client", "retail", "other"})
 
@@ -332,6 +338,302 @@ def answer_clarification(
     rebuild(db, profile, ruleset)
     db.commit()
     return row_out(row)
+
+
+def update_transaction(
+    db: Session,
+    user: User,
+    transaction_id: str,
+    payload: TransactionUpdate,
+    ruleset: Ruleset,
+) -> TransactionOut:
+    """PUT /transactions/{id} — optimistic concurrency via ``version`` (FR-08).
+
+    Classification is not re-run on a field edit (UC-05a A1). Snapshots from the
+    earlier of the old and new month through December are rebuilt (API §5.12).
+    """
+    row = get_transaction(db, user, transaction_id)
+    if payload.version != row.version:
+        raise ApiError(
+            409,
+            "VERSION_CONFLICT",
+            "Data ini sudah diubah di perangkat lain. Muat ulang, lalu simpan lagi.",
+        )
+    if payload.source_channel not in _SOURCE_CHANNELS:
+        raise ApiError(422, "INVALID_SOURCE_CHANNEL", "Saluran sumber tidak dikenal.")
+    if payload.tx_date.year != ruleset.tax_year:
+        raise ApiError(
+            422,
+            "INVALID_DATE_RANGE",
+            f"Tanggal transaksi di luar tahun pajak {ruleset.tax_year}.",
+        )
+    profile = find_profile(db, user, ruleset.tax_year)
+    if profile is None:
+        raise ApiError(404, "PROFILE_NOT_FOUND", "Profil untuk tahun pajak berjalan belum dibuat.")
+
+    client_norm = normalize_text(payload.client_name)
+    invoice_norm = normalize_text(payload.invoice_no) if payload.invoice_no else None
+    if invoice_norm:
+        duplicate = db.scalar(
+            select(TransactionRow.id).where(
+                TransactionRow.user_id == user.id,
+                TransactionRow.client_name_norm == client_norm,
+                TransactionRow.invoice_no_norm == invoice_norm,
+                TransactionRow.amount_idr == payload.amount_idr,
+                TransactionRow.tx_date == payload.tx_date,
+                TransactionRow.id != row.id,
+            )
+        )
+        if duplicate is not None:
+            raise ApiError(
+                409,
+                "DUPLICATE_INVOICE_TRANSACTION",
+                "Nomor faktur ini sudah tercatat untuk klien, nominal, dan tanggal yang sama.",
+            )
+
+    row.tx_date = payload.tx_date
+    row.amount_idr = payload.amount_idr
+    row.withheld_tax_amount_idr = payload.withheld_tax_amount_idr
+    row.client_name = payload.client_name.strip()
+    row.client_name_norm = client_norm
+    row.description = payload.description.strip()
+    row.invoice_no = payload.invoice_no or None
+    row.invoice_no_norm = invoice_norm
+    row.source_channel = payload.source_channel
+    row.version += 1
+    rebuild(db, profile, ruleset)
+    db.commit()
+    return row_out(row)
+
+
+def delete_transaction(db: Session, user: User, transaction_id: str, ruleset: Ruleset) -> dict:
+    """DELETE /transactions/{id} — cascade classification events, rebuild (FR-09)."""
+    row = get_transaction(db, user, transaction_id)
+    profile = find_profile(db, user, ruleset.tax_year)
+    if profile is None:
+        raise ApiError(404, "PROFILE_NOT_FOUND", "Profil untuk tahun pajak berjalan belum dibuat.")
+
+    for event in db.scalars(
+        select(ClassificationEvent).where(ClassificationEvent.transaction_id == row.id)
+    ).all():
+        db.delete(event)
+    db.delete(row)
+    db.flush()
+    rebuild(db, profile, ruleset)
+    db.commit()
+    return {"deleted": True, "id": transaction_id}
+
+
+def override_category(
+    db: Session,
+    user: User,
+    transaction_id: str,
+    payload: OverrideIn,
+    ruleset: Ruleset,
+) -> TransactionOut:
+    """POST /transactions/{id}/override — no model call (FR-16 / API §5.18)."""
+    row = get_transaction(db, user, transaction_id)
+    profile = find_profile(db, user, ruleset.tax_year)
+    if profile is None:
+        raise ApiError(404, "PROFILE_NOT_FOUND", "Profil untuk tahun pajak berjalan belum dibuat.")
+
+    before = _usaha_total(db, user.id, exclude_id=row.id)
+    old_category = row.category
+    row.category = payload.new_category
+    row.source = "user_override"
+    row.requires_clarification = False
+    row.confidence = 1.0
+    row.version += 1
+    after = before + row.amount_idr if payload.new_category == "usaha" else before
+    db.add(
+        ClassificationEvent(
+            id=new_id("evt_"),
+            transaction_id=row.id,
+            recorded_at=now_utc(),
+            source=row.source,
+            rule_id="",
+            citation="",
+            old_category=old_category,
+            new_category=payload.new_category,
+            note=(payload.note or "").strip(),
+            ytd_usaha_before_idr=before,
+            ytd_usaha_after_idr=after,
+            ruleset_id=ruleset.ruleset_id,
+            effective_date=date.fromisoformat(ruleset.effective_date),
+        )
+    )
+    rebuild(db, profile, ruleset)
+    db.commit()
+    return row_out(row)
+
+
+def reclassify_transactions(
+    db: Session, user: User, payload: ReclassifyIn, ruleset: Ruleset
+) -> dict:
+    """POST /transactions/reclassify — atomic rules-layer rerun (API §5.9).
+
+    This slice has no model fallback; exhausted AI quota is therefore a no-op for
+    reservation. Each id runs the same keyword pipeline as create. One unknown
+    id fails the whole request with no writes.
+    """
+    profile = find_profile(db, user, ruleset.tax_year)
+    if profile is None:
+        raise ApiError(404, "PROFILE_NOT_FOUND", "Profil untuk tahun pajak berjalan belum dibuat.")
+
+    ids = list(payload.transaction_ids)
+    rows = []
+    for tx_id in ids:
+        row = db.scalar(
+            select(TransactionRow).where(
+                TransactionRow.id == tx_id,
+                TransactionRow.user_id == user.id,
+            )
+        )
+        if row is None:
+            raise ApiError(
+                404,
+                "TRANSACTION_NOT_FOUND",
+                "Satu atau lebih transaksi tidak ditemukan pada akun Anda.",
+            )
+        rows.append(row)
+
+    results = []
+    for row in rows:
+        old_category = row.category
+        category, rule_id, confidence, requires_clarification, citation = classify(
+            f"{row.description} {row.client_name}"
+        )
+        before = _usaha_total(db, user.id, exclude_id=row.id)
+        row.category = category
+        row.source = "rule"
+        row.rule_id = rule_id
+        row.confidence = confidence
+        row.requires_clarification = requires_clarification
+        row.version += 1
+        after = before + row.amount_idr if category == "usaha" else before
+        db.add(
+            ClassificationEvent(
+                id=new_id("evt_"),
+                transaction_id=row.id,
+                recorded_at=now_utc(),
+                source=row.source,
+                rule_id=rule_id,
+                citation=citation,
+                old_category=old_category,
+                new_category=category,
+                note="" if not requires_clarification else "Menunggu klarifikasi pengguna.",
+                ytd_usaha_before_idr=before,
+                ytd_usaha_after_idr=after,
+                ruleset_id=ruleset.ruleset_id,
+                effective_date=date.fromisoformat(ruleset.effective_date),
+            )
+        )
+        results.append(
+            {
+                "id": row.id,
+                "old_category": old_category,
+                "new_category": category,
+                "source": row.source,
+            }
+        )
+    rebuild(db, profile, ruleset)
+    db.commit()
+    return {"reclassified_count": len(results), "results": results}
+
+
+def audit_trail(db: Session, user: User, transaction_id: str) -> AuditTrailOut:
+    """GET /transactions/{id}/audit-trail from classification_events (FR-16a)."""
+    get_transaction(db, user, transaction_id)  # ownership / 404
+    events = db.scalars(
+        select(ClassificationEvent)
+        .where(ClassificationEvent.transaction_id == transaction_id)
+        .order_by(ClassificationEvent.recorded_at.asc(), ClassificationEvent.id.asc())
+    ).all()
+    out = []
+    for event in events:
+        out.append(
+            AuditEventOut(
+                timestamp=iso_utc(event.recorded_at),
+                source=event.source,
+                rule_id=event.rule_id,
+                citation=event.citation,
+                assigned_category=event.new_category,
+                old_category=event.old_category,
+                new_category=event.new_category,
+                note=event.note,
+                ytd_usaha_omzet_before_idr=event.ytd_usaha_before_idr,
+                ytd_usaha_omzet_after_idr=event.ytd_usaha_after_idr,
+                ruleset_id=event.ruleset_id,
+                effective_date=event.effective_date.isoformat(),
+            )
+        )
+    return AuditTrailOut(events=tuple(out))
+
+
+def recalculate_snapshots(db: Session, user: User, tax_year: int, ruleset: Ruleset) -> dict:
+    """POST /tax/snapshots/{tax_year}/recalculate (FR-23a / API §5.22).
+
+    Rebuilds versioned berlaku rows (prior berlaku → usang, version + 1).
+    """
+    if tax_year != ruleset.tax_year:
+        raise ApiError(422, "INVALID_DATE_RANGE", f"Tahun pajak harus {ruleset.tax_year}.")
+    profile = find_profile(db, user, tax_year)
+    if profile is None:
+        raise ApiError(
+            404,
+            "PROFILE_NOT_FOUND",
+            "Profil untuk tahun pajak yang dipilih belum dibuat.",
+        )
+    # rebuild() marks prior berlaku → usang and inserts version+1 (D-11).
+    written = rebuild(db, profile, ruleset)
+    db.commit()
+    return {
+        "recalculated_tax_year": tax_year,
+        "recalculated_months_count": len(written),
+        "status": "berlaku",
+    }
+
+
+def month_snapshot(db: Session, user: User, tax_year: int, month: str, ruleset: Ruleset) -> dict:
+    """GET /tax/snapshots/{tax_year}/{month} — FR-47 jejak cuplikan bulan."""
+    if tax_year != ruleset.tax_year:
+        raise ApiError(422, "INVALID_DATE_RANGE", f"Tahun pajak harus {ruleset.tax_year}.")
+    profile = find_profile(db, user, tax_year)
+    if profile is None:
+        raise ApiError(
+            404,
+            "PROFILE_NOT_FOUND",
+            "Profil untuk tahun pajak yang dipilih belum dibuat.",
+        )
+    month_key = month if len(month) == 7 else f"{tax_year}-{int(month):02d}"
+    row = get_berlaku(db, profile, month_key)
+    if row is None:
+        raise ApiError(404, "SNAPSHOT_NOT_FOUND", "Cuplikan bulan yang diminta tidak ada.")
+    return {
+        "month": row.month_key,
+        "version": row.version,
+        "status": row.status,
+        "ruleset_id": row.ruleset_id,
+        "effective_date": row.effective_date.isoformat(),
+        "rounding_rule": row.rounding_rule,
+        "scheme_eligibility_status": row.scheme_eligibility_status,
+        "next_year_ineligible": row.next_year_ineligible,
+        "prior_year_resolution_source": row.prior_year_resolution_source,
+        "input_hash": row.input_hash,
+        "usaha_omzet_idr": row.usaha_omzet_idr,
+        "porsi_bebas_idr": row.porsi_bebas_idr,
+        "porsi_kena_idr": row.porsi_kena_idr,
+        "tax_0_5_pct_idr": row.tax_0_5_pct_idr,
+        "withheld_tax_idr": row.withheld_tax_idr,
+        "sisa_bayar_idr": row.sisa_bayar_idr,
+        "overwithheld_excess_idr": row.overwithheld_excess_idr,
+        "overwithheld_status": row.overwithheld_status,
+        "pekerjaan_bebas_omzet_idr": row.pekerjaan_bebas_omzet_idr,
+        "already_final_omzet_idr": row.already_final_omzet_idr,
+        "non_object_omzet_idr": row.non_object_omzet_idr,
+        "annotation": row.annotation,
+        "disclaimer": DISCLAIMER,
+    }
 
 
 def _usaha_total(db: Session, user_id: str, *, exclude_id: str) -> int:
