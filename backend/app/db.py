@@ -1,7 +1,8 @@
 """Database engine and request-scoped sessions.
 
-MySQL 8 is the only supported store (ERD v1.2.2). Instants are UTC
-``DATETIME(6)`` values written by the application.
+MySQL 8 is the only supported store (ERD r2). Instants are UTC
+``DATETIME(6)`` values written by the application. Schema changes go through
+Alembic; ``create_all`` is limited to non-production bootstraps and tests.
 """
 
 from collections.abc import Iterator
@@ -31,7 +32,13 @@ def get_db() -> Iterator[Session]:
 
 
 def init_db() -> None:
-    """Create tables for a fresh local database."""
+    """Create tables for a fresh local/dev database.
+
+    Production must use Alembic (``alembic upgrade head``) and never relies on
+    ``create_all``. Tests keep using ``Base.metadata.create_all`` in conftest.
+    """
     import app.models  # noqa: F401  (registers the mappers)
 
+    if _settings.is_production:
+        return
     Base.metadata.create_all(engine)

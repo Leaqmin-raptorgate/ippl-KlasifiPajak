@@ -10,7 +10,7 @@ services:
       - "127.0.0.1:3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
-      - ./docker/mysql-init.sql:/docker-entrypoint-initdb.d/01-test-database.sql:ro
+      - ./docker/mysql-init.sql:/docker-entrypoint-initdb.d/01-init-users.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
       interval: 5s
@@ -21,7 +21,12 @@ services:
     build: .
     environment:
       APP_ENV: test
+      # pytest create_all needs DDL on the test schema (MYSQL_USER grants).
       DATABASE_URL: mysql+pymysql://klasifipajak:klasifipajak@mysql:3306/klasifipajak_test
+      JWT_SECRET: test-secret-change-me
+    # Image HEALTHCHECK probes /health; pytest CMD has no listener.
+    healthcheck:
+      disable: true
     depends_on:
       mysql:
         condition: service_healthy
@@ -34,12 +39,28 @@ services:
       - "127.0.0.1:8000:8000"
     environment:
       APP_ENV: development
-      DATABASE_URL: mysql+pymysql://klasifipajak:klasifipajak@mysql:3306/klasifipajak
+      # Runtime least-privilege DML user (HB-18).
+      DATABASE_URL: mysql+pymysql://klasifipajak_app:klasifipajak_app@mysql:3306/klasifipajak
+      # Alembic / schema changes (not used by the API process).
+      MIGRATE_DATABASE_URL: mysql+pymysql://klasifipajak_migrate:klasifipajak_migrate@mysql:3306/klasifipajak
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
     volumes:
       - ./backend:/app/backend
     depends_on:
       mysql:
         condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
 volumes:
   mysql_data:
