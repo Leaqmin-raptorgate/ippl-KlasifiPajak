@@ -46,6 +46,19 @@ def _audit(*vuln_ids: str, package: str = "demo", version: str = "1.0.0") -> dic
     }
 
 
+def _clean_audit(package: str = "demo", version: str = "1.0.0") -> dict[str, Any]:
+    """At least one dependency audited, zero vulns — valid clean output."""
+    return {
+        "dependencies": [
+            {
+                "name": package,
+                "version": version,
+                "vulns": [],
+            }
+        ]
+    }
+
+
 def test_score_cvss3_critical_high_medium_low():
     assert gate.score_cvss3_vector(VECTOR_CRITICAL) == pytest.approx(9.8)
     assert gate.score_cvss3_vector(VECTOR_HIGH) == pytest.approx(8.8)
@@ -64,12 +77,13 @@ def test_resolve_severity_from_cvss_vector_string():
     assert gate.resolve_severity(osv_med) == "MEDIUM"
 
 
-def test_resolve_severity_prefers_database_specific_label():
+def test_resolve_severity_max_of_label_and_cvss():
+    """MEDIUM GHSA label must not hide CVSS 9.8 → CRITICAL."""
     osv = {
         "database_specific": {"severity": "medium"},
         "severity": [{"type": "CVSS_V3", "score": VECTOR_CRITICAL}],
     }
-    assert gate.resolve_severity(osv) == "MEDIUM"
+    assert gate.resolve_severity(osv) == "CRITICAL"
 
 
 def test_resolve_severity_missing_is_unknown():
@@ -126,12 +140,6 @@ def test_main_invalid_json_fail_closed(tmp_path: Path):
     assert gate.main(["--input", str(bad)]) == 1
 
 
-def test_main_no_vulnerabilities_ok(tmp_path: Path):
-    audit_path = tmp_path / "audit.json"
-    audit_path.write_text(json.dumps({"dependencies": []}), encoding="utf-8")
-    assert gate.main(["--input", str(audit_path)]) == 0
-
-
 def test_main_missing_file_fails(tmp_path: Path):
     missing = tmp_path / "no-such-audit.json"
     assert gate.main(["--input", str(missing)]) == 1
@@ -162,6 +170,14 @@ def test_main_dependencies_not_list_fails(tmp_path: Path):
     path = tmp_path / "bad-deps.json"
     path.write_text(json.dumps({"dependencies": {"name": "x"}}), encoding="utf-8")
     assert gate.main(["--input", str(path)]) == 1
+
+
+def test_main_empty_dependencies_fails(tmp_path: Path):
+    """Empty dependencies list means nothing was audited → fail closed."""
+    path = tmp_path / "empty-deps.json"
+    path.write_text(json.dumps({"dependencies": []}), encoding="utf-8")
+    assert gate.main(["--input", str(path)]) == 1
+    assert gate.main(["--input", str(path), "--pip-audit-rc", "0"]) == 1
 
 
 @pytest.mark.parametrize(
@@ -195,10 +211,35 @@ def test_resolve_severity_max_across_cvss_entries():
 
 
 def test_main_clean_dependencies_exits_zero(tmp_path: Path):
-    """Valid clean pip-audit JSON with empty deps → exit 0."""
+    """Valid clean pip-audit JSON: ≥1 dep, zero vulns, rc=0 → exit 0."""
     audit_path = tmp_path / "clean.json"
-    audit_path.write_text(json.dumps({"dependencies": []}), encoding="utf-8")
-    assert gate.main(["--input", str(audit_path)]) == 0
+    audit_path.write_text(json.dumps(_clean_audit()), encoding="utf-8")
+    assert gate.main(["--input", str(audit_path), "--pip-audit-rc", "0"]) == 0
+
+
+def test_main_pip_audit_rc1_with_zero_vulns_fails(tmp_path: Path):
+    """pip-audit exited 1 but JSON has no vulns → fail closed."""
+    audit_path = tmp_path / "mismatch.json"
+    audit_path.write_text(json.dumps(_clean_audit()), encoding="utf-8")
+    assert gate.main(["--input", str(audit_path), "--pip-audit-rc", "1"]) == 1
+
+
+def test_main_pip_audit_rc1_with_vulns_evaluates(tmp_path: Path):
+    """pip-audit exited 1 and JSON lists vulns → severity gate decides."""
+    audit_path = tmp_path / "with-vulns.json"
+    audit_path.write_text(json.dumps(_audit("VULN-MED")), encoding="utf-8")
+
+    def fake_fetch(vid: str, timeout: float = 30.0):
+        return {"severity": [{"type": "CVSS_V3", "score": VECTOR_MEDIUM}]}
+
+    with patch.object(gate, "fetch_osv", side_effect=fake_fetch):
+        assert gate.main(["--input", str(audit_path), "--pip-audit-rc", "1"]) == 0
+
+
+def test_main_pip_audit_rc0_clean(tmp_path: Path):
+    audit_path = tmp_path / "clean.json"
+    audit_path.write_text(json.dumps(_clean_audit()), encoding="utf-8")
+    assert gate.main(["--input", str(audit_path), "--pip-audit-rc", "0"]) == 0
 
 
 def test_main_unspecified_label_fail_closed(tmp_path: Path):
@@ -223,3 +264,79 @@ def test_main_moderate_label_passes(tmp_path: Path):
         return_value={"database_specific": {"severity": "MODERATE"}},
     ):
         assert gate.main(["--input", str(audit_path)]) == 0
+
+
+def test_main_dep_not_dict_fails_without_traceback(tmp_path: Path, capsys):
+    path = tmp_path / "bad-dep.json"
+    path.write_text(json.dumps({"dependencies": ["not-an-object"]}), encoding="utf-8")
+    assert gate.main(["--input", str(path)]) == 1
+    err = capsys.readouterr().err
+    assert "malformed" in err.lower()
+    assert "Traceback" not in err
+
+
+def test_main_vulns_not_list_fails_without_traceback(tmp_path: Path, capsys):
+    path = tmp_path / "bad-vulns.json"
+    path.write_text(
+        json.dumps({"dependencies": [{"name": "x", "version": "1", "vulns": "oops"}]}),
+        encoding="utf-8",
+    )
+    assert gate.main(["--input", str(path)]) == 1
+    err = capsys.readouterr().err
+    assert "malformed" in err.lower()
+    assert "Traceback" not in err
+
+
+def test_main_database_specific_not_dict_fails_without_traceback(tmp_path: Path, capsys):
+    audit_path = tmp_path / "audit.json"
+    audit_path.write_text(json.dumps(_audit("VULN-BAD-DB")), encoding="utf-8")
+
+    with patch.object(gate, "fetch_osv", return_value={"database_specific": "not-a-dict"}):
+        assert gate.main(["--input", str(audit_path)]) == 1
+    err = capsys.readouterr().err
+    assert "malformed" in err.lower() or "database_specific" in err.lower()
+    assert "Traceback" not in err
+
+
+def test_main_vuln_entry_not_dict_fails_without_traceback(tmp_path: Path, capsys):
+    path = tmp_path / "bad-vuln-entry.json"
+    path.write_text(
+        json.dumps({"dependencies": [{"name": "x", "version": "1", "vulns": ["not-obj"]}]}),
+        encoding="utf-8",
+    )
+    assert gate.main(["--input", str(path)]) == 1
+    err = capsys.readouterr().err
+    assert "malformed" in err.lower()
+    assert "Traceback" not in err
+
+
+def test_main_missing_vuln_id_is_unknown_fail(tmp_path: Path):
+    path = tmp_path / "no-id.json"
+    path.write_text(
+        json.dumps(
+            {"dependencies": [{"name": "demo", "version": "1.0.0", "vulns": [{"summary": "x"}]}]}
+        ),
+        encoding="utf-8",
+    )
+    assert gate.main(["--input", str(path)]) == 1
+
+
+def test_main_medium_label_with_critical_cvss_fails(tmp_path: Path):
+    """MEDIUM label + CVSS 9.8 → CRITICAL → fail."""
+    audit_path = tmp_path / "audit.json"
+    audit_path.write_text(json.dumps(_audit("VULN-HIDE")), encoding="utf-8")
+
+    with patch.object(
+        gate,
+        "fetch_osv",
+        return_value={
+            "database_specific": {"severity": "MEDIUM"},
+            "severity": [{"type": "CVSS_V3", "score": VECTOR_CRITICAL}],
+        },
+    ):
+        assert gate.main(["--input", str(audit_path)]) == 1
+
+
+def test_resolve_severity_database_specific_not_dict_raises():
+    with pytest.raises(ValueError, match="database_specific"):
+        gate.resolve_severity({"database_specific": ["nope"]})

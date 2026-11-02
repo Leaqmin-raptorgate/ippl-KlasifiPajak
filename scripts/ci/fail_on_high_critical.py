@@ -6,21 +6,26 @@ pip-audit has no native severity filter. Its JSON lists vulnerability ids
 
 1. Reads pip-audit ``-f json`` output (stdin or --input).
 2. For each vuln id, fetches OSV (``GET https://api.osv.dev/v1/vulns/{id}``).
-3. Resolves severity from, in order:
+3. Resolves severity as the MAX of:
    - ``database_specific.severity`` — allowlist only:
      HIGH/CRITICAL fail; MODERATE/MEDIUM/LOW pass (GHSA uses MODERATE);
      any other label → UNKNOWN → fail
-   - numeric CVSS base score in ``severity[]`` when present (MAX across entries)
-   - CVSS vector strings in ``severity[].score`` (CVSS:3.0 / 3.1 self-contained;
-     CVSS:4.0 via the pinned ``cvss`` package when installed)
+   - numeric / vector CVSS scores in ``severity[]`` (MAX across entries;
+     CVSS:3.x self-contained; CVSS:4.0 via pinned ``cvss`` when installed)
      (CRITICAL >= 9.0, HIGH >= 7.0, MEDIUM >= 4.0, else LOW)
+   so a GHSA MEDIUM label cannot hide a CVSS 9.8.
 4. Exits 1 if any HIGH/CRITICAL/UNKNOWN finding remains; otherwise exits 0.
 
 Fail-closed policy (default):
   - Network / HTTP errors other than 404 while looking up OSV → UNKNOWN → fail
   - Missing or unresolvable severity → UNKNOWN → fail
   - Missing/empty input, malformed JSON, non-object root, or ``dependencies``
-    missing / not a list → exit 1
+    missing / not a list / empty → exit 1
+  - Malformed shapes (dep not a dict, ``vulns`` not a list,
+    ``database_specific`` not a dict, etc.) → exit 1 with a clear message
+  - Vuln entry with no id → UNKNOWN → fail
+  - ``--pip-audit-rc 1`` with zero vulns in JSON → exit 1 (pip-audit claimed
+    findings the gate cannot see)
   - Pass ``--allow-unknown`` to soften UNKNOWN (not used in CI)
 
 Network is required only when vulnerabilities are present. Zero vulns → no
@@ -45,6 +50,18 @@ OSV_VULN_URL = "https://api.osv.dev/v1/vulns/{id}"
 FAIL_LEVELS = frozenset({"HIGH", "CRITICAL"})
 # GHSA uses MODERATE; only these non-failing database_specific labels pass.
 PASS_LABELS = frozenset({"MODERATE", "MEDIUM", "LOW"})
+MISSING_VULN_ID = "<missing-id>"
+
+# Higher rank wins when combining label + CVSS. UNKNOWN ranks highest so it
+# always fails closed when present.
+_SEVERITY_RANK = {
+    "LOW": 1,
+    "MEDIUM": 2,
+    "MODERATE": 2,
+    "HIGH": 3,
+    "CRITICAL": 4,
+    "UNKNOWN": 5,
+}
 
 # CVSS v3.x metric weights (FIRST.org CVSS 3.1 §7.4).
 _AV = {"N": 0.85, "A": 0.62, "L": 0.55, "P": 0.2}
@@ -161,32 +178,66 @@ def _level_from_cvss(score: float) -> str:
     return "LOW"
 
 
-def resolve_severity(osv: dict[str, Any]) -> str:
-    """Return CRITICAL/HIGH/MEDIUM/LOW/MODERATE/UNKNOWN for one OSV document.
+def _max_severity(*levels: str | None) -> str:
+    """Return the highest-ranked severity among non-None levels."""
+    best: str | None = None
+    for level in levels:
+        if level is None:
+            continue
+        if best is None or _SEVERITY_RANK[level] > _SEVERITY_RANK[best]:
+            best = level
+    return best if best is not None else "UNKNOWN"
 
-    ``database_specific.severity`` is allowlisted: HIGH/CRITICAL fail,
-    MODERATE/MEDIUM/LOW pass, anything else becomes UNKNOWN. When falling
-    back to ``severity[]``, take the MAX parseable CVSS score.
-    """
-    db = osv.get("database_specific") or {}
+
+def _label_severity(osv: dict[str, Any]) -> str | None:
+    """Parse database_specific.severity; None if absent."""
+    db = osv.get("database_specific")
+    if db is None:
+        return None
+    if not isinstance(db, dict):
+        raise ValueError("database_specific must be an object")
     label = db.get("severity")
-    if isinstance(label, str) and label.strip():
-        normalized = label.strip().upper()
-        if normalized in FAIL_LEVELS or normalized in PASS_LABELS:
-            return normalized
-        return "UNKNOWN"
+    if not isinstance(label, str) or not label.strip():
+        return None
+    normalized = label.strip().upper()
+    if normalized in FAIL_LEVELS or normalized in PASS_LABELS:
+        return normalized
+    return "UNKNOWN"
 
+
+def _cvss_severity(osv: dict[str, Any]) -> str | None:
+    """MAX parseable CVSS level from severity[]; None if none parse."""
+    entries = osv.get("severity")
+    if entries is None:
+        return None
+    if not isinstance(entries, list):
+        raise ValueError("severity must be a list")
     max_score: float | None = None
-    for entry in osv.get("severity") or []:
+    for entry in entries:
         if not isinstance(entry, dict):
             continue
         numeric = _score_from_severity_entry(entry)
         if numeric is not None:
             max_score = numeric if max_score is None else max(max_score, numeric)
-    if max_score is not None:
-        return _level_from_cvss(max_score)
+    if max_score is None:
+        return None
+    return _level_from_cvss(max_score)
 
-    return "UNKNOWN"
+
+def resolve_severity(osv: dict[str, Any]) -> str:
+    """Return CRITICAL/HIGH/MEDIUM/LOW/MODERATE/UNKNOWN for one OSV document.
+
+    Takes the MAX of the allowlisted ``database_specific.severity`` label and
+    the MAX CVSS score across ``severity[]``. A MEDIUM label cannot hide a
+    CRITICAL CVSS vector.
+    """
+    if not isinstance(osv, dict):
+        raise ValueError("OSV document must be an object")
+    label = _label_severity(osv)
+    cvss = _cvss_severity(osv)
+    if label is None and cvss is None:
+        return "UNKNOWN"
+    return _max_severity(label, cvss)
 
 
 def fetch_osv(vuln_id: str, timeout: float = 30.0) -> dict[str, Any] | None:
@@ -201,15 +252,33 @@ def fetch_osv(vuln_id: str, timeout: float = 30.0) -> dict[str, Any] | None:
 
 
 def iter_findings(audit: dict[str, Any]) -> list[tuple[str, str, str]]:
-    """Return (package, version, vuln_id) triples from pip-audit JSON."""
+    """Return (package, version, vuln_id) triples from pip-audit JSON.
+
+    A vuln entry with a missing/empty id yields ``MISSING_VULN_ID`` so the
+    gate can treat it as UNKNOWN. Raises ``ValueError`` on malformed shapes.
+    """
     out: list[tuple[str, str, str]] = []
-    for dep in audit.get("dependencies") or []:
+    deps = audit.get("dependencies")
+    if not isinstance(deps, list):
+        raise ValueError("dependencies must be a list")
+    for index, dep in enumerate(deps):
+        if not isinstance(dep, dict):
+            raise ValueError(f"dependencies[{index}] must be an object")
         name = dep.get("name") or "?"
         version = dep.get("version") or "?"
-        for vuln in dep.get("vulns") or []:
+        vulns = dep.get("vulns")
+        if vulns is None:
+            vulns = []
+        if not isinstance(vulns, list):
+            raise ValueError(f"dependencies[{index}].vulns must be a list")
+        for vindex, vuln in enumerate(vulns):
+            if not isinstance(vuln, dict):
+                raise ValueError(f"dependencies[{index}].vulns[{vindex}] must be an object")
             vid = vuln.get("id")
-            if vid:
-                out.append((name, version, vid))
+            if isinstance(vid, str) and vid.strip():
+                out.append((name, version, vid.strip()))
+            else:
+                out.append((name, version, MISSING_VULN_ID))
     return out
 
 
@@ -224,6 +293,12 @@ def main(argv: list[str] | None = None) -> int:
         "--allow-unknown",
         action="store_true",
         help="Do not fail when severity cannot be resolved (default: fail closed)",
+    )
+    parser.add_argument(
+        "--pip-audit-rc",
+        type=int,
+        default=None,
+        help="Exit code from pip-audit (0=clean, 1=vulns). If 1, JSON must list ≥1 vuln.",
     )
     args = parser.parse_args(argv)
 
@@ -256,7 +331,26 @@ def main(argv: list[str] | None = None) -> int:
         print("FAIL: pip-audit JSON must include a dependencies list", file=sys.stderr)
         return 1
 
-    findings = iter_findings(audit)
+    if len(audit["dependencies"]) < 1:
+        print(
+            "FAIL: pip-audit JSON dependencies list is empty (nothing was audited)",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        findings = iter_findings(audit)
+    except ValueError as exc:
+        print(f"FAIL: malformed pip-audit JSON ({exc})", file=sys.stderr)
+        return 1
+
+    if args.pip_audit_rc == 1 and not findings:
+        print(
+            "FAIL: pip-audit exited 1 but JSON reports zero vulnerabilities",
+            file=sys.stderr,
+        )
+        return 1
+
     if not findings:
         print("pip-audit gate: no vulnerabilities reported")
         return 0
@@ -266,6 +360,14 @@ def main(argv: list[str] | None = None) -> int:
     severity_cache: dict[str, str] = {}
 
     for pkg, ver, vid in findings:
+        if vid == MISSING_VULN_ID:
+            level = "UNKNOWN"
+            line = f"  - {pkg}=={ver} {vid} severity={level}"
+            reports.append(line)
+            if not args.allow_unknown:
+                blockers.append(line + " (missing vuln id; treat as blocker)")
+            continue
+
         if vid not in severity_cache:
             try:
                 osv = fetch_osv(vid)
@@ -277,7 +379,11 @@ def main(argv: list[str] | None = None) -> int:
                         f"  - {pkg}=={ver} {vid} severity=UNKNOWN (lookup failed: {exc})"
                     )
                 continue
-            severity_cache[vid] = "UNKNOWN" if osv is None else resolve_severity(osv)
+            try:
+                severity_cache[vid] = "UNKNOWN" if osv is None else resolve_severity(osv)
+            except ValueError as exc:
+                print(f"FAIL: malformed OSV document for {vid} ({exc})", file=sys.stderr)
+                return 1
 
         level = severity_cache[vid]
         line = f"  - {pkg}=={ver} {vid} severity={level}"

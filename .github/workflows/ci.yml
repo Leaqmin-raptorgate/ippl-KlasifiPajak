@@ -78,7 +78,7 @@ jobs:
             echo "FAIL: pip-audit.json missing or empty"
             exit 1
           fi
-          python scripts/ci/fail_on_high_critical.py --input pip-audit.json
+          python scripts/ci/fail_on_high_critical.py --input pip-audit.json --pip-audit-rc "$rc"
 
   gitleaks:
     name: gitleaks
