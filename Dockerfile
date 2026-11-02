@@ -11,6 +11,8 @@ COPY requirements.txt pyproject.toml ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend ./backend
+# CI helper scripts (pip-audit severity gate) are exercised by backend/tests.
+COPY scripts ./scripts
 
 # Default target is the test suite. The api service in docker-compose.yml
 # overrides this with uvicorn.
