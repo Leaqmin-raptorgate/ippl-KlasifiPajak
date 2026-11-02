@@ -12,6 +12,9 @@ from pathlib import Path
 #: deployed frontend is added through ``CORS_ORIGINS`` at startup.
 DEFAULT_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173")
 
+_DEV_PLACEHOLDER_SECRET = "dev-secret-change-me"
+_MIN_JWT_SECRET_LEN = 32
+
 
 def _cors_origins() -> tuple[str, ...]:
     if os.environ.get("APP_ENV") == "production":
@@ -33,8 +36,32 @@ def _database_url() -> str:
     )
 
 
+def _app_env() -> str:
+    return os.environ.get("APP_ENV", "development")
+
+
 def _jwt_secret() -> str:
-    return os.environ.get("JWT_SECRET", "dev-secret-change-me")
+    """Resolve the HS256 secret, refusing unsafe values outside development/test.
+
+    HB-01 / TC-HARD-15: production (and any non-dev/test env) must not boot with
+    an empty secret, the built-in placeholder, or a secret shorter than 32 bytes.
+    """
+    secret = os.environ.get("JWT_SECRET", _DEV_PLACEHOLDER_SECRET)
+    env = _app_env()
+    if env in ("development", "test"):
+        return secret or _DEV_PLACEHOLDER_SECRET
+    if (
+        not secret
+        or secret.strip() == ""
+        or secret == _DEV_PLACEHOLDER_SECRET
+        or len(secret.encode("utf-8")) < _MIN_JWT_SECRET_LEN
+    ):
+        raise RuntimeError(
+            "JWT_SECRET must be set to a non-default value of at least "
+            f"{_MIN_JWT_SECRET_LEN} bytes when APP_ENV={env!r} "
+            "(HB-01 fail-closed)."
+        )
+    return secret
 
 
 @dataclass(frozen=True)
@@ -52,7 +79,7 @@ class Settings:
 
     @property
     def app_env(self) -> str:
-        return os.environ.get("APP_ENV", "development")
+        return _app_env()
 
     @property
     def is_production(self) -> bool:

@@ -1,9 +1,9 @@
 """SQLAlchemy tables for the slice that stores accounts and tax data.
 
 Names and columns follow ERD v1.2.2. Money is ``BIGINT`` rupiah; instants are
-UTC ``DateTime`` values written by the application. Tables outside today's
-slice (password reset, receipts, quotas, orders, payment events) are not
-declared yet.
+UTC ``DateTime`` values written by the application. Password-reset tokens and auth rate-limit counters are declared for the
+security lane (HB-03 / F-AUTH). Receipts, quotas, and payment tables remain
+out of this slice.
 """
 
 from datetime import date, datetime
@@ -16,6 +16,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    PrimaryKeyConstraint,
     String,
     UniqueConstraint,
 )
@@ -173,9 +174,37 @@ class MonthSnapshot(Base):
     annotation: Mapped[str] = mapped_column(String(255), default="", nullable=False)
 
 
+class PasswordResetToken(Base):
+    """Single-use SHA-256 hashed reset tokens (API §5.4–5.5; ERD)."""
+
+    __tablename__ = "password_reset_tokens"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    expires_at_utc: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class AuthRateLimit(Base):
+    """Sliding 15-minute windows keyed by email_norm, username_norm, or IP.
+
+    No foreign key to ``users`` — subjects may be client IPs (ERD Keys).
+    """
+
+    __tablename__ = "auth_rate_limits"
+    __table_args__ = (PrimaryKeyConstraint("subject", "window_start_utc"),)
+
+    subject: Mapped[str] = mapped_column(String(320), nullable=False)
+    window_start_utc: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    hit_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+
 __all__ = [
+    "AuthRateLimit",
     "ClassificationEvent",
     "MonthSnapshot",
+    "PasswordResetToken",
     "Profile",
     "ProfileChange",
     "Session",

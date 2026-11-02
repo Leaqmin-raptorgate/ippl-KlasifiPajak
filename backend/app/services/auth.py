@@ -1,30 +1,61 @@
 """Account and session use cases. No route builds a query."""
 
+from __future__ import annotations
+
+import hmac
 import unicodedata
 from datetime import timedelta
 
-from sqlalchemy import select
+from sqlalchemy import inspect, select, text
 from sqlalchemy.orm import Session
 
 from app.api.errors import ApiError
 from app.config.settings import Settings
+from app.logging_redaction import get_logger
+from app.models import AuthRateLimit, PasswordResetToken, User
 from app.models import Session as SessionRow
-from app.models import User
-from app.schemas.account import LoginIn, RegisterIn
+from app.schemas.account import (
+    DeleteAccountIn,
+    LoginIn,
+    PasswordResetConfirmIn,
+    PasswordResetRequestIn,
+    RegisterIn,
+    SessionItemOut,
+    validate_email_shape,
+)
 from app.security import (
     InvalidToken,
     create_jwt,
     decode_jwt,
     device_label,
     hash_password,
+    hash_reset_token,
+    iso_utc,
     new_id,
     new_jti,
+    new_reset_token,
     now_utc,
+    password_needs_rehash,
     session_expiry,
     verify_password,
 )
 
 MIN_PASSWORD_LENGTH = 10
+RESET_TOKEN_MINUTES = 30
+RATE_WINDOW_MINUTES = 15
+REGISTER_IP_LIMIT = 5
+LOGIN_ID_LIMIT = 5
+LOGIN_IP_LIMIT = 20
+ACCOUNT_CONFIRMATION = "HAPUS AKUN SAYA"
+GENERIC_RESET_MESSAGE = (
+    "Jika surel terdaftar pada sistem, petunjuk atur ulang kata sandi telah dikirimkan."
+)
+RESET_SUCCESS_MESSAGE = "Kata sandi berhasil diperbarui. Seluruh sesi aktif telah dibatalkan."
+ACCOUNT_DELETED_MESSAGE = (
+    "Seluruh data profil, transaksi, citra, dan cuplikan pajak Anda telah dihapus secara permanen."
+)
+
+log = get_logger("app.auth")
 
 
 def normalize_identifier(value: str) -> str:
@@ -35,8 +66,60 @@ def _display(value: str) -> str:
     return unicodedata.normalize("NFKC", value).strip()
 
 
-def register(db: Session, payload: RegisterIn) -> User:
+def _client_ip(raw: str | None) -> str:
+    if not raw:
+        return "0.0.0.0"
+    # First hop only; X-Forwarded-For may list several.
+    return raw.split(",")[0].strip() or "0.0.0.0"
+
+
+def _window_start():
+    """Floor the current UTC instant to a 15-minute bucket."""
+    now = now_utc()
+    return now.replace(
+        minute=(now.minute // RATE_WINDOW_MINUTES) * RATE_WINDOW_MINUTES, second=0, microsecond=0
+    )
+
+
+def _hit(db: Session, subject: str, limit: int) -> None:
+    """Increment a rate-limit counter and raise 429 when the limit is exceeded."""
+    window = _window_start()
+    row = db.get(AuthRateLimit, {"subject": subject, "window_start_utc": window})
+    if row is None:
+        row = AuthRateLimit(subject=subject, window_start_utc=window, hit_count=0)
+        db.add(row)
+        db.flush()
+    if row.hit_count >= limit:
+        db.commit()
+        raise ApiError(
+            429,
+            "RATE_LIMITED",
+            "Terlalu banyak percobaan. Coba lagi dalam 15 menit.",
+        )
+    row.hit_count += 1
+    db.commit()
+
+
+def enforce_register_rate_limit(db: Session, client_ip: str) -> None:
+    _hit(db, f"ip:{_client_ip(client_ip)}", REGISTER_IP_LIMIT)
+
+
+def enforce_login_rate_limits(db: Session, identifier: str, client_ip: str) -> None:
+    # Identity first (5), then IP (20) — API §5.2.
+    _hit(db, f"id:{normalize_identifier(identifier)}", LOGIN_ID_LIMIT)
+    _hit(db, f"ip:{_client_ip(client_ip)}", LOGIN_IP_LIMIT)
+
+
+def enforce_reset_rate_limits(db: Session, email: str, client_ip: str) -> None:
+    # Same window as login; checked before the generic response (API §5.2 / §5.4).
+    _hit(db, f"id:{normalize_identifier(email)}", LOGIN_ID_LIMIT)
+    _hit(db, f"ip:{_client_ip(client_ip)}", LOGIN_IP_LIMIT)
+
+
+def register(db: Session, payload: RegisterIn, client_ip: str = "0.0.0.0") -> User:
     """Create an account. No session is created."""
+    enforce_register_rate_limit(db, client_ip)
+    validate_email_shape(payload.email)
     if len(payload.password) < MIN_PASSWORD_LENGTH:
         raise ApiError(
             422,
@@ -72,20 +155,37 @@ def register(db: Session, payload: RegisterIn) -> User:
     )
     db.add(user)
     db.commit()
+    log.info("user registered user_id=%s", user.id)
     return user
 
 
 def login(
-    db: Session, payload: LoginIn, settings: Settings, user_agent: str
+    db: Session,
+    payload: LoginIn,
+    settings: Settings,
+    user_agent: str,
+    client_ip: str = "0.0.0.0",
 ) -> tuple[User, SessionRow]:
     """Authenticate and insert one session. A sixth login revokes the oldest."""
+    enforce_login_rate_limits(db, payload.identifier, client_ip)
     identifier = normalize_identifier(payload.identifier)
     user = db.scalar(
         select(User).where((User.email_norm == identifier) | (User.username_norm == identifier))
     )
     if user is None or not verify_password(payload.password, user.password_hash):
+        log.info("login failed for identifier_norm=%s", identifier)
         raise ApiError(401, "INVALID_CREDENTIALS", "Identitas atau kata sandi tidak valid.")
+    if password_needs_rehash(user.password_hash):
+        user.password_hash = hash_password(payload.password)
     issued = now_utc()
+    # Expired / revoked rows are pruned on a later login (ERD sessions note).
+    for stale in db.scalars(
+        select(SessionRow).where(
+            SessionRow.user_id == user.id,
+            (SessionRow.revoked_at.is_not(None)) | (SessionRow.expires_at_utc <= issued),
+        )
+    ).all():
+        db.delete(stale)
     session = SessionRow(
         id=new_jti(),
         user_id=user.id,
@@ -109,6 +209,7 @@ def login(
     for stale in active[: max(0, len(active) - settings.max_sessions)]:
         stale.revoked_at = issued
     db.commit()
+    log.info("login ok user_id=%s session_id=%s", user.id, session.id)
     return user, session
 
 
@@ -159,3 +260,183 @@ def token_for(user: User, session: SessionRow, settings: Settings) -> str:
         session.expires_at_utc,
         settings.jwt_secret,
     )
+
+
+def request_password_reset(
+    db: Session, payload: PasswordResetRequestIn, client_ip: str = "0.0.0.0"
+) -> str:
+    """Always return the generic message; never reveal whether the email exists."""
+    enforce_reset_rate_limits(db, payload.email, client_ip)
+    email_norm = normalize_identifier(payload.email)
+    user = db.scalar(select(User).where(User.email_norm == email_norm))
+    if user is not None:
+        plaintext = new_reset_token()
+        row = PasswordResetToken(
+            id=new_id("rst_"),
+            user_id=user.id,
+            token_hash=hash_reset_token(plaintext),
+            expires_at_utc=now_utc() + timedelta(minutes=RESET_TOKEN_MINUTES),
+            used_at=None,
+        )
+        db.add(row)
+        db.commit()
+        # Plaintext is returned only to the caller that can deliver mail / tests.
+        # Routes discard it and respond with the generic message only.
+        log.info("password reset token issued user_id=%s", user.id)
+        return plaintext
+    log.info("password reset requested for unknown email")
+    return ""
+
+
+def confirm_password_reset(db: Session, payload: PasswordResetConfirmIn) -> None:
+    if len(payload.new_password) < MIN_PASSWORD_LENGTH:
+        raise ApiError(
+            422,
+            "PASSWORD_TOO_SHORT",
+            "Kata sandi baru harus memiliki panjang minimal 10 karakter.",
+        )
+    digest = hash_reset_token(payload.token)
+    row = db.scalar(select(PasswordResetToken).where(PasswordResetToken.token_hash == digest))
+    now = now_utc()
+    if (
+        row is None
+        or row.used_at is not None
+        or row.expires_at_utc < now
+        or not hmac.compare_digest(row.token_hash, digest)
+    ):
+        raise ApiError(
+            400,
+            "TOKEN_INVALID_OR_EXPIRED",
+            "Token atur ulang kata sandi tidak sah atau telah kedaluwarsa.",
+        )
+    user = db.get(User, row.user_id)
+    if user is None:
+        raise ApiError(
+            400,
+            "TOKEN_INVALID_OR_EXPIRED",
+            "Token atur ulang kata sandi tidak sah atau telah kedaluwarsa.",
+        )
+    user.password_hash = hash_password(payload.new_password)
+    row.used_at = now
+    for session in db.scalars(select(SessionRow).where(SessionRow.user_id == user.id)).all():
+        if session.revoked_at is None:
+            session.revoked_at = now
+    db.commit()
+    log.info("password reset confirmed user_id=%s", user.id)
+
+
+def list_sessions(db: Session, user: User, current: SessionRow) -> list[SessionItemOut]:
+    rows = db.scalars(
+        select(SessionRow)
+        .where(
+            SessionRow.user_id == user.id,
+            SessionRow.revoked_at.is_(None),
+            SessionRow.expires_at_utc > now_utc(),
+        )
+        .order_by(SessionRow.issued_at_utc.desc())
+    ).all()
+    return [
+        SessionItemOut(
+            id=row.id,
+            device_label=row.device_label,
+            created_at=iso_utc(row.issued_at_utc),
+            last_seen_at=iso_utc(row.last_seen_at),
+            current=row.id == current.id,
+        )
+        for row in rows
+    ]
+
+
+def revoke_session(db: Session, user: User, session_id: str) -> None:
+    row = db.get(SessionRow, session_id)
+    if row is None or row.user_id != user.id:
+        raise ApiError(404, "SESSION_NOT_FOUND", "Sesi tidak ditemukan.")
+    if row.revoked_at is None:
+        row.revoked_at = now_utc()
+        db.commit()
+
+
+def revoke_other_sessions(db: Session, user: User, current: SessionRow) -> int:
+    now = now_utc()
+    count = 0
+    for row in db.scalars(
+        select(SessionRow).where(
+            SessionRow.user_id == user.id,
+            SessionRow.id != current.id,
+            SessionRow.revoked_at.is_(None),
+        )
+    ).all():
+        row.revoked_at = now
+        count += 1
+    db.commit()
+    return count
+
+
+def _table_exists(db: Session, name: str) -> bool:
+    return inspect(db.bind).has_table(name)
+
+
+def delete_account(db: Session, user: User, payload: DeleteAccountIn) -> None:
+    """Cascade-delete the account per API §5.6. Missing optional tables are skipped."""
+    if payload.confirmation != ACCOUNT_CONFIRMATION:
+        raise ApiError(
+            422,
+            "CONFIRMATION_TEXT_MISMATCH",
+            "Teks konfirmasi penghapusan akun tidak sesuai.",
+        )
+    user_id = user.id
+
+    # Payment tables: null user_id when present (API §5.6 order).
+    if _table_exists(db, "subscription_orders"):
+        db.execute(
+            text("UPDATE subscription_orders SET user_id = NULL WHERE user_id = :uid"),
+            {"uid": user_id},
+        )
+    if _table_exists(db, "payment_events"):
+        db.execute(
+            text("UPDATE payment_events SET user_id = NULL WHERE user_id = :uid"),
+            {"uid": user_id},
+        )
+
+    # Sessions and reset tokens.
+    for row in db.scalars(select(SessionRow).where(SessionRow.user_id == user_id)).all():
+        db.delete(row)
+    for row in db.scalars(
+        select(PasswordResetToken).where(PasswordResetToken.user_id == user_id)
+    ).all():
+        db.delete(row)
+
+    # Profiles → changes + snapshots.
+    from app.models import ClassificationEvent, MonthSnapshot, Profile, ProfileChange, Transaction
+
+    profiles = db.scalars(select(Profile).where(Profile.user_id == user_id)).all()
+    for profile in profiles:
+        for snap in db.scalars(
+            select(MonthSnapshot).where(MonthSnapshot.profile_id == profile.id)
+        ).all():
+            db.delete(snap)
+        for change in db.scalars(
+            select(ProfileChange).where(ProfileChange.profile_id == profile.id)
+        ).all():
+            db.delete(change)
+        db.delete(profile)
+
+    # Transactions → classification events; receipt_images if present.
+    transactions = db.scalars(select(Transaction).where(Transaction.user_id == user_id)).all()
+    for tx in transactions:
+        for ev in db.scalars(
+            select(ClassificationEvent).where(ClassificationEvent.transaction_id == tx.id)
+        ).all():
+            db.delete(ev)
+        db.delete(tx)
+
+    if _table_exists(db, "receipt_images"):
+        # Filesystem purge is Storage's concern when the table exists; null-safe delete.
+        db.execute(text("DELETE FROM receipt_images WHERE user_id = :uid"), {"uid": user_id})
+
+    if _table_exists(db, "quota_counters"):
+        db.execute(text("DELETE FROM quota_counters WHERE user_id = :uid"), {"uid": user_id})
+
+    db.delete(user)
+    db.commit()
+    log.info("account deleted user_id=%s", user_id)

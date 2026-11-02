@@ -10,15 +10,23 @@ from app.api.deps import AuthContext, current_session, get_settings
 from app.api.errors import ApiError
 from app.config.settings import Settings
 from app.db import get_db
+from app.logging_redaction import configure_redacted_logging
 from app.schemas.account import (
+    DeleteAccountIn,
+    DeleteAccountOut,
     LoginIn,
     LoginOut,
     MeOut,
+    MessageOut,
+    PasswordResetConfirmIn,
+    PasswordResetRequestIn,
     ProfileOut,
     ProfileUpdate,
     RegisterIn,
     RegisterOut,
+    RevokedCountOut,
     RevokedOut,
+    SessionListOut,
 )
 from app.schemas.transaction import (
     ClarificationAnswer,
@@ -33,14 +41,34 @@ from app.services import dashboard as dashboard_service
 from app.services import profile as profile_service
 from app.services import subscription as subscription_service
 from app.services import transactions as transaction_service
+from app.services.auth import (
+    ACCOUNT_DELETED_MESSAGE,
+    GENERIC_RESET_MESSAGE,
+    RESET_SUCCESS_MESSAGE,
+)
 from app.services.snapshot import active_ruleset
+
+configure_redacted_logging()
 
 router = APIRouter()
 
 
+def _client_ip(request: Request) -> str:
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    if request.client and request.client.host:
+        return request.client.host
+    return "0.0.0.0"
+
+
 @router.post("/auth/register", status_code=201, response_model=RegisterOut)
-def register(payload: RegisterIn, db: Session = Depends(get_db)) -> RegisterOut:
-    user = auth_service.register(db, payload)
+def register(
+    payload: RegisterIn,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> RegisterOut:
+    user = auth_service.register(db, payload, client_ip=_client_ip(request))
     return RegisterOut(
         user_id=user.id,
         email=user.email,
@@ -57,7 +85,13 @@ def login(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> LoginOut:
-    user, session = auth_service.login(db, payload, settings, request.headers.get("User-Agent", ""))
+    user, session = auth_service.login(
+        db,
+        payload,
+        settings,
+        request.headers.get("User-Agent", ""),
+        client_ip=_client_ip(request),
+    )
     token = auth_service.token_for(user, session, settings)
     non_browser = request.headers.get("X-Client-Type") == "non-browser"
     if not non_browser:
@@ -82,9 +116,17 @@ def logout(
     response: Response,
     context: AuthContext = Depends(current_session),
     db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
 ) -> RevokedOut:
     auth_service.logout(db, context.session)
-    response.delete_cookie("kp_session", path="/")
+    # HB-05: clear flags must match set_cookie (path/httponly/samesite/secure).
+    response.delete_cookie(
+        "kp_session",
+        path="/",
+        httponly=True,
+        samesite="lax",
+        secure=settings.is_production,
+    )
     return RevokedOut(revoked=True)
 
 
@@ -95,6 +137,73 @@ def me(context: AuthContext = Depends(current_session)) -> MeOut:
         email=context.user.email,
         username=context.user.username,
     )
+
+
+@router.post("/auth/password-reset/request", response_model=MessageOut)
+def password_reset_request(
+    payload: PasswordResetRequestIn,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> MessageOut:
+    # Discard plaintext; never leak account existence (API §5.4).
+    auth_service.request_password_reset(db, payload, client_ip=_client_ip(request))
+    return MessageOut(message=GENERIC_RESET_MESSAGE)
+
+
+@router.post("/auth/password-reset/confirm", response_model=MessageOut)
+def password_reset_confirm(
+    payload: PasswordResetConfirmIn,
+    db: Session = Depends(get_db),
+) -> MessageOut:
+    auth_service.confirm_password_reset(db, payload)
+    return MessageOut(message=RESET_SUCCESS_MESSAGE)
+
+
+@router.get("/auth/sessions", response_model=SessionListOut)
+def list_sessions(
+    context: AuthContext = Depends(current_session),
+    db: Session = Depends(get_db),
+) -> SessionListOut:
+    items = auth_service.list_sessions(db, context.user, context.session)
+    return SessionListOut(items=items)
+
+
+@router.delete("/auth/sessions/{session_id}", response_model=RevokedOut)
+def revoke_one_session(
+    session_id: str,
+    context: AuthContext = Depends(current_session),
+    db: Session = Depends(get_db),
+) -> RevokedOut:
+    auth_service.revoke_session(db, context.user, session_id)
+    return RevokedOut(revoked=True)
+
+
+@router.delete("/auth/sessions", response_model=RevokedCountOut)
+def revoke_other_sessions(
+    context: AuthContext = Depends(current_session),
+    db: Session = Depends(get_db),
+) -> RevokedCountOut:
+    count = auth_service.revoke_other_sessions(db, context.user, context.session)
+    return RevokedCountOut(revoked_count=count)
+
+
+@router.delete("/account", response_model=DeleteAccountOut)
+def delete_account(
+    payload: DeleteAccountIn,
+    response: Response,
+    context: AuthContext = Depends(current_session),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> DeleteAccountOut:
+    auth_service.delete_account(db, context.user, payload)
+    response.delete_cookie(
+        "kp_session",
+        path="/",
+        httponly=True,
+        samesite="lax",
+        secure=settings.is_production,
+    )
+    return DeleteAccountOut(deleted=True, message=ACCOUNT_DELETED_MESSAGE)
 
 
 @router.get("/profiles/{tax_year}", response_model=ProfileOut)

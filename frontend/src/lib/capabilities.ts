@@ -20,9 +20,9 @@ export const CAPABILITIES = Object.freeze({
   /** `POST /transactions/ocr-upload`, then `POST /transactions/ocr-confirm`. */
   ocrUpload: false,
   /** `POST /auth/password-reset/request`, then `POST /auth/password-reset/confirm`. */
-  passwordReset: false,
+  passwordReset: true,
   /** `GET /auth/sessions`, and the revoke calls on the same path. */
-  activeSessions: false,
+  activeSessions: true,
   /** `POST /transactions/{id}/override`. */
   manualOverride: false,
   /** `DELETE /transactions/{id}`. Deleting one row and rebuilding its month. */
