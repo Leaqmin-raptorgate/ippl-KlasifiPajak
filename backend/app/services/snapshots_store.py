@@ -84,9 +84,17 @@ def rebuild(db: Session, profile: ProfileRow, ruleset: Ruleset) -> list[MonthSna
         status = "scheme_eligible"
         annotation = ""
 
+    # Compatibility until Tax lands D-11 usang/berlaku writers: keep a single
+    # version=1 row per month_key so UniqueConstraint(profile_id, month_key, version)
+    # is satisfied by the existing overwrite path.
     existing = {
         row.month_key: row
-        for row in db.scalars(select(MonthSnapshot).where(MonthSnapshot.profile_id == profile.id))
+        for row in db.scalars(
+            select(MonthSnapshot).where(
+                MonthSnapshot.profile_id == profile.id,
+                MonthSnapshot.version == 1,
+            )
+        )
     }
     last_month = min(as_of.month, 12) if as_of.year == ruleset.tax_year else 12
     written: list[MonthSnapshot] = []
@@ -104,7 +112,10 @@ def rebuild(db: Session, profile: ProfileRow, ruleset: Ruleset) -> list[MonthSna
         snapshot_row = existing.get(month_key)
         if snapshot_row is None:
             snapshot_row = MonthSnapshot(
-                id=new_id("snap_"), profile_id=profile.id, month_key=month_key
+                id=new_id("snap_"),
+                profile_id=profile.id,
+                month_key=month_key,
+                version=1,
             )
             db.add(snapshot_row)
             existing[month_key] = snapshot_row
