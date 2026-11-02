@@ -12,9 +12,10 @@ the prior berlaku is marked ``usang`` and a new row is inserted with
 berlaku hash (no-op, no bump).
 
 Race safety: ``rebuild`` takes ``SELECT … FOR UPDATE`` on the profile row as
-its first statement, before any snapshot / max(version) read. UK collisions on
-``(profile_id, month_key, version)`` retry inside a savepoint; exhausted
-retries surface as ``409 VERSION_CONFLICT``.
+its first statement, before any snapshot / max(version) read. MySQL ``1062``
+collisions on UK ``uq_month_snapshots_version`` ``(profile_id, month_key,
+version)`` retry inside a savepoint; exhausted retries surface as ``409
+VERSION_CONFLICT``. Any other ``IntegrityError`` is re-raised.
 """
 
 from __future__ import annotations
@@ -48,6 +49,9 @@ UNVERIFIABLE_ANNOTATION = "Peredaran bruto tahun lalu belum tersedia."
 _VERSION_INSERT_RETRIES = 3
 
 VERSION_CONFLICT_MESSAGE = "Data ini sudah diubah di perangkat lain. Muat ulang, lalu simpan lagi."
+
+# Matches Storage Alembic ``uq_month_snapshots_version`` / ERD r3 UK.
+SNAPSHOT_VERSION_UK_NAME = "uq_month_snapshots_version"
 
 
 _TODAY_JAKARTA_OVERRIDE: ContextVar[date | None] = ContextVar(
@@ -199,6 +203,22 @@ def _raise_version_conflict() -> None:
     raise ApiError(409, "VERSION_CONFLICT", VERSION_CONFLICT_MESSAGE)
 
 
+def is_month_snapshot_version_conflict(exc: IntegrityError) -> bool:
+    """True only for MySQL 1062 on ``uq_month_snapshots_version``.
+
+    Other integrity faults (FK 1452, unrelated 1062, etc.) must not become
+    ``409 VERSION_CONFLICT``.
+    """
+    orig = getattr(exc, "orig", None)
+    if orig is None:
+        return False
+    args = getattr(orig, "args", ()) or ()
+    if not args or args[0] != 1062:
+        return False
+    message = args[1] if len(args) > 1 else str(orig)
+    return SNAPSHOT_VERSION_UK_NAME in str(message)
+
+
 def _insert_berlaku_month(
     db: Session,
     *,
@@ -252,6 +272,8 @@ def _insert_berlaku_month(
                 db.flush()
                 return snapshot_row
         except IntegrityError as exc:
+            if not is_month_snapshot_version_conflict(exc):
+                raise
             last_error = exc
             continue
     if last_error is not None:
@@ -298,6 +320,8 @@ def rebuild(
                     only_usang=only_usang,
                 )
         except IntegrityError as exc:
+            if not is_month_snapshot_version_conflict(exc):
+                raise
             last_error = exc
             _lock_snapshots(db, profile.id)
             continue

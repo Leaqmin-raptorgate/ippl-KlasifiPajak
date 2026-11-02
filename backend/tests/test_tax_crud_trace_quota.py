@@ -1602,10 +1602,98 @@ def test_tc_argon_month_path_foo_is_422(client):
     assert resp_year.json()["error"]["code"] == "INVALID_DATE_RANGE"
 
 
+def test_tc_argon_month_path_unicode_digits_are_422(client):
+    """Argon #5 re-review B1/N1 — unicode numeric months must be 422, never 500.
+
+    ``str.isdigit()`` is true for circled ``①``, Arabic-Indic ``١٢``, and
+    fullwidth ``５``, but only ASCII ``[0-9]`` is accepted for §5.21 paths.
+    """
+    _auth(client)
+    assert _profile(client).status_code == 200
+    for month in ("①", "١٢", "５"):  # ①, ١٢, ５
+        resp = client.get(f"/api/v1/tax/snapshots/2026/{month}")
+        assert resp.status_code == 422, (month, resp.status_code, resp.text)
+        assert resp.json()["error"]["code"] == "INVALID_DATE_RANGE"
+
+
+def test_tc_argon_non_version_uk_integrity_error_is_reraised(client, monkeypatch):
+    """N4 — IntegrityError other than 1062 on uq_month_snapshots_version is not 409."""
+    import pymysql
+    from sqlalchemy.exc import IntegrityError
+
+    from app.engine.ruleset import load_ruleset
+    from app.services import snapshots_store
+    from app.services.snapshots_store import (
+        SNAPSHOT_VERSION_UK_NAME,
+        is_month_snapshot_version_conflict,
+        mark_usang,
+    )
+
+    # Helper contract.
+    uk_exc = IntegrityError(
+        "INSERT",
+        {},
+        pymysql.err.IntegrityError(
+            1062,
+            f"Duplicate entry 'p-2026-10-1' for key 'month_snapshots.{SNAPSHOT_VERSION_UK_NAME}'",
+        ),
+    )
+    other_1062 = IntegrityError(
+        "INSERT",
+        {},
+        pymysql.err.IntegrityError(1062, "Duplicate entry 'x' for key 'users.email_norm'"),
+    )
+    fk_exc = IntegrityError(
+        "INSERT",
+        {},
+        pymysql.err.IntegrityError(
+            1452, "Cannot add or update a child row: a foreign key constraint fails"
+        ),
+    )
+    assert is_month_snapshot_version_conflict(uk_exc) is True
+    assert is_month_snapshot_version_conflict(other_1062) is False
+    assert is_month_snapshot_version_conflict(fk_exc) is False
+
+    _auth(client)
+    assert _profile(client).status_code == 200
+    assert _tx(client).status_code == 201
+    me = client.get("/api/v1/auth/me").json()
+
+    db = SessionLocal()
+    try:
+        profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
+        mark_usang(db, profile, ["2026-10"])
+        db.commit()
+    finally:
+        db.close()
+
+    def explode(*_a, **_k):
+        raise fk_exc
+
+    monkeypatch.setattr(snapshots_store, "_rebuild_locked", explode)
+
+    db = SessionLocal()
+    try:
+        profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
+        try:
+            snapshots_store.rebuild(db, profile, load_ruleset(), only_usang=True)
+            raised = None
+        except IntegrityError as exc:
+            raised = exc
+        except Exception as exc:  # noqa: BLE001
+            raised = exc
+        assert isinstance(raised, IntegrityError), type(raised)
+        assert raised.orig.args[0] == 1452
+    finally:
+        db.close()
+
+
 def test_tc_argon_quota_ensure_counter_race(client):
     """Argon #6 — concurrent first GET /quotas of a month: one insert, no error."""
     import threading
     from collections import Counter
+
+    from app.main import app
 
     _auth(client)
     me = client.get("/api/v1/auth/me").json()
@@ -1630,20 +1718,14 @@ def test_tc_argon_quota_ensure_counter_race(client):
     barrier = threading.Barrier(8)
     outcomes: Counter = Counter()
     lock = threading.Lock()
+    # Reuse the authenticated cookie — avoids concurrent re-login session
+    # churn that previously surfaced as OperationalError under full suite (N2).
+    shared_cookies = dict(client.cookies)
 
     def worker() -> None:
         barrier.wait(timeout=30)
-        # Each thread uses its own TestClient session cookie via login.
-        from app.main import app
-
         local = TestClient(app)
-        assert (
-            local.post(
-                "/api/v1/auth/login",
-                json={"identifier": AUTH["email"], "password": AUTH["password"]},
-            ).status_code
-            == 200
-        )
+        local.cookies.update(shared_cookies)
         try:
             resp = local.get("/api/v1/quotas")
             with lock:

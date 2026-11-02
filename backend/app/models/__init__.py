@@ -157,7 +157,7 @@ class MonthSnapshot(Base):
 
     __tablename__ = "month_snapshots"
     __table_args__ = (
-        UniqueConstraint("profile_id", "month_key", "version"),
+        UniqueConstraint("profile_id", "month_key", "version", name="uq_month_snapshots_version"),
         Index("ix_month_snapshots_profile_month_status", "profile_id", "month_key", "status"),
     )
 

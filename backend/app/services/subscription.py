@@ -7,11 +7,12 @@ names ``ai_classification_used`` and ``assistant_chat_used``. Free limits are
 reset instant use Asia/Jakarta (FR-34, FR-39).
 """
 
+import time as time_module
 from datetime import date, datetime, time, timezone
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from app.api.errors import ApiError
@@ -72,49 +73,76 @@ def _jakarta_month_key(now: datetime | None = None) -> tuple[str, datetime]:
     return local.strftime("%Y-%m"), reset
 
 
+# MySQL InnoDB: deadlock victim (1213) / lock wait timeout (1205).
+_TRANSIENT_LOCK_ERRNOS = frozenset({1205, 1213})
+_ENSURE_COUNTER_ATTEMPTS = 8
+_ENSURE_COUNTER_BACKOFF_SEC = (0.01, 0.02, 0.05, 0.1, 0.15, 0.2, 0.3, 0.4)
+
+
+def _is_transient_lock_error(exc: OperationalError) -> bool:
+    orig = getattr(exc, "orig", None)
+    if orig is None:
+        return False
+    args = getattr(orig, "args", ()) or ()
+    return bool(args) and args[0] in _TRANSIENT_LOCK_ERRNOS
+
+
 def _ensure_counter(db: Session, user: User, month_key: str) -> tuple[QuotaCounter, bool]:
     """Load or insert the month counter; race-safe on the (user_id, month_key) UK.
 
     Uses a savepoint so a concurrent first-GET loses the insert cleanly. After
     ``IntegrityError``, a locking re-select (current read) sees the winner under
-    MySQL REPEATABLE READ. Caller still commits only when ``created`` is True
-    (GET /quotas stays non-committing on an existing counter).
+    MySQL REPEATABLE READ. Transient InnoDB deadlocks (1213) and lock-wait
+    timeouts (1205) retry with short backoff. Caller still commits only when
+    ``created`` is True (GET /quotas stays non-committing on an existing
+    counter).
     """
-    for _attempt in range(5):
-        row = db.scalar(
-            select(QuotaCounter).where(
-                QuotaCounter.user_id == user.id,
-                QuotaCounter.month_key == month_key,
-            )
-        )
-        if row is not None:
-            return row, False
+    last_lock_error: OperationalError | None = None
+    for attempt in range(_ENSURE_COUNTER_ATTEMPTS):
         try:
-            with db.begin_nested():
-                row = QuotaCounter(
-                    id=new_id("qc_"),
-                    user_id=user.id,
-                    month_key=month_key,
-                    ai_classification_used=0,
-                    assistant_chat_used=0,
-                )
-                db.add(row)
-                db.flush()
-            return row, True
-        except IntegrityError:
-            # Locking read bypasses the RR snapshot so we observe the committed
-            # winner instead of retrying inserts forever.
             row = db.scalar(
-                select(QuotaCounter)
-                .where(
+                select(QuotaCounter).where(
                     QuotaCounter.user_id == user.id,
                     QuotaCounter.month_key == month_key,
                 )
-                .with_for_update()
             )
             if row is not None:
                 return row, False
-            db.expire_all()
+            try:
+                with db.begin_nested():
+                    row = QuotaCounter(
+                        id=new_id("qc_"),
+                        user_id=user.id,
+                        month_key=month_key,
+                        ai_classification_used=0,
+                        assistant_chat_used=0,
+                    )
+                    db.add(row)
+                    db.flush()
+                return row, True
+            except IntegrityError:
+                # Locking read bypasses the RR snapshot so we observe the
+                # committed winner instead of retrying inserts forever.
+                row = db.scalar(
+                    select(QuotaCounter)
+                    .where(
+                        QuotaCounter.user_id == user.id,
+                        QuotaCounter.month_key == month_key,
+                    )
+                    .with_for_update()
+                )
+                if row is not None:
+                    return row, False
+                db.expire_all()
+                continue
+        except OperationalError as exc:
+            if not _is_transient_lock_error(exc):
+                raise
+            last_lock_error = exc
+            # Deadlock aborts the whole MySQL transaction; clear session state.
+            db.rollback()
+            delay = _ENSURE_COUNTER_BACKOFF_SEC[min(attempt, len(_ENSURE_COUNTER_BACKOFF_SEC) - 1)]
+            time_module.sleep(delay)
             continue
     row = db.scalar(
         select(QuotaCounter)
@@ -125,6 +153,8 @@ def _ensure_counter(db: Session, user: User, month_key: str) -> tuple[QuotaCount
         .with_for_update()
     )
     if row is None:
+        if last_lock_error is not None:
+            raise last_lock_error
         raise RuntimeError("quota counter insert raced without a surviving row")
     return row, False
 

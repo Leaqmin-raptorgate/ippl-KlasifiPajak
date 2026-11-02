@@ -1,6 +1,7 @@
 """Transaction use cases: list, create, classify, and rebuild snapshots."""
 
 import math
+import re
 import unicodedata
 from calendar import monthrange
 from datetime import date
@@ -212,7 +213,7 @@ def list_transactions(
             TransactionRow.tx_date.between(date(tax_year, 1, 1), date(tax_year, 12, 31))
         )
     if month:
-        year, month_number = (int(part) for part in month.split("-"))
+        year, month_number = _parse_yyyy_mm(month)
         conditions.append(
             TransactionRow.tx_date.between(
                 date(year, month_number, 1), _last_day(year, month_number)
@@ -753,17 +754,39 @@ def recalculate_snapshots(db: Session, user: User, tax_year: int, ruleset: Rules
     }
 
 
+_ASCII_YEAR = re.compile(r"[0-9]{4}")
+_ASCII_MONTH = re.compile(r"[0-9]{1,2}")
+_ASCII_YYYY_MM = re.compile(r"[0-9]{4}-[0-9]{2}")
+
+
+def _parse_yyyy_mm(raw: str) -> tuple[int, int]:
+    """Parse ``YYYY-MM`` with ASCII digits only → ``(year, month)`` or 422."""
+    value = (raw or "").strip()
+    if not _ASCII_YYYY_MM.fullmatch(value):
+        raise ApiError(422, "INVALID_DATE_RANGE", "Format bulan tidak valid.")
+    year_num = int(value[:4])
+    month_num = int(value[5:7])
+    if month_num < 1 or month_num > 12:
+        raise ApiError(422, "INVALID_DATE_RANGE", "Bulan harus antara 1 dan 12.")
+    return year_num, month_num
+
+
 def _parse_month_key(tax_year: int, month: str) -> str:
-    """Validate path ``month`` (``MM`` or ``YYYY-MM``) → ``YYYY-MM`` (API §5.21)."""
+    """Validate path ``month`` (``MM`` or ``YYYY-MM``) → ``YYYY-MM`` (API §5.21).
+
+    Only ASCII ``[0-9]`` digits are accepted. Unicode numeric characters that
+    pass ``str.isdigit()`` (e.g. ``①``, Arabic-Indic ``١٢``, fullwidth ``５``)
+    must yield 422, never an unhandled ``ValueError`` → 500.
+    """
     raw = (month or "").strip()
-    if raw.isdigit():
+    if _ASCII_MONTH.fullmatch(raw):
         month_num = int(raw)
         if month_num < 1 or month_num > 12:
             raise ApiError(422, "INVALID_DATE_RANGE", "Bulan harus antara 1 dan 12.")
         return f"{tax_year}-{month_num:02d}"
     if len(raw) == 7 and raw[4] == "-":
         year_part, month_part = raw.split("-", 1)
-        if not (year_part.isdigit() and month_part.isdigit()):
+        if not (_ASCII_YEAR.fullmatch(year_part) and _ASCII_MONTH.fullmatch(month_part)):
             raise ApiError(422, "INVALID_DATE_RANGE", "Format bulan tidak valid.")
         year_num = int(year_part)
         month_num = int(month_part)
