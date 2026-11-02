@@ -14,7 +14,7 @@ export const CAPABILITIES = Object.freeze({
   /** `POST /recap/{tax_year}/pdf`. The "Unduh workpaper" button. */
   workpaperExport: false,
   /** `POST /transactions/reclassify`. Re-classify a list of rows on the ledger. */
-  reclassifyAll: false,
+  reclassifyAll: true,
   /** `POST /assistant/query`. The ask form, its quota chip, and its suggestions. */
   assistantChat: false,
   /** `POST /transactions/ocr-upload`, then `POST /transactions/ocr-confirm`. */
@@ -24,13 +24,13 @@ export const CAPABILITIES = Object.freeze({
   /** `GET /auth/sessions`, and the revoke calls on the same path. */
   activeSessions: false,
   /** `POST /transactions/{id}/override`. */
-  manualOverride: false,
+  manualOverride: true,
   /** `DELETE /transactions/{id}`. Deleting one row and rebuilding its month. */
-  deleteTransaction: false,
+  deleteTransaction: true,
   /** `GET` and `POST /subscriptions/orders`. */
   subscriptionPurchase: false,
   /** `GET /transactions/{id}/audit-trail`. */
-  auditTrail: false,
+  auditTrail: true,
 } as const);
 
 /** One feature name, for a caller that takes a name rather than one flag. */

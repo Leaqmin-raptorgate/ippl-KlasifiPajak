@@ -11,7 +11,7 @@ from app.models import Profile as ProfileRow
 from app.models import ProfileChange, User
 from app.schemas.account import AuditEntry, ProfileOut, ProfileUpdate
 from app.security import new_id, now_utc
-from app.services.snapshots_store import rebuild
+from app.services.snapshots_store import lock_profile, mark_usang, rebuild
 
 _NIB = re.compile(r"^\d{4}$")
 _BUSINESS_FIELDS = (
@@ -33,6 +33,23 @@ _BUSINESS_FIELDS = (
     "prior_spouse_usaha_idr",
     "prior_spouse_pekerjaan_bebas_idr",
     "prior_spouse_already_final_idr",
+)
+
+# API §5.7: only these mark year snapshots stale (name-only leaves hashes alone).
+_SNAPSHOT_FIELDS = frozenset(
+    {
+        "spouse_aggregation_active",
+        "is_new_taxpayer_current_year",
+        "spouse_current_usaha_idr",
+        "spouse_current_pekerjaan_bebas_idr",
+        "spouse_current_already_final_idr",
+        "prior_user_usaha_idr",
+        "prior_user_pekerjaan_bebas_idr",
+        "prior_user_already_final_idr",
+        "prior_spouse_usaha_idr",
+        "prior_spouse_pekerjaan_bebas_idr",
+        "prior_spouse_already_final_idr",
+    }
 )
 
 
@@ -93,6 +110,7 @@ def update_profile(
         )
 
     changed = False
+    snapshot_touch = False
     for field in _BUSINESS_FIELDS:
         new_value = getattr(payload, field)
         old_value = getattr(profile, field)
@@ -109,10 +127,25 @@ def update_profile(
             )
             setattr(profile, field, new_value)
             changed = True
+            if field in _SNAPSHOT_FIELDS:
+                snapshot_touch = True
 
     if changed:
         profile.version = current_version + 1
-        rebuild(db, profile, ruleset)
+        from app.models import MonthSnapshot
+
+        has_snap = db.scalar(
+            select(MonthSnapshot.id).where(MonthSnapshot.profile_id == profile.id).limit(1)
+        )
+        if has_snap is None:
+            # Initial profile: seed the year band (no prior berlaku to mark).
+            # rebuild() takes the profile lock first.
+            rebuild(db, profile, ruleset, only_usang=False)
+        elif snapshot_touch:
+            # Lock order: profile → snapshots (never mark_usang before profile).
+            lock_profile(db, profile)
+            mark_usang(db, profile, None)
+            rebuild(db, profile, ruleset, only_usang=True)
     db.commit()
     return profile_out(db, profile)
 

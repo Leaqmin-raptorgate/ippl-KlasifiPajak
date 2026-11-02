@@ -21,7 +21,10 @@ def dashboard(db: Session, user: User, tax_year: int, ruleset: Ruleset) -> dict:
         )
     rows = db.scalars(
         select(MonthSnapshot)
-        .where(MonthSnapshot.profile_id == profile.id)
+        .where(
+            MonthSnapshot.profile_id == profile.id,
+            MonthSnapshot.status == "berlaku",
+        )
         .order_by(MonthSnapshot.month_key)
     ).all()
 
@@ -101,6 +104,8 @@ def dashboard(db: Session, user: User, tax_year: int, ruleset: Ruleset) -> dict:
         "monthly_summaries": [
             {
                 "month": row.month_key,
+                "version": row.version,
+                "status": row.status,
                 "scheme_eligibility_status": row.scheme_eligibility_status,
                 "usaha_omzet_idr": row.usaha_omzet_idr,
                 "porsi_bebas_idr": row.porsi_bebas_idr,
