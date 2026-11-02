@@ -3,6 +3,7 @@
 Thin by rule: validate, call one service, return. No route builds a query.
 """
 
+import ipaddress
 import os
 
 from fastapi import APIRouter, Depends, Query, Request, Response
@@ -55,28 +56,82 @@ configure_redacted_logging()
 router = APIRouter()
 
 
+def _trusted_proxy_networks():
+    """Parse ``TRUSTED_PROXY_IPS`` (comma-separated IPs/CIDRs). Empty → trust none."""
+    raw = os.environ.get("TRUSTED_PROXY_IPS", "") or ""
+    networks: list = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            networks.append(ipaddress.ip_network(part, strict=False))
+        except ValueError:
+            continue
+    return tuple(networks)
+
+
+def _peer_is_trusted_proxy(peer: str) -> bool:
+    """True when the TCP peer is in ``TRUSTED_PROXY_IPS`` (CR3-1)."""
+    networks = _trusted_proxy_networks()
+    if not networks:
+        return False
+    host = (peer or "").strip()
+    if not host:
+        return False
+    # Strip IPv6 zone id if present (e.g. fe80::1%eth0).
+    if "%" in host:
+        host = host.split("%", 1)[0]
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return any(addr in network for network in networks)
+
+
+def _xff_joined(request: Request) -> str | None:
+    """Join every ``X-Forwarded-For`` header value in order (CR3-2).
+
+    ``headers.get()`` returns only the first header; an attacker who injects
+    their own XFF before the proxy's must not win. Starlette/HTTPX expose all
+    values via ``getlist``.
+    """
+    headers = request.headers
+    if hasattr(headers, "getlist"):
+        values = headers.getlist("x-forwarded-for")
+        if values:
+            return ",".join(values)
+    return headers.get("x-forwarded-for") or headers.get("X-Forwarded-For")
+
+
 def _client_ip(request: Request) -> str:
-    """Resolve the client IP for rate limits (ARGON-1).
+    """Resolve the client IP for rate limits (ARGON-1 / CR3-1 / CR3-2).
 
     ``TRUSTED_PROXY_COUNT`` (default 0) is the number of reverse proxies that
-    *append* to ``X-Forwarded-For``. When 0, the header is ignored entirely so
-    clients cannot spoof the IP. When ``trusted >= 1``, the client is
-    ``parts[len(parts) - trusted]`` (the hop just left of the trusted suffix).
-    If the header is missing or shorter than ``trusted``, fall back to
-    ``request.client.host``.
+    *append* to ``X-Forwarded-For``. XFF is honoured **only** when:
+
+    1. ``trusted >= 1``, and
+    2. ``request.client.host`` is in ``TRUSTED_PROXY_IPS`` (comma-separated
+       IPs/CIDRs parsed with :mod:`ipaddress`; empty means never trust XFF).
+
+    With the peer allowlist in place, the client hop is ``parts[-trusted]``
+    when ``len(parts) >= trusted``. Requiring ``len > trusted`` would break the
+    common single-proxy nginx ``$proxy_add_x_forwarded_for`` case, where a
+    legitimate request arrives as ``XFF: <client>`` (len == trusted == 1) and
+    every user would collapse onto the proxy IP. If the header is missing or
+    shorter than ``trusted``, fall back to ``request.client.host``.
     """
+    peer = request.client.host if request.client and request.client.host else "0.0.0.0"
     trusted = int(os.environ.get("TRUSTED_PROXY_COUNT", "0") or "0")
     if trusted < 0:
         trusted = 0
-    if trusted >= 1:
-        forwarded = request.headers.get("X-Forwarded-For")
+    if trusted >= 1 and _peer_is_trusted_proxy(peer):
+        forwarded = _xff_joined(request)
         if forwarded:
             parts = [part.strip() for part in forwarded.split(",") if part.strip()]
             if len(parts) >= trusted:
-                return parts[len(parts) - trusted]
-    if request.client and request.client.host:
-        return request.client.host
-    return "0.0.0.0"
+                return parts[-trusted]
+    return peer
 
 
 @router.post("/auth/register", status_code=201, response_model=RegisterOut)

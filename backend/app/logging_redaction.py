@@ -37,8 +37,12 @@ _SENSITIVE_KEY_ALT = (
     "jwt_secret|webhook_secret|server_key|signature"
 )
 
-# Key=value forms (password=..., token: ..., kp_session=...).
-_PASSWORDISH = re.compile(rf"(?i)\b({_SENSITIVE_KEY_ALT})([\"'\s:=]+)([^\s\"']+)")
+# Key=value forms only (password=..., token: ..., "password":"...").
+# Require = or : plus a non-empty value; optional quotes around key/value.
+# Bare words/spaces are not separators (CR3-a), so "password reset token
+# issued" and Cookie ";" delimiters stay intact.
+_PASSWORDISH = re.compile(rf"(?i)\b({_SENSITIVE_KEY_ALT})([\"']?\s*[:=]\s*[\"']?)([^\s;\"',]+)")
+
 
 # Authorization: <scheme> <credentials> — redact the whole value (ARGON-3).
 _AUTHORIZATION = re.compile(r"(?i)\b(authorization)(\s*[:=]\s*)([^\r\n,;]+)")

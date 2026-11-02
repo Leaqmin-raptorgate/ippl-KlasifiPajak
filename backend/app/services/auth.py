@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import unicodedata
 from datetime import datetime, timedelta
@@ -125,9 +126,20 @@ def enforce_login_ip_rate_limit(db: Session, client_ip: str) -> None:
     _hit(db, f"login-ip:{_rate_ip(client_ip)}", LOGIN_IP_LIMIT)
 
 
+def _unknown_identifier_subject(identifier: str) -> str:
+    """Stable hashed bucket for unknown identifiers (CR3-b).
+
+    Known accounts key on ``user_id``; unknowns use ``id-unknown:<sha256>`` so
+    they share the same limit behaviour (429 after N failures) without storing
+    the raw identifier and without unbounded plaintext subject growth.
+    """
+    digest = hashlib.sha256(normalize_identifier(identifier).encode("utf-8")).hexdigest()
+    return f"id-unknown:{digest}"
+
+
 def enforce_login_id_rate_limit(db: Session, identifier: str, user_id: str | None) -> None:
     """Key on resolved user_id when known so email and username share one bucket."""
-    key = f"login-id:{user_id}" if user_id else f"login-id:{normalize_identifier(identifier)}"
+    key = f"login-id:{user_id}" if user_id else _unknown_identifier_subject(identifier)
     _hit(db, key, LOGIN_ID_LIMIT)
 
 
@@ -136,7 +148,7 @@ def enforce_reset_ip_rate_limit(db: Session, client_ip: str) -> None:
 
 
 def enforce_reset_id_rate_limit(db: Session, email: str, user_id: str | None) -> None:
-    key = f"reset-id:{user_id}" if user_id else f"reset-id:{normalize_identifier(email)}"
+    key = f"reset-id:{user_id}" if user_id else _unknown_identifier_subject(email)
     _hit(db, key, LOGIN_ID_LIMIT)
 
 

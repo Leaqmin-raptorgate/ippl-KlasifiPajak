@@ -1,7 +1,8 @@
-"""Test-support routes (API §5.31–§5.32). Mounted only when APP_ENV=test.
+"""Test-support routes (API §5.32). Mounted only when APP_ENV=test.
 
 Fail-closed: each handler also refuses non-loopback callers using
 ``request.client.host`` only — never ``X-Forwarded-For`` (ARGON-4 / G-28).
+API §5.31 (subscription-override) is intentionally not implemented here.
 """
 
 from __future__ import annotations

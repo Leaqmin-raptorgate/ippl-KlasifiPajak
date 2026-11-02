@@ -44,6 +44,13 @@ def _client() -> TestClient:
     return TestClient(app)
 
 
+def _trusted_xff_client(monkeypatch, peer: str = "10.0.0.1") -> TestClient:
+    """TestClient whose peer is in TRUSTED_PROXY_IPS so XFF is honoured."""
+    monkeypatch.setenv("TRUSTED_PROXY_COUNT", "1")
+    monkeypatch.setenv("TRUSTED_PROXY_IPS", peer)
+    return TestClient(app, client=(peer, 50000))
+
+
 def _register(client: TestClient, **overrides):
     payload = dict(AUTH)
     payload.update(overrides)
@@ -447,13 +454,14 @@ def test_tc_4_10_44_45_47_delete_account(client):
     assert _register(fresh).status_code == 201
 
 
-def test_tc_4_10_63_login_ip_limit_twenty(client, monkeypatch):
+def test_tc_4_10_63_login_ip_limit_twenty(monkeypatch):
     """TC-4.10-63 / H-03: 21st login from the same IP → 429 RATE_LIMITED.
 
-    Registers users from distinct IPs (TRUSTED_PROXY_COUNT=1) so register-ip
-    buckets stay separate, then fires logins from one shared login-ip bucket.
+    Registers users from distinct IPs (TRUSTED_PROXY_COUNT=1 + allowlisted peer)
+    so register-ip buckets stay separate, then fires logins from one shared
+    login-ip bucket.
     """
-    monkeypatch.setenv("TRUSTED_PROXY_COUNT", "1")
+    client = _trusted_xff_client(monkeypatch)
     shared_ip = "203.0.113.63"
     for i in range(21):
         reg = client.post(
@@ -1019,7 +1027,7 @@ def test_disclaimer_remains_workpaper_spelling():
 
 
 def test_argon1_client_ip_xff_parsing(monkeypatch):
-    """ARGON-1: XFF client index is parts[len-trusted]; trusted=0 ignores XFF."""
+    """ARGON-1: XFF client index is parts[-trusted] only from an allowlisted peer."""
     from unittest.mock import Mock
 
     from app.api.routes_app import _client_ip
@@ -1033,33 +1041,43 @@ def test_argon1_client_ip_xff_parsing(monkeypatch):
         req.client.host = peer
         return req
 
-    # trusted=0 → ignore XFF entirely
+    # trusted=0 → ignore XFF entirely (even with allowlist)
     monkeypatch.setenv("TRUSTED_PROXY_COUNT", "0")
+    monkeypatch.setenv("TRUSTED_PROXY_IPS", "10.0.0.1")
     assert _client_ip(make_request("1.2.3.4, 203.0.113.9", peer="10.0.0.1")) == "10.0.0.1"
 
-    # trusted=1 → rightmost hop is the client the proxy saw
+    # trusted=1 + allowlisted peer → rightmost hop
     monkeypatch.setenv("TRUSTED_PROXY_COUNT", "1")
+    monkeypatch.setenv("TRUSTED_PROXY_IPS", "10.0.0.1")
     assert _client_ip(make_request("1.2.3.4, 203.0.113.9")) == "203.0.113.9"
-    # spoofed prefix must not win
     assert _client_ip(make_request("198.51.100.1, 203.0.113.50")) == "203.0.113.50"
 
-    # trusted=2
+    # trusted=2 + allowlisted peer
     monkeypatch.setenv("TRUSTED_PROXY_COUNT", "2")
+    monkeypatch.setenv("TRUSTED_PROXY_IPS", "10.0.0.1")
     assert _client_ip(make_request("spoof, 203.0.113.7, 10.1.1.1")) == "203.0.113.7"
 
-    # short header → fall back to peer
+    # short header → fall back to peer (peer itself must be allowlisted for XFF path,
+    # but short header still falls back)
     monkeypatch.setenv("TRUSTED_PROXY_COUNT", "2")
+    monkeypatch.setenv("TRUSTED_PROXY_IPS", "10.0.0.9")
     assert _client_ip(make_request("only-one", peer="10.0.0.9")) == "10.0.0.9"
 
     # garbage / empty parts → fall back
     monkeypatch.setenv("TRUSTED_PROXY_COUNT", "1")
+    monkeypatch.setenv("TRUSTED_PROXY_IPS", "10.0.0.8,10.0.0.7")
     assert _client_ip(make_request("  ,  , ", peer="10.0.0.8")) == "10.0.0.8"
     assert _client_ip(make_request(None, peer="10.0.0.7")) == "10.0.0.7"
 
-
-def test_argon2a_login_ip_does_not_block_register(client, monkeypatch):
-    """ARGON-2a: login-ip and register-ip are separate buckets on a NAT IP."""
+    # trusted=1 but empty allowlist → never honour XFF (direct client spoof)
     monkeypatch.setenv("TRUSTED_PROXY_COUNT", "1")
+    monkeypatch.delenv("TRUSTED_PROXY_IPS", raising=False)
+    assert _client_ip(make_request("evil", peer="203.0.113.9")) == "203.0.113.9"
+
+
+def test_argon2a_login_ip_does_not_block_register(monkeypatch):
+    """ARGON-2a: login-ip and register-ip are separate buckets on a NAT IP."""
+    client = _trusted_xff_client(monkeypatch)
     shared = "203.0.113.80"
     assert (
         client.post(
@@ -1118,9 +1136,9 @@ def test_argon2b_email_and_username_share_login_id_bucket(client):
     assert sixth.json()["error"]["code"] == "RATE_LIMITED"
 
 
-def test_argon2c_ip_block_does_not_increment_id_bucket(client, monkeypatch):
+def test_argon2c_ip_block_does_not_increment_id_bucket(monkeypatch):
     """ARGON-2c: once login-ip is exhausted, further attempts do not burn login-id."""
-    monkeypatch.setenv("TRUSTED_PROXY_COUNT", "1")
+    client = _trusted_xff_client(monkeypatch)
     # Victim registers from a clean IP.
     assert (
         client.post(
@@ -1337,3 +1355,201 @@ def test_argon5_revoke_other_sessions_skips_expired(client):
     assert revoked.status_code == 200
     # Only the other active session is revoked — not the expired one.
     assert revoked.json()["revoked_count"] == 1
+
+
+# --- CR3 adversarial re-review follow-ups ------------------------------------
+
+
+def test_cr3_1_xff_requires_trusted_proxy_peer_allowlist(monkeypatch):
+    """CR3-1: single-hop XFF spoof from a non-allowlisted peer must not dodge IP limits.
+
+    Also locks the len>=trusted choice for the legit single-proxy case: with
+    TRUSTED_PROXY_COUNT=1 and an allowlisted peer, XFF='<client>' (len==1)
+    resolves to that client — requiring len>trusted would collapse every user
+    onto the proxy IP under nginx $proxy_add_x_forwarded_for.
+    """
+    from unittest.mock import Mock
+
+    from app.api.routes_app import _client_ip
+
+    def make_request(xff: str | None, peer: str, multi_xff: list[str] | None = None):
+        req = Mock()
+        if multi_xff is not None:
+            # Mimic Starlette Headers.getlist
+            class _H(dict):
+                def getlist(self, key: str):
+                    if key.lower() == "x-forwarded-for":
+                        return list(multi_xff)
+                    return []
+
+                def get(self, key, default=None):  # noqa: A003
+                    key_l = key.lower()
+                    for k, v in self.items():
+                        if k.lower() == key_l:
+                            return v
+                    return default
+
+            headers = _H()
+            if multi_xff:
+                headers["X-Forwarded-For"] = multi_xff[0]
+            req.headers = headers
+        else:
+            req.headers = {}
+            if xff is not None:
+                req.headers["X-Forwarded-For"] = xff
+        req.client = Mock()
+        req.client.host = peer
+        return req
+
+    # Direct client (peer not in allowlist) with trusted=1 + spoofed single-hop XFF
+    # → must use peer, not the spoofed value.
+    monkeypatch.setenv("TRUSTED_PROXY_COUNT", "1")
+    monkeypatch.setenv("TRUSTED_PROXY_IPS", "10.0.0.1")  # proxy only
+    assert _client_ip(make_request("evil", peer="203.0.113.9")) == "203.0.113.9"
+    assert _client_ip(make_request("evil, real", peer="203.0.113.9")) == "203.0.113.9"
+
+    # Empty allowlist → never trust XFF regardless of TRUSTED_PROXY_COUNT
+    monkeypatch.delenv("TRUSTED_PROXY_IPS", raising=False)
+    assert _client_ip(make_request("evil", peer="10.0.0.1")) == "10.0.0.1"
+
+    # Legit single-proxy: peer allowlisted, XFF='<client>' (len == trusted == 1)
+    monkeypatch.setenv("TRUSTED_PROXY_IPS", "10.0.0.1")
+    monkeypatch.setenv("TRUSTED_PROXY_COUNT", "1")
+    assert _client_ip(make_request("198.51.100.50", peer="10.0.0.1")) == "198.51.100.50"
+
+    # Legit single-proxy with attacker-prefixed spoof that the proxy appended after
+    monkeypatch.setenv("TRUSTED_PROXY_IPS", "10.0.0.1")
+    assert _client_ip(make_request("evil, 198.51.100.50", peer="10.0.0.1")) == "198.51.100.50"
+
+    # CIDR allowlist
+    monkeypatch.setenv("TRUSTED_PROXY_IPS", "10.0.0.0/8")
+    assert _client_ip(make_request("203.0.113.7", peer="10.1.2.3")) == "203.0.113.7"
+
+    # Integration: rotating single-hop XFF from a direct (non-allowlisted) peer
+    # must hit the login-ip limit (cannot dodge by rotating spoofed IPs).
+    monkeypatch.setenv("TRUSTED_PROXY_COUNT", "1")
+    monkeypatch.setenv("TRUSTED_PROXY_IPS", "10.0.0.1")
+    # Peer is the default TestClient host "testclient" — not in allowlist.
+    client = TestClient(app)
+    assert (
+        client.post(
+            "/api/v1/auth/register",
+            json={**AUTH, "email": "cr31@example.com", "username": "cr31user"},
+        ).status_code
+        == 201
+    )
+    codes = []
+    for i in range(25):
+        r = client.post(
+            "/api/v1/auth/login",
+            json={"identifier": f"nobody{i}@example.com", "password": "WrongPassword1"},
+            headers={"X-Forwarded-For": f"198.51.100.{i}"},
+        )
+        codes.append(r.status_code)
+    assert 429 in codes, codes
+    assert codes.count(401) <= 20
+
+
+def test_cr3_2_xff_joins_duplicate_headers(monkeypatch):
+    """CR3-2: all X-Forwarded-For header values are joined before splitting."""
+    from starlette.requests import Request
+
+    from app.api.routes_app import _client_ip
+
+    async def _receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": "/",
+        "raw_path": b"/",
+        "query_string": b"",
+        "headers": [
+            (b"x-forwarded-for", b"first-evil"),
+            (b"x-forwarded-for", b"second-real"),
+        ],
+        "client": ("10.0.0.1", 123),
+        "server": ("127.0.0.1", 80),
+    }
+    monkeypatch.setenv("TRUSTED_PROXY_COUNT", "1")
+    monkeypatch.setenv("TRUSTED_PROXY_IPS", "10.0.0.1")
+    got = _client_ip(Request(scope, _receive))
+    # Joined "first-evil, second-real" → rightmost with trusted=1 is second-real.
+    # headers.get() alone would have returned only first-evil (the attacker).
+    assert got == "second-real"
+
+
+def test_cr3_a_redaction_does_not_eat_bare_password_words_or_cookie_delim():
+    """CR3-a: 'password reset token issued' and Cookie ';' stay intact."""
+    from app.logging_redaction import redact_text
+
+    plain = "password reset token issued user_id=usr_KEEPME"
+    out = redact_text(plain)
+    assert out == plain, out
+    assert "[REDACTED]" not in out
+
+    # Key=value still redacts (including JSON "password":"...")
+    assert "secret" not in redact_text("password=secret token=abc123")
+    assert "[REDACTED]" in redact_text("password=secret")
+    json_out = redact_text('{"password":"PasswordMinimal10","ok":true}')
+    assert "PasswordMinimal10" not in json_out
+    assert "[REDACTED]" in json_out
+
+    cookie = "Cookie: theme=dark; kp_session=jwt.value.here; other=keepme"
+    cookie_out = redact_text(cookie)
+    assert "jwt.value.here" not in cookie_out
+    assert "theme=dark" in cookie_out
+    assert "other=keepme" in cookie_out
+    # Semicolon delimiters must survive (not swallowed into a passwordish match)
+    assert ";" in cookie_out
+
+
+def test_cr3_b_known_and_unknown_identifiers_share_lockout_shape(client):
+    """CR3-b: known and unknown identifiers both 429 after the same N failures."""
+    assert _register(client).status_code == 201
+
+    # Known account: 5 failures then 429
+    for i in range(5):
+        r = client.post(
+            "/api/v1/auth/login",
+            json={"identifier": AUTH["email"], "password": "WrongPassword123"},
+        )
+        assert r.status_code == 401, (i, r.text)
+    known_sixth = client.post(
+        "/api/v1/auth/login",
+        json={"identifier": AUTH["email"], "password": "WrongPassword123"},
+    )
+    assert known_sixth.status_code == 429
+    assert known_sixth.json()["error"]["code"] == "RATE_LIMITED"
+
+    # Unknown account (fresh identifier): same 5×401 then 429
+    unknown = "totally-unknown-cr3b@example.com"
+    for i in range(5):
+        r = client.post(
+            "/api/v1/auth/login",
+            json={"identifier": unknown, "password": "WrongPassword123"},
+        )
+        assert r.status_code == 401, (i, r.text)
+    unknown_sixth = client.post(
+        "/api/v1/auth/login",
+        json={"identifier": unknown, "password": "WrongPassword123"},
+    )
+    assert unknown_sixth.status_code == 429
+    assert unknown_sixth.json()["error"]["code"] == "RATE_LIMITED"
+
+    # Subject stored is hashed, not the raw identifier
+    db = SessionLocal()
+    try:
+        subjects = [
+            row.subject
+            for row in db.scalars(select(AuthRateLimit)).all()
+            if row.subject.startswith("id-unknown:")
+        ]
+        assert subjects, "expected id-unknown: hashed subjects"
+        assert all(unknown not in s and "totally-unknown" not in s for s in subjects)
+    finally:
+        db.close()
