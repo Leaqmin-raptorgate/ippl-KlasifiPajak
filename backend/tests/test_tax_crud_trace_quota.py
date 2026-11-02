@@ -346,3 +346,157 @@ def test_hb12_cap_eq_stays_eligible_dashboard(client):
     prior = dashboard["thresholds"]["eligibility_prior_year_cap_4_8m"]
     assert prior["combined_prior_year_gross_idr"] == 4_800_000_000
     assert prior["status"] == "scheme_eligible"
+
+
+def _assert_one_berlaku_contiguous(db, profile_id: str, month_key: str) -> int:
+    """Exactly one berlaku; usang versions are a contiguous prefix below it."""
+    rows = db.scalars(
+        select(MonthSnapshot)
+        .where(
+            MonthSnapshot.profile_id == profile_id,
+            MonthSnapshot.month_key == month_key,
+        )
+        .order_by(MonthSnapshot.version)
+    ).all()
+    assert rows, f"expected snapshots for {month_key}"
+    berlaku = [r for r in rows if r.status == "berlaku"]
+    assert len(berlaku) == 1, f"expected 1 berlaku, got {[(r.version, r.status) for r in rows]}"
+    versions = [r.version for r in rows]
+    assert versions == list(range(1, len(rows) + 1)), versions
+    assert berlaku[0].version == versions[-1]
+    return berlaku[0].version
+
+
+def test_tc_4_5_60_exactly_one_berlaku_after_n_recalcs(client):
+    """TC-4.5-60 — N>=5 recalcs leave exactly one berlaku; versions 1..N contiguous."""
+    _auth(client)
+    assert _profile(client).status_code == 200
+    assert _tx(client).status_code == 201
+
+    me = client.get("/api/v1/auth/me").json()
+    n = 5
+    for _ in range(n):
+        assert client.post("/api/v1/tax/snapshots/2026/recalculate").status_code == 200
+
+    db = SessionLocal()
+    try:
+        from app.models import Profile
+
+        profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
+        assert profile is not None
+        # create_transaction already rebuilt once after profile PUT's v1, so
+        # total versions >= n + 2; invariant is one berlaku + contiguous ints.
+        ver = _assert_one_berlaku_contiguous(db, profile.id, "2026-10")
+        assert ver >= n
+        # Every other month through Jakarta "today" also has a single berlaku.
+        months = db.scalars(
+            select(MonthSnapshot.month_key).where(MonthSnapshot.profile_id == profile.id).distinct()
+        ).all()
+        for month_key in months:
+            _assert_one_berlaku_contiguous(db, profile.id, month_key)
+    finally:
+        db.close()
+
+    dashboard = client.get("/api/v1/tax/dashboard?tax_year=2026").json()
+    oct_rows = [r for r in dashboard["monthly_summaries"] if r["month"] == "2026-10"]
+    assert len(oct_rows) == 1
+    assert oct_rows[0]["status"] == "berlaku"
+
+
+def test_tc_4_5_61_concurrent_rebuilds_one_berlaku(client):
+    """TC-4.5-61 — two MySQL sessions rebuild same profile → one berlaku, contiguous."""
+    import threading
+
+    from app.engine.ruleset import load_ruleset
+    from app.models import Profile
+    from app.services.snapshots_store import rebuild
+
+    _auth(client)
+    assert _profile(client).status_code == 200
+    assert _tx(client).status_code == 201
+    me = client.get("/api/v1/auth/me").json()
+
+    setup = SessionLocal()
+    try:
+        profile_id = setup.scalar(select(Profile.id).where(Profile.user_id == me["user_id"]))
+        assert profile_id
+    finally:
+        setup.close()
+
+    barriers = threading.Barrier(2)
+    errors: list[BaseException] = []
+
+    def worker() -> None:
+        # Open the transaction only after the barrier so MySQL RR does not pin
+        # a pre-lock snapshot before we wait on SELECT … FOR UPDATE.
+        barriers.wait(timeout=10)
+        db = SessionLocal()
+        try:
+            profile = db.scalar(select(Profile).where(Profile.id == profile_id))
+            assert profile is not None
+            rebuild(db, profile, load_ruleset())
+            db.commit()
+        except BaseException as exc:  # noqa: BLE001 — collect for main thread
+            errors.append(exc)
+            db.rollback()
+        finally:
+            db.close()
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+        assert not t.is_alive()
+
+    assert not errors, errors
+
+    db = SessionLocal()
+    try:
+        _assert_one_berlaku_contiguous(db, profile_id, "2026-10")
+        months = db.scalars(
+            select(MonthSnapshot.month_key).where(MonthSnapshot.profile_id == profile_id).distinct()
+        ).all()
+        for month_key in months:
+            _assert_one_berlaku_contiguous(db, profile_id, month_key)
+    finally:
+        db.close()
+
+
+def test_tc_4_5_62_integrity_error_version_retry(client, monkeypatch):
+    """TC-4.5-62 — stale next-version that hits the UK retries and still lands one berlaku."""
+    from app.engine.ruleset import load_ruleset
+    from app.models import Profile
+    from app.services import snapshots_store
+
+    _auth(client)
+    assert _profile(client).status_code == 200
+    assert _tx(client).status_code == 201
+    me = client.get("/api/v1/auth/me").json()
+
+    db = SessionLocal()
+    try:
+        profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
+        assert profile is not None
+        before = _assert_one_berlaku_contiguous(db, profile.id, "2026-10")
+
+        real_next = snapshots_store._next_version
+        state = {"stale_hits": 0}
+
+        def flaky_next(session, profile_id: str, month_key: str) -> int:
+            real = real_next(session, profile_id, month_key)
+            # First attempt for October returns an already-used version → IntegrityError.
+            if month_key == "2026-10" and state["stale_hits"] == 0:
+                state["stale_hits"] += 1
+                return max(real - 1, 1)
+            return real
+
+        monkeypatch.setattr(snapshots_store, "_next_version", flaky_next)
+        rebuild_written = snapshots_store.rebuild(db, profile, load_ruleset())
+        db.commit()
+        assert state["stale_hits"] == 1
+        assert any(row.month_key == "2026-10" for row in rebuild_written)
+        after = _assert_one_berlaku_contiguous(db, profile.id, "2026-10")
+        assert after == before + 1
+    finally:
+        db.close()
