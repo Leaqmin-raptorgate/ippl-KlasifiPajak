@@ -1,0 +1,18 @@
+# Gitleaks config for KlasifiPajak (TC-HARD-05 / HB-24).
+# Default rules apply. Allowlist only the documented example webhook secret
+# string from the API specification so docs/fixtures do not fail CI.
+
+title = "KlasifiPajak"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Documented example secrets and test fixtures (not real credentials)"
+paths = [
+  '''docs/.*''',
+  '''backend/tests/data/.*''',
+]
+regexes = [
+  '''example-webhook-secret''',
+]
