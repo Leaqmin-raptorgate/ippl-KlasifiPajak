@@ -3,6 +3,8 @@
 Thin by rule: validate, call one service, return. No route builds a query.
 """
 
+import os
+
 from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.orm import Session
 
@@ -54,9 +56,23 @@ router = APIRouter()
 
 
 def _client_ip(request: Request) -> str:
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    """Resolve the client IP.
+
+    ``TRUSTED_PROXY_COUNT`` (default 0) must be set to the number of reverse
+    proxies that append to ``X-Forwarded-For``. When 0, the header is ignored
+    so clients cannot spoof the IP used for rate limits (Code Review N4).
+    """
+    trusted = int(os.environ.get("TRUSTED_PROXY_COUNT", "0") or "0")
+    if trusted > 0:
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            parts = [part.strip() for part in forwarded.split(",") if part.strip()]
+            # Rightmost ``trusted`` hops are proxies; client sits just before them.
+            index = len(parts) - trusted - 1
+            if index >= 0:
+                return parts[index]
+            if parts:
+                return parts[0]
     if request.client and request.client.host:
         return request.client.host
     return "0.0.0.0"

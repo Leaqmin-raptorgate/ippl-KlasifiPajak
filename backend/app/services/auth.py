@@ -6,7 +6,8 @@ import hmac
 import unicodedata
 from datetime import timedelta
 
-from sqlalchemy import inspect, select, text
+from sqlalchemy import inspect, select, text, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.errors import ApiError
@@ -57,6 +58,10 @@ ACCOUNT_DELETED_MESSAGE = (
 
 log = get_logger("app.auth")
 
+# Precomputed argon2id digest used only to equalize login timing when the
+# identifier is unknown (API §5.2 / Code Review B1).
+_DUMMY_PASSWORD_HASH = hash_password("__klasifipajak_timing_pad__")
+
 
 def normalize_identifier(value: str) -> str:
     return unicodedata.normalize("NFKC", value).strip().casefold()
@@ -88,7 +93,14 @@ def _hit(db: Session, subject: str, limit: int) -> None:
     if row is None:
         row = AuthRateLimit(subject=subject, window_start_utc=window, hit_count=0)
         db.add(row)
-        db.flush()
+        try:
+            db.flush()
+        except IntegrityError:
+            # Concurrent first insert for the same window (N5).
+            db.rollback()
+            row = db.get(AuthRateLimit, {"subject": subject, "window_start_utc": window})
+            if row is None:
+                raise
     if row.hit_count >= limit:
         db.commit()
         raise ApiError(
@@ -172,7 +184,12 @@ def login(
     user = db.scalar(
         select(User).where((User.email_norm == identifier) | (User.username_norm == identifier))
     )
-    if user is None or not verify_password(payload.password, user.password_hash):
+    if user is None:
+        # B1: always pay argon2id verify cost so timing does not leak existence.
+        verify_password(payload.password, _DUMMY_PASSWORD_HASH)
+        log.info("login failed for identifier_norm=%s", identifier)
+        raise ApiError(401, "INVALID_CREDENTIALS", "Identitas atau kata sandi tidak valid.")
+    if not verify_password(payload.password, user.password_hash):
         log.info("login failed for identifier_norm=%s", identifier)
         raise ApiError(401, "INVALID_CREDENTIALS", "Identitas atau kata sandi tidak valid.")
     if password_needs_rehash(user.password_hash):
@@ -223,6 +240,9 @@ def authenticate(db: Session, token: str, settings: Settings) -> tuple[User, Ses
     now = now_utc()
     if session is None:
         raise ApiError(401, "UNAUTHENTICATED", "Sesi tidak valid.")
+    if claims.get("sub") != session.user_id:
+        # N1: JWT sub must match the session row's user.
+        raise ApiError(401, "UNAUTHENTICATED", "Sesi tidak valid.")
     if session.revoked_at is not None:
         raise ApiError(401, "session_revoked", "Sesi ini sudah dibatalkan.")
     if now > session.expires_at_utc:
@@ -266,16 +286,30 @@ def request_password_reset(
     db: Session, payload: PasswordResetRequestIn, client_ip: str = "0.0.0.0"
 ) -> str:
     """Always return the generic message; never reveal whether the email exists."""
+    # N2 / HB-04: shape check before rate limit so 422 does not leak existence.
+    validate_email_shape(payload.email)
     enforce_reset_rate_limits(db, payload.email, client_ip)
     email_norm = normalize_identifier(payload.email)
     user = db.scalar(select(User).where(User.email_norm == email_norm))
+    # B2: always mint + hash so known/unknown pay the same CPU before branching.
+    plaintext = new_reset_token()
+    digest = hash_reset_token(plaintext)
     if user is not None:
-        plaintext = new_reset_token()
+        now = now_utc()
+        # N3: invalidate older unused tokens for this user when issuing a new one.
+        db.execute(
+            update(PasswordResetToken)
+            .where(
+                PasswordResetToken.user_id == user.id,
+                PasswordResetToken.used_at.is_(None),
+            )
+            .values(used_at=now)
+        )
         row = PasswordResetToken(
             id=new_id("rst_"),
             user_id=user.id,
-            token_hash=hash_reset_token(plaintext),
-            expires_at_utc=now_utc() + timedelta(minutes=RESET_TOKEN_MINUTES),
+            token_hash=digest,
+            expires_at_utc=now + timedelta(minutes=RESET_TOKEN_MINUTES),
             used_at=None,
         )
         db.add(row)
@@ -284,6 +318,17 @@ def request_password_reset(
         # Routes discard it and respond with the generic message only.
         log.info("password reset token issued user_id=%s", user.id)
         return plaintext
+    # Unknown email: mint+hash already done; touch the DB with a no-op UPDATE so
+    # known/unknown pay a similar round-trip (B2) without inserting a fake row.
+    db.execute(
+        update(PasswordResetToken)
+        .where(
+            PasswordResetToken.user_id == "__timing_pad__",
+            PasswordResetToken.used_at.is_(None),
+        )
+        .values(used_at=now_utc())
+    )
+    db.commit()
     log.info("password reset requested for unknown email")
     return ""
 
@@ -296,14 +341,25 @@ def confirm_password_reset(db: Session, payload: PasswordResetConfirmIn) -> None
             "Kata sandi baru harus memiliki panjang minimal 10 karakter.",
         )
     digest = hash_reset_token(payload.token)
-    row = db.scalar(select(PasswordResetToken).where(PasswordResetToken.token_hash == digest))
     now = now_utc()
-    if (
-        row is None
-        or row.used_at is not None
-        or row.expires_at_utc < now
-        or not hmac.compare_digest(row.token_hash, digest)
-    ):
+    # B4: atomic single-use consume — only one concurrent caller can win.
+    result = db.execute(
+        update(PasswordResetToken)
+        .where(
+            PasswordResetToken.token_hash == digest,
+            PasswordResetToken.used_at.is_(None),
+            PasswordResetToken.expires_at_utc >= now,
+        )
+        .values(used_at=now)
+    )
+    if result.rowcount != 1:
+        raise ApiError(
+            400,
+            "TOKEN_INVALID_OR_EXPIRED",
+            "Token atur ulang kata sandi tidak sah atau telah kedaluwarsa.",
+        )
+    row = db.scalar(select(PasswordResetToken).where(PasswordResetToken.token_hash == digest))
+    if row is None or not hmac.compare_digest(row.token_hash, digest):
         raise ApiError(
             400,
             "TOKEN_INVALID_OR_EXPIRED",
@@ -317,7 +373,15 @@ def confirm_password_reset(db: Session, payload: PasswordResetConfirmIn) -> None
             "Token atur ulang kata sandi tidak sah atau telah kedaluwarsa.",
         )
     user.password_hash = hash_password(payload.new_password)
-    row.used_at = now
+    # B3: invalidate every other unused reset token for this user in the same txn.
+    db.execute(
+        update(PasswordResetToken)
+        .where(
+            PasswordResetToken.user_id == user.id,
+            PasswordResetToken.used_at.is_(None),
+        )
+        .values(used_at=now)
+    )
     for session in db.scalars(select(SessionRow).where(SessionRow.user_id == user.id)).all():
         if session.revoked_at is None:
             session.revoked_at = now
@@ -419,7 +483,10 @@ def delete_account(db: Session, user: User, payload: DeleteAccountIn) -> None:
             select(ProfileChange).where(ProfileChange.profile_id == profile.id)
         ).all():
             db.delete(change)
+        # Flush children first so MySQL FK checks pass (profile_changes → profiles).
+        db.flush()
         db.delete(profile)
+    db.flush()
 
     # Transactions → classification events; receipt_images if present.
     transactions = db.scalars(select(Transaction).where(Transaction.user_id == user_id)).all()
@@ -428,7 +495,9 @@ def delete_account(db: Session, user: User, payload: DeleteAccountIn) -> None:
             select(ClassificationEvent).where(ClassificationEvent.transaction_id == tx.id)
         ).all():
             db.delete(ev)
+        db.flush()
         db.delete(tx)
+    db.flush()
 
     if _table_exists(db, "receipt_images"):
         # Filesystem purge is Storage's concern when the table exists; null-safe delete.

@@ -12,6 +12,7 @@ os.environ.setdefault(
 )
 os.environ.setdefault("APP_ENV", "test")
 os.environ.setdefault("JWT_SECRET", "test-secret-change-me")
+os.environ.setdefault("TRUSTED_PROXY_COUNT", "1")
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
