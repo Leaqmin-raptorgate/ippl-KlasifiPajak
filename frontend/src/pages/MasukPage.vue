@@ -9,6 +9,7 @@ import AppInput from "@/components/ui/AppInput.vue";
 import AppSegmented from "@/components/ui/AppSegmented.vue";
 import WorkpaperNote from "@/components/app/WorkpaperNote.vue";
 import { ApiFailure } from "@/lib/api";
+import { CAPABILITIES } from "@/lib/capabilities";
 import { useSessionStore } from "@/stores/session";
 
 const router = useRouter();
@@ -138,7 +139,9 @@ async function submit() {
           </AppButton>
         </form>
 
-        <RouterLink to="/atur-ulang" class="lanjut">Lupa kata sandi</RouterLink>
+        <RouterLink v-if="CAPABILITIES.passwordReset" to="/atur-ulang" class="lanjut">
+          Lupa kata sandi
+        </RouterLink>
 
         <div class="trust">
           <p class="tl">

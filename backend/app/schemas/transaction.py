@@ -49,6 +49,37 @@ class TransactionOut(BaseModel):
     classification: ClassificationOut | None = None
 
 
+class ClarificationOption(BaseModel):
+    """One answer to a clarification question."""
+
+    model_config = ConfigDict(frozen=True)
+
+    value: Literal["usaha", "pekerjaan_bebas", "already_final", "non_object"]
+    label: str
+
+
+class ClarificationOut(BaseModel):
+    """The closed question a provisional row is waiting on."""
+
+    model_config = ConfigDict(frozen=True)
+
+    transaction_id: str
+    provisional_category: str
+    question: str
+    options: tuple[ClarificationOption, ...]
+
+
+class ClarificationAnswer(BaseModel):
+    """Body of ``POST /transactions/{id}/clarification``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    category: Literal["usaha", "pekerjaan_bebas", "already_final", "non_object"]
+    #: Sent when the client holds a row it read earlier. A mismatch is a 409
+    #: rather than a silent overwrite.
+    version: int | None = None
+
+
 class PaginationOut(BaseModel):
     model_config = ConfigDict(frozen=True)
 

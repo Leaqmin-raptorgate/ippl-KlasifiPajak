@@ -12,6 +12,7 @@ import AppSelect from "@/components/ui/AppSelect.vue";
 import TransactionLedger from "@/components/app/TransactionLedger.vue";
 import WorkpaperNote from "@/components/app/WorkpaperNote.vue";
 import { ApiFailure } from "@/lib/api";
+import { CAPABILITIES } from "@/lib/capabilities";
 import { KATEGORI_LABEL, KATEGORI_RINGKAS, type Kategori } from "@/lib/domain";
 import { useTransaksiStore } from "@/stores/transaksi";
 import { bulanTahun, rupiah } from "@/lib/format";
@@ -101,7 +102,12 @@ function goto(id: string) {
         </p>
       </div>
       <div class="acts">
-        <AppButton variant="outline" class="ekspor" @click="klasifikasiUlang">
+        <AppButton
+          v-if="CAPABILITIES.reclassifyAll"
+          variant="outline"
+          class="ekspor"
+          @click="klasifikasiUlang"
+        >
           <span class="ekspor-label">Klasifikasi ulang</span>
         </AppButton>
         <AppButton to="/transaksi/baru" variant="primary" icon="tambah">

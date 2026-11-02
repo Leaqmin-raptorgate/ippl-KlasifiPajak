@@ -10,6 +10,7 @@ import StatCard from "@/components/app/StatCard.vue";
 import TransactionLedger from "@/components/app/TransactionLedger.vue";
 import WorkpaperNote from "@/components/app/WorkpaperNote.vue";
 import { ApiFailure } from "@/lib/api";
+import { CAPABILITIES } from "@/lib/capabilities";
 import { KATEGORI_LABEL } from "@/lib/domain";
 import { bulanTahun, persen, rupiah, rupiahPlain, rupiahShort } from "@/lib/format";
 import { usePajakStore } from "@/stores/pajak";
@@ -35,6 +36,11 @@ const sudahLewati = computed(() =>
     ? pita.value.remaining_free_band_idr === 0 && pita.value.ytd_usaha_omzet_idr > 0
     : false,
 );
+/**
+ * Turnover still parked on provisional rows. The engine's band stays exactly as
+ * it was computed; this only qualifies how much of it is still unconfirmed.
+ */
+const omzetBelumTerklasifikasi = computed(() => pita.value?.provisional_omzet_idr ?? 0);
 
 const STATUS_LABEL: Record<string, string> = {
   scheme_eligible: "Memenuhi syarat",
@@ -104,7 +110,14 @@ async function unduh() {
         </p>
       </div>
       <div class="acts">
-        <AppButton variant="outline" icon="unduh" @click="unduh">Unduh workpaper</AppButton>
+        <AppButton
+          v-if="CAPABILITIES.workpaperExport"
+          variant="outline"
+          icon="unduh"
+          @click="unduh"
+        >
+          Unduh workpaper
+        </AppButton>
         <AppButton to="/transaksi/baru" variant="primary" icon="tambah">
           Catat transaksi
         </AppButton>
@@ -123,6 +136,11 @@ async function unduh() {
             <template v-if="pita?.split_month">
               · terbelah pada {{ bulanTahun(pita.split_month + "-01") }}
             </template>
+          </p>
+          <p v-if="omzetBelumTerklasifikasi > 0" class="belum">
+            Dari {{ pita ? rupiah(pita.ytd_usaha_omzet_idr) : "—" }} omzet usaha di pita ini,
+            {{ rupiah(omzetBelumTerklasifikasi) }} masih belum terklasifikasi. Menjawab baris-baris
+            itu akan mengubah angka di atas.
           </p>
           <AppMeter
             v-if="pita"
@@ -218,13 +236,15 @@ async function unduh() {
           </li>
         </ul>
       </AppCard>
-      <p v-if="pajak.recap" class="sub">
+      <p v-if="CAPABILITIES.workpaperExport && pajak.recap" class="sub">
         Rekap usaha {{ rupiah(pajak.recap.total_usaha_omzet_idr) }}, kena
         {{ rupiah(pajak.recap.total_porsi_kena_idr) }}, pajak
         {{ rupiah(pajak.recap.total_tax_0_5_pct_idr) }}, sisa
         {{ rupiah(pajak.recap.total_sisa_bayar_idr) }}. KAP/KJS {{ pajak.recap.kap_kjs }}.
       </p>
-      <p v-else-if="pajak.recapPesan" class="sub">{{ pajak.recapPesan }}</p>
+      <p v-else-if="CAPABILITIES.workpaperExport && pajak.recapPesan" class="sub">
+        {{ pajak.recapPesan }}
+      </p>
     </section>
 
     <section aria-labelledby="h-terbaru">
@@ -328,6 +348,13 @@ async function unduh() {
   font: var(--t-body-sm);
   color: var(--ink-3);
   margin-top: var(--s-1);
+}
+
+.belum {
+  font: var(--t-body-sm);
+  color: var(--cat-ask-ink);
+  margin-top: var(--s-2);
+  line-height: 1.45;
 }
 
 .meter {

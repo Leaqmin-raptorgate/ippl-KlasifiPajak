@@ -1,8 +1,12 @@
 <script setup lang="ts">
 /**
  * Review-and-resolve screen for one transaction's classification: the evidence
- * it was read from, the verdict with its honest confidence, and the manual
- * override that can move it.
+ * it was read from, the verdict, and the manual override that can move it.
+ *
+ * The verdict branches on `classification.requires_clarification`, never on
+ * `confidence`. A provisional row has no determination to report, only a
+ * placeholder and a question waiting for an answer, so the question is the
+ * primary card and the meter is not rendered at all.
  */
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
@@ -18,6 +22,7 @@ import AppSheet from "@/components/ui/AppSheet.vue";
 import SourceTag from "@/components/app/SourceTag.vue";
 import WorkpaperNote from "@/components/app/WorkpaperNote.vue";
 import { ApiFailure } from "@/lib/api";
+import { CAPABILITIES } from "@/lib/capabilities";
 import {
   KATEGORI_LABEL,
   PUBLIC_RULESET,
@@ -42,6 +47,8 @@ const id = computed(() => {
 
 const row = computed(() => store.byId(id.value));
 const galat = ref("");
+const galatOverride = ref("");
+const galatKlarifikasi = ref("");
 const stampId = computed(() => pajak.dashboard?.metadata.ruleset_id || PUBLIC_RULESET.id);
 const stampDate = computed(
   () => pajak.dashboard?.metadata.effective_date || PUBLIC_RULESET.berlaku,
@@ -74,27 +81,47 @@ const kategoriOpsi = (Object.keys(KATEGORI_LABEL) as Kategori[]).map((k) => ({
 const sheetTerbuka = ref(false);
 const kategoriBaru = ref("");
 const catatanBaru = ref("");
+const sedangTerapkan = ref(false);
 /** Set only by this screen, so the answered question can collapse instead of vanish. */
 const klarifikasiSelesai = ref(false);
+const sedangDijawab = ref(false);
 
-const adaKeyakinan = computed(() => typeof row.value?.classification?.confidence === "number");
-const keyakinan = computed(() => row.value?.classification?.confidence ?? 0);
-const keyakinanRendah = computed(() => keyakinan.value < 0.8);
+/** Older payloads carry no classification at all; that reads as classified, not as 0%. */
+const klasifikasi = computed(() => row.value?.classification);
+const perluJawab = computed(() => klasifikasi.value?.requires_clarification === true);
+
+/** A human set this category, so there is no rule-match score to show. */
+const dariManusia = computed(() => row.value?.source !== "rule");
+
+/**
+ * The classifier's match strength, as a percentage. Null when the payload
+ * carried no confidence, and null when a person set the category: a confident
+ * answer is not a rule that matched, and labelling it as one is a false claim
+ * about how the figure was reached.
+ */
+const keyakinanPersen = computed(() => {
+  if (dariManusia.value) return null;
+  const nilai = klasifikasi.value?.confidence;
+  return typeof nilai === "number" ? nilai * 100 : null;
+});
 
 function bukaSheet() {
   if (!row.value) return;
   kategoriBaru.value = row.value.category;
   catatanBaru.value = "";
+  galatOverride.value = "";
   sheetTerbuka.value = true;
 }
 
 function tutupSheet() {
   sheetTerbuka.value = false;
+  galatOverride.value = "";
 }
 
 async function terapkan() {
-  if (!row.value || kategoriBaru.value === "") return;
-  galat.value = "";
+  if (!row.value || kategoriBaru.value === "" || sedangTerapkan.value) return;
+  sedangTerapkan.value = true;
+  galatOverride.value = "";
   try {
     await store.override(
       row.value.id,
@@ -102,21 +129,41 @@ async function terapkan() {
       catatanBaru.value.trim() || undefined,
     );
     sheetTerbuka.value = false;
+    galatOverride.value = "";
     await pajak.muat(true);
   } catch (error) {
-    galat.value = error instanceof ApiFailure ? error.message : "Override gagal.";
+    galatOverride.value = error instanceof ApiFailure ? error.message : "Override gagal.";
+  } finally {
+    sedangTerapkan.value = false;
   }
 }
 
 async function jawab(category: Kategori) {
-  if (!row.value) return;
-  galat.value = "";
+  if (!row.value || sedangDijawab.value) return;
+  sedangDijawab.value = true;
+  galatKlarifikasi.value = "";
   try {
     await store.jawab(row.value.id, category);
     klarifikasiSelesai.value = true;
     await pajak.muat(true);
   } catch (error) {
-    galat.value = error instanceof ApiFailure ? error.message : "Klarifikasi gagal.";
+    galatKlarifikasi.value = error instanceof ApiFailure ? error.message : "Klarifikasi gagal.";
+  } finally {
+    sedangDijawab.value = false;
+  }
+}
+
+/**
+ * A 404 means there is no question, which is not a failure: the store clears
+ * itself and the card renders nothing. Anything else is reported on the card.
+ */
+async function muatPertanyaan(transactionId: string) {
+  galatKlarifikasi.value = "";
+  try {
+    await store.muatKlarifikasi(transactionId);
+  } catch (error) {
+    galatKlarifikasi.value =
+      error instanceof ApiFailure ? error.message : "Pertanyaan belum bisa dimuat.";
   }
 }
 
@@ -136,8 +183,10 @@ onMounted(async () => {
   await pajak.muat();
   const found = await store.buka(id.value);
   if (!found) return;
-  await store.muatKlarifikasi(found.id);
-  await store.muatJejak(found.id);
+  if (found.classification?.requires_clarification) await muatPertanyaan(found.id);
+  // The trail reads /transactions/{id}/audit-trail, so it is only fetched while
+  // the section that renders it exists.
+  if (CAPABILITIES.auditTrail) await store.muatJejak(found.id);
 });
 </script>
 
@@ -226,13 +275,25 @@ onMounted(async () => {
         <div class="putusan-head">
           <p class="u-label">Kategori yang ditetapkan</p>
           <div class="putusan-nama">
-            <span class="nama" :class="`i-${TONE[row.category]}`">
+            <span class="nama" :class="perluJawab ? 'i-belum' : `i-${TONE[row.category]}`">
               {{ KATEGORI_LABEL[row.category] }}
             </span>
-            <AppPill :label="KATEGORI_LABEL[row.category]" :tone="TONE[row.category]" />
+            <AppPill
+              v-if="perluJawab"
+              tone="ask"
+              label="Belum terklasifikasi"
+              icon="helpCircle"
+              attention
+            />
             <SourceTag :sumber="row.source" />
           </div>
-          <p class="asal">
+          <p v-if="perluJawab" class="asal">
+            Tidak ada aturan yang cocok pada keterangan baris ini, jadi
+            {{ KATEGORI_LABEL[row.category] }} hanya kategori sementara. Angka
+            <span class="figure">{{ rupiah(row.amount_idr) }}</span> masih menunggu jawaban Anda;
+            begitu kategorinya ditetapkan, mesin menghitung ulang.
+          </p>
+          <p v-else class="asal">
             Kategori ini masuk lewat {{ SUMBER_LABEL[row.source] }}. Sumbernya selalu ikut
             ditampilkan, jadi bisa ditelusuri ke belakang.
           </p>
@@ -240,29 +301,66 @@ onMounted(async () => {
 
         <p v-if="galat" class="catatan" role="alert">{{ galat }}</p>
 
-        <div v-if="adaKeyakinan" class="keyakinan">
-          <AppMeter
-            :value="keyakinan * 100"
-            :max="100"
-            :warn-at="1"
-            label="Keyakinan mesin atas kategori ini"
-            :caption="persen(keyakinan * 100, 0)"
-          />
-          <p v-if="keyakinanRendah" class="tidak-yakin">
-            Mesin hanya yakin {{ persen(keyakinan * 100, 0) }}. Keterangan pada baris ini belum
-            membedakan pekerjaan yang dikerjakan sendiri dari pekerjaan yang lewat usaha, dan dua
-            pembacaan itu berakhir pada skema yang berbeda. Angka dan kategori di halaman ini belum
-            bisa dianggap final sebelum Anda menjawab pertanyaannya atau memindahkannya sendiri.
-          </p>
-          <p v-else class="yakin">
-            Keyakinan {{ persen(keyakinan * 100, 0) }}. Kategori ini cocok dengan aturan yang dibaca
-            mesin, tapi tetap tebakan — bukan penetapan yang sah.
+        <div v-if="perluJawab" class="menunggu">
+          <p class="menunggu-judul">Angka ini belum final</p>
+          <p class="yakin">
+            Omzet dan pajak baris ini dihitung sebagai {{ KATEGORI_LABEL[row.category] }} sementara.
+            Selama pertanyaan di bawah belum dijawab, perlakuan pajaknya bisa berubah karena
+            pekerjaan yang dikerjakan sendiri dan pekerjaan yang lewat usaha berakhir pada skema
+            yang berbeda.
           </p>
         </div>
+        <div v-else-if="keyakinanPersen !== null" class="keyakinan">
+          <AppMeter
+            :value="keyakinanPersen"
+            :max="100"
+            :warn-at="1"
+            label="Kecocokan dengan aturan"
+            :caption="persen(keyakinanPersen, 0)"
+          />
+          <p class="yakin">
+            Kategori ini cocok dengan aturan kata kunci yang membaca keterangan baris. Angka di
+            meter adalah kadar kecocokan aturan itu, bukan perkiraan model.
+          </p>
+        </div>
+        <p v-else-if="dariManusia" class="yakin tanpa-meter">
+          Kategori ini Anda tetapkan sendiri
+          {{
+            row.source === "user_clarification"
+              ? "lewat jawaban klarifikasi"
+              : "lewat override manual"
+          }}, bukan hasil pencocokan aturan. Karena itu tidak ada angka kecocokan yang ditampilkan
+          di sini; yang tercatat adalah pilihan Anda beserta waktunya.
+        </p>
         <p v-else class="yakin tanpa-meter">
-          Kategori ini bukan dari tebakan mesin, jadi tidak ada tingkat keyakinan yang perlu
+          Kategori ini tidak membawa tingkat kecocokan dari mesin, jadi tidak ada angka yang perlu
           ditampilkan.
         </p>
+      </AppCard>
+
+      <AppCard v-if="store.klarifikasi || (perluJawab && galatKlarifikasi)" class="tanya-card">
+        <div class="tanya-head">
+          <AppPill tone="ask" label="Belum terklasifikasi" icon="helpCircle" attention />
+          <p v-if="store.klarifikasi" class="tanya-judul">{{ store.klarifikasi.question }}</p>
+          <p v-else class="tanya-judul">Pertanyaannya belum termuat.</p>
+          <p v-if="store.klarifikasi" class="tanya-sub">
+            Pilih satu kategori. Sesudah Anda memilih, mesin berhenti menebak dan memakai pilihan
+            itu.
+          </p>
+        </div>
+        <p v-if="galatKlarifikasi" class="tanya-galat" role="alert">{{ galatKlarifikasi }}</p>
+        <div v-if="store.klarifikasi" class="jawab">
+          <AppButton
+            v-for="opsi in store.klarifikasi.options"
+            :key="opsi.value"
+            variant="outline"
+            size="lg"
+            :disabled="sedangDijawab"
+            @click="jawab(opsi.value)"
+          >
+            {{ opsi.label }}
+          </AppButton>
+        </div>
       </AppCard>
 
       <AppCard title="Dasar hukum" :subtitle="`Ringkasan bacaan ${PUBLIC_RULESET.nama} Pasal 56`">
@@ -286,26 +384,7 @@ onMounted(async () => {
         </p>
       </AppCard>
 
-      <AppCard v-if="store.klarifikasi" class="tanya-card">
-        <div class="tanya-head">
-          <AppPill tone="ask" label="Perlu klarifikasi" icon="helpCircle" attention />
-          <p class="tanya-judul">{{ store.klarifikasi.question }}</p>
-          <p class="tanya-sub">Pilih satu kategori. Mesin tidak menebak setelah pertanyaan ini.</p>
-        </div>
-        <div class="jawab">
-          <AppButton
-            v-for="opsi in store.klarifikasi.options"
-            :key="opsi.value"
-            variant="outline"
-            size="lg"
-            @click="jawab(opsi.value)"
-          >
-            {{ opsi.label }}
-          </AppButton>
-        </div>
-      </AppCard>
-
-      <AppCard v-else-if="klarifikasiSelesai" class="selesai">
+      <AppCard v-if="klarifikasiSelesai && !store.klarifikasi" class="selesai">
         <div class="selesai-isi">
           <span class="selesai-ic"
             ><AppIcon name="checkCircle" :size="18" :stroke-width="1.8"
@@ -321,14 +400,27 @@ onMounted(async () => {
       </AppCard>
 
       <AppCard
+        v-if="CAPABILITIES.manualOverride || CAPABILITIES.deleteTransaction"
         title="Override manual"
         subtitle="Kalau mesin salah atau keterangan belum cukup, pindahkan sendiri."
       >
         <div class="override-isi">
-          <AppButton variant="outline" icon="ubah" @click="bukaSheet">
+          <AppButton
+            v-if="CAPABILITIES.manualOverride"
+            variant="outline"
+            icon="ubah"
+            @click="bukaSheet"
+          >
             Ubah klasifikasi manual
           </AppButton>
-          <AppButton variant="danger" icon="sampah" @click="hapus">Hapus</AppButton>
+          <AppButton
+            v-if="CAPABILITIES.deleteTransaction"
+            variant="danger"
+            icon="sampah"
+            @click="hapus"
+          >
+            Hapus
+          </AppButton>
           <p class="override-note">
             Kategori yang Anda pilih akan menimpa tebakan mesin dan baris ini ditandai Override,
             beserta catatannya. Batas bebas usaha {{ rupiah(batasBebas) }} tidak ikut dipakai kalau
@@ -337,7 +429,10 @@ onMounted(async () => {
         </div>
       </AppCard>
 
-      <AppCard v-if="store.jejak.length || store.jejakPesan" title="Jejak klasifikasi">
+      <AppCard
+        v-if="CAPABILITIES.auditTrail && (store.jejak.length || store.jejakPesan)"
+        title="Jejak klasifikasi"
+      >
         <p v-if="store.jejakPesan">{{ store.jejakPesan }}</p>
         <ul v-else class="dl">
           <li v-for="(ev, i) in store.jejak" :key="i">
@@ -359,9 +454,11 @@ onMounted(async () => {
     </div>
 
     <AppSheet
+      v-if="CAPABILITIES.manualOverride"
       :open="sheetTerbuka"
       title="Ubah klasifikasi manual"
       subtitle="Empat kategori. Pilihan yang disimpan tercatat sebagai override oleh Anda."
+      :error="galatOverride"
       @close="tutupSheet"
     >
       <div class="sheet-fields">
@@ -394,10 +491,10 @@ onMounted(async () => {
           <AppButton
             variant="primary"
             icon="check"
-            :disabled="kategoriBaru === ''"
+            :disabled="kategoriBaru === '' || sedangTerapkan"
             @click="terapkan"
           >
-            Terapkan override
+            {{ sedangTerapkan ? "Menerapkan…" : "Terapkan override" }}
           </AppButton>
         </div>
       </template>
@@ -557,6 +654,12 @@ onMounted(async () => {
   color: var(--cat-non-ink);
 }
 
+/* A provisional category is a placeholder, so it never wears a settled
+   category's ink. */
+.i-belum {
+  color: var(--cat-ask-ink);
+}
+
 .asal {
   font: var(--t-body-sm);
   color: var(--ink-2);
@@ -591,14 +694,20 @@ onMounted(async () => {
   border-top: 1px solid var(--hairline);
 }
 
-.tidak-yakin {
-  padding: var(--s-3) var(--s-4);
-  border: 1px solid var(--warn-line);
-  border-radius: var(--r-md);
-  background: var(--warn-bg);
-  color: var(--warn-ink);
-  font: var(--t-body-sm);
-  line-height: 1.5;
+.menunggu {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin-top: var(--s-5);
+  padding-top: var(--s-5);
+  border-top: 1px solid var(--hairline);
+}
+
+.menunggu-judul {
+  font: var(--t-label);
+  letter-spacing: var(--track-label);
+  font-weight: 600;
+  color: var(--cat-ask-ink);
 }
 
 .yakin {
@@ -666,6 +775,17 @@ onMounted(async () => {
 .tanya-sub {
   font: var(--t-body-sm);
   color: var(--ink-2);
+  line-height: 1.5;
+}
+
+.tanya-galat {
+  margin-top: var(--s-4);
+  padding: var(--s-3);
+  border: 1px solid var(--cat-ask-line);
+  border-radius: var(--r-md);
+  background: var(--cat-ask-bg);
+  color: var(--cat-ask-ink);
+  font: var(--t-body-sm);
   line-height: 1.5;
 }
 

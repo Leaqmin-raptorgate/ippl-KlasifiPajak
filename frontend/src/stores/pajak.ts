@@ -2,6 +2,7 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import { ApiFailure, api, apiBlob } from "@/lib/api";
+import { CAPABILITIES } from "@/lib/capabilities";
 import { TAX_YEAR } from "@/lib/domain";
 import type { Dashboard, Recap } from "@/lib/wire";
 
@@ -22,12 +23,20 @@ export const usePajakStore = defineStore("pajak", () => {
       dashboard.value = null;
       pesan.value = error instanceof ApiFailure ? error.message : "Ringkasan pajak belum tersedia.";
     }
-    try {
-      recap.value = await api<Recap>(`/recap/${TAX_YEAR}`);
-      recapPesan.value = "";
-    } catch (error) {
+    // Only ask for the recap when its route exists. A call that can only 404 is
+    // noise in the network tab, and its message would otherwise surface as user
+    // copy on a screen that has nothing to say about it.
+    if (CAPABILITIES.workpaperExport) {
+      try {
+        recap.value = await api<Recap>(`/recap/${TAX_YEAR}`);
+        recapPesan.value = "";
+      } catch (error) {
+        recap.value = null;
+        recapPesan.value = error instanceof ApiFailure ? error.message : "Rekap belum tersedia.";
+      }
+    } else {
       recap.value = null;
-      recapPesan.value = error instanceof ApiFailure ? error.message : "Rekap belum tersedia.";
+      recapPesan.value = "";
     }
   }
 

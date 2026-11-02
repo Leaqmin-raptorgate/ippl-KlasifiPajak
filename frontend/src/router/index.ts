@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router";
+import { CAPABILITIES } from "@/lib/capabilities";
 import { useSessionStore } from "@/stores/session";
 
 const routes: RouteRecordRaw[] = [
@@ -14,12 +15,18 @@ const routes: RouteRecordRaw[] = [
     component: () => import("@/pages/MasukPage.vue"),
     meta: { bare: true },
   },
-  {
-    path: "/atur-ulang",
-    name: "atur-ulang",
-    component: () => import("@/pages/AturUlangPage.vue"),
-    meta: { bare: true },
-  },
+  // The reset flow calls /auth/password-reset, so the view is only routed while
+  // that path exists. A stale bookmark then falls through to the catch-all.
+  ...(CAPABILITIES.passwordReset
+    ? [
+        {
+          path: "/atur-ulang",
+          name: "atur-ulang",
+          component: () => import("@/pages/AturUlangPage.vue"),
+          meta: { bare: true },
+        } satisfies RouteRecordRaw,
+      ]
+    : []),
   {
     path: "/dasbor",
     name: "dasbor",

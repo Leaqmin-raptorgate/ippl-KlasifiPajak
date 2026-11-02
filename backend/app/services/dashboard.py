@@ -8,6 +8,7 @@ from app.engine import Ruleset
 from app.models import MonthSnapshot, Profile, User
 from app.services.profile import find_profile
 from app.services.snapshot import DISCLAIMER
+from app.services.transactions import provisional_usaha_total
 
 
 def dashboard(db: Session, user: User, tax_year: int, ruleset: Ruleset) -> dict:
@@ -44,6 +45,14 @@ def dashboard(db: Session, user: User, tax_year: int, ruleset: Ruleset) -> dict:
     remaining = max(0, ruleset.exemption_band_idr - usaha_ytd)
     annotation = next((row.annotation for row in rows if row.annotation), "")
 
+    # How much of the band is unconfirmed. Reported next to the band rather than
+    # netted out of it: the engine does not decide the treatment, the user does,
+    # and the band total must stay the number the engine actually computed.
+    provisional = provisional_usaha_total(db, user, tax_year)
+    if provisional:
+        note = f"{provisional:,}".replace(",", ".") + " IDR belum terklasifikasi"
+        annotation = f"{annotation} {note}".strip() if annotation else note
+
     return {
         "metadata": {
             "ruleset_id": ruleset.ruleset_id,
@@ -57,6 +66,7 @@ def dashboard(db: Session, user: User, tax_year: int, ruleset: Ruleset) -> dict:
                 "ytd_usaha_omzet_idr": usaha_ytd,
                 "remaining_free_band_idr": remaining if status == "scheme_eligible" else 0,
                 "split_month": split_month,
+                "provisional_omzet_idr": provisional,
                 "annotation": annotation,
             },
             "eligibility_prior_year_cap_4_8m": {
@@ -68,6 +78,7 @@ def dashboard(db: Session, user: User, tax_year: int, ruleset: Ruleset) -> dict:
             "monitoring_current_year_cap_4_8m": {
                 "limit_idr": ruleset.eligibility_cap_idr,
                 "ytd_usaha_omzet_idr": usaha_ytd,
+                "provisional_usaha_omzet_idr": provisional,
                 "ytd_pekerjaan_bebas_omzet_idr": pekerjaan_ytd,
                 "ytd_already_final_omzet_idr": already_final_ytd,
                 "spouse_current_year_usaha_omzet_idr": (

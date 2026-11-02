@@ -1,0 +1,30 @@
+# Local development database, and nothing else.
+#
+#   docker compose -f docker-compose.dev.yml up -d
+#
+# APP_ENV is deliberately absent. This file starts MySQL; the API and pytest
+# read APP_ENV=development from their own environment when they point at this
+# instance. The credentials below are throwaway local values.
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: klasifipajak
+      MYSQL_USER: klasifipajak
+      MYSQL_PASSWORD: klasifipajak
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      # Runs once, on an empty volume. MYSQL_DATABASE only ever creates one
+      # schema, so the test schema comes from the init script.
+      - ./docker/mysql-init.sql:/docker-entrypoint-initdb.d/01-test-database.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  mysql_data:

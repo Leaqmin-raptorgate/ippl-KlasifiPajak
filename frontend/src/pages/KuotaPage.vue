@@ -10,6 +10,7 @@ import AppPill from "@/components/ui/AppPill.vue";
 import AppSegmented from "@/components/ui/AppSegmented.vue";
 import WorkpaperNote from "@/components/app/WorkpaperNote.vue";
 import { ApiFailure } from "@/lib/api";
+import { CAPABILITIES } from "@/lib/capabilities";
 import { PUBLIC_RULESET } from "@/lib/domain";
 import { rupiah, tanggalPanjang } from "@/lib/format";
 import { useKuotaStore } from "@/stores/kuota";
@@ -134,10 +135,10 @@ function gantiTema(nilai: string) {
           <p v-if="kuota.pesan || galat || kuota.bayarPesan" class="plan-tag" role="alert">
             {{ galat || kuota.bayarPesan || kuota.pesan }}
           </p>
-          <div class="plan-cta">
+          <div v-if="CAPABILITIES.subscriptionPurchase" class="plan-cta">
             <AppButton variant="primary" block @click="bayar">Buat tautan bayar</AppButton>
           </div>
-          <ul v-if="kuota.orders.length" class="fitur">
+          <ul v-if="CAPABILITIES.subscriptionPurchase && kuota.orders.length" class="fitur">
             <li v-for="order in kuota.orders" :key="order.order_id">
               <span class="fitur-label">{{ order.order_id }}</span>
               <span class="fitur-nilai">{{ order.status }} · {{ rupiah(order.amount_idr) }}</span>

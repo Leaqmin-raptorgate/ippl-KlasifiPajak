@@ -13,6 +13,7 @@ import AppSelect from "@/components/ui/AppSelect.vue";
 import AppSheet from "@/components/ui/AppSheet.vue";
 import WorkpaperNote from "@/components/app/WorkpaperNote.vue";
 import { ApiFailure } from "@/lib/api";
+import { CAPABILITIES } from "@/lib/capabilities";
 import { HAPUS_AKUN } from "@/lib/domain";
 import { parseRupiah } from "@/lib/format";
 import { useKuotaStore } from "@/stores/kuota";
@@ -160,11 +161,19 @@ const sheetBuka = ref(false);
 const konfirmasi = ref("");
 const sudahDiconfirmasi = ref(false);
 const bisaHapus = computed(() => konfirmasi.value === HAPUS_AKUN);
+/** Shown inside the sheet the moment the typed phrase stops matching. */
+const konfirmasiGagal = computed(() =>
+  konfirmasi.value.length > 0 && !bisaHapus.value
+    ? `Ketikan persis ${HAPUS_AKUN}, huruf kapital semua.`
+    : "",
+);
 
 onMounted(() => {
   void profil.muat();
   void kuota.muat();
-  void profil.muatSesi();
+  // The device list reads /auth/sessions, so it is only fetched while the block
+  // that renders it exists.
+  if (CAPABILITIES.activeSessions) void profil.muatSesi();
 });
 
 function bukaSheet() {
@@ -354,12 +363,15 @@ async function jalankanHapus() {
       </div>
     </AppCard>
 
+    <!-- Both rows need a route that is not there yet, so the card only renders
+         while at least one of them is on; an empty security card says nothing. -->
     <AppCard
+      v-if="CAPABILITIES.passwordReset || CAPABILITIES.activeSessions"
       title="Keamanan"
       subtitle="Sesi perangkat ini. Keluar hanya membatalkan sesi yang sedang dipakai."
     >
       <div class="baris-grup">
-        <div class="baris-tunggal">
+        <div v-if="CAPABILITIES.passwordReset" class="baris-tunggal">
           <div class="baris-teks">
             <p class="baris-judul">Kata sandi</p>
             <p class="baris-sub">Atur ulang lewat surel. Token tidak disimpan di peramban.</p>
@@ -369,7 +381,7 @@ async function jalankanHapus() {
           </AppButton>
         </div>
 
-        <div class="baris-tunggal">
+        <div v-if="CAPABILITIES.activeSessions" class="baris-tunggal">
           <div class="baris-teks">
             <p class="baris-judul">Perangkat aktif</p>
             <p class="baris-sub">
@@ -387,7 +399,7 @@ async function jalankanHapus() {
         </div>
       </div>
 
-      <div v-if="catatanKeamanan === 'perangkat'" class="kunci">
+      <div v-if="CAPABILITIES.activeSessions && catatanKeamanan === 'perangkat'" class="kunci">
         <div v-for="s in profil.sesi" :key="s.id" class="kunci-row">
           <span>
             {{ s.device_label }}
@@ -424,6 +436,7 @@ async function jalankanHapus() {
       v-model:open="sheetBuka"
       title="Hapus akun dan semua data?"
       :subtitle="`Ketik ${HAPUS_AKUN} untuk membuka tombol penghapusan.`"
+      :error="konfirmasiGagal ? konfirmasiGagal : galat"
       @close="tutupSheet"
     >
       <p v-if="!sudahDiconfirmasi" class="sheet-teks">
@@ -449,7 +462,6 @@ async function jalankanHapus() {
             :invalid="konfirmasi.length > 0 && !bisaHapus"
           />
         </AppField>
-        <p v-if="galat" class="sheet-cat" role="alert">{{ galat }}</p>
       </div>
 
       <div v-else class="sheet-done">

@@ -1,5 +1,9 @@
 """End-to-end checks for the authenticated slice under ``/api/v1``."""
 
+from fastapi.testclient import TestClient
+
+from app.main import app
+
 AUTH = {
     "email": "user@example.com",
     "username": "adityaputra",
@@ -237,3 +241,184 @@ def test_paid_flag_switches_the_tier(client):
     assert body["subscription_tier"] == "berbayar"
     assert body["paid_flag"] is True
     assert body["valid_until_local"] is not None
+
+
+# --- Clarification flow -------------------------------------------------------
+# A row the keyword table cannot place is stored provisionally as ``usaha`` with
+# ``requires_clarification`` set. These cover the question being askable, being
+# answerable, and the answer actually moving the figure out of the band.
+
+UNCLASSIFIABLE = {
+    "amount_idr": 7_000_000,
+    "tx_date": "2026-10-20",
+    "client_name": "Dinasichletan",
+    "description": "qqqq zzzz xxxx",  # matches no rule phrase
+    "invoice_no": "INV-2026-900",
+    "withheld_tax_amount_idr": 0,
+    "source_channel": "corporate_client",
+}
+
+
+def _provisional(client):
+    """Create a row that lands provisional, and return its id."""
+    response = _transaction(client, **UNCLASSIFIABLE)
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["classification"]["requires_clarification"] is True
+    assert body["classification"]["confidence"] == 0.0
+    return body["id"]
+
+
+def test_an_unrecognised_row_is_stored_provisional_not_as_a_confident_answer():
+    client = _client_fresh()
+    _authenticated(client)
+    _profile(client)
+    body = _transaction(client, **UNCLASSIFIABLE).json()
+    assert body["category"] == "usaha"  # a placeholder, not a determination
+    assert body["classification"]["requires_clarification"] is True
+    assert body["classification"]["confidence"] == 0.0
+
+
+def test_every_row_carries_its_classification_flag():
+    """A client must never have to infer provisional-ness from an absent object."""
+    client = _client_fresh()
+    _authenticated(client)
+    _profile(client)
+    _transaction(client)
+    _provisional(client)
+    items = client.get("/api/v1/transactions?per_page=100").json()["items"]
+    assert len(items) == 2
+    assert all(item["classification"] is not None for item in items)
+    flags = sorted(item["classification"]["requires_clarification"] for item in items)
+    assert flags == [False, True]
+
+
+def test_a_provisional_row_offers_exactly_the_four_categories():
+    client = _client_fresh()
+    _authenticated(client)
+    _profile(client)
+    transaction_id = _provisional(client)
+    response = client.get(f"/api/v1/transactions/{transaction_id}/clarification")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["transaction_id"] == transaction_id
+    assert [option["value"] for option in body["options"]] == [
+        "usaha",
+        "pekerjaan_bebas",
+        "already_final",
+        "non_object",
+    ]
+    assert body["question"]
+
+
+def test_a_classified_row_has_no_question_to_answer():
+    client = _client_fresh()
+    _authenticated(client)
+    _profile(client)
+    created = _transaction(client).json()
+    assert created["classification"]["requires_clarification"] is False
+    response = client.get(f"/api/v1/transactions/{created['id']}/clarification")
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "CLARIFICATION_NOT_REQUIRED"
+
+
+def test_answering_moves_the_row_out_of_the_usaha_band():
+    client = _client_fresh()
+    _authenticated(client)
+    _profile(client)
+    transaction_id = _provisional(client)
+
+    before = client.get("/api/v1/tax/dashboard?tax_year=2026").json()
+    assert before["thresholds"]["pita_500_juta"]["provisional_omzet_idr"] == 7_000_000
+
+    answered = client.post(
+        f"/api/v1/transactions/{transaction_id}/clarification",
+        json={"category": "pekerjaan_bebas", "version": 1},
+    )
+    assert answered.status_code == 200, answered.text
+    body = answered.json()
+    assert body["category"] == "pekerjaan_bebas"
+    assert body["source"] == "user_clarification"
+    assert body["classification"]["requires_clarification"] is False
+    assert body["version"] == 2
+
+    after = client.get("/api/v1/tax/dashboard?tax_year=2026").json()
+    assert after["thresholds"]["pita_500_juta"]["provisional_omzet_idr"] == 0
+    # The placeholder never belonged in the classified band.
+    assert after["thresholds"]["pita_500_juta"]["ytd_usaha_omzet_idr"] == 0
+    assert after["thresholds"]["pita_500_juta"]["remaining_free_band_idr"] == 500_000_000
+
+
+def test_the_question_is_askable_only_once():
+    client = _client_fresh()
+    _authenticated(client)
+    _profile(client)
+    transaction_id = _provisional(client)
+    assert (
+        client.post(
+            f"/api/v1/transactions/{transaction_id}/clarification",
+            json={"category": "pekerjaan_bebas"},
+        ).status_code
+        == 200
+    )
+    again = client.post(
+        f"/api/v1/transactions/{transaction_id}/clarification",
+        json={"category": "usaha"},
+    )
+    assert again.status_code == 409
+    assert again.json()["error"]["code"] == "CLARIFICATION_NOT_REQUIRED"
+
+
+def test_a_stale_answer_is_refused_rather_than_silently_applied():
+    client = _client_fresh()
+    _authenticated(client)
+    _profile(client)
+    transaction_id = _provisional(client)
+    stale = client.post(
+        f"/api/v1/transactions/{transaction_id}/clarification",
+        json={"category": "pekerjaan_bebas", "version": 99},
+    )
+    assert stale.status_code == 409
+    assert stale.json()["error"]["code"] == "VERSION_CONFLICT"
+
+
+def test_the_band_reports_how_much_of_it_is_still_unconfirmed():
+    client = _client_fresh()
+    _authenticated(client)
+    _profile(client)
+    _transaction(client, amount_idr=10_000_000, invoice_no="INV-A", description="jasa desain")
+    _provisional(client)
+    pita = client.get("/api/v1/tax/dashboard?tax_year=2026").json()["thresholds"]["pita_500_juta"]
+    assert pita["provisional_omzet_idr"] == 7_000_000
+    assert "belum terklasifikasi" in pita["annotation"]
+    # Reported alongside the band, never netted out of it.
+    assert pita["ytd_usaha_omzet_idr"] >= pita["provisional_omzet_idr"]
+
+
+def test_one_account_cannot_read_or_answer_another_accounts_question():
+    client = _client_fresh()
+    _authenticated(client)
+    _profile(client)
+    transaction_id = _provisional(client)
+
+    other = _client_fresh()
+    assert _register(other, email="lain@example.com", username="lain").status_code == 201
+    assert (
+        other.post(
+            "/api/v1/auth/login",
+            json={"identifier": "lain@example.com", "password": AUTH["password"]},
+        ).status_code
+        == 200
+    )
+    assert other.get(f"/api/v1/transactions/{transaction_id}/clarification").status_code == 404
+    assert (
+        other.post(
+            f"/api/v1/transactions/{transaction_id}/clarification", json={"category": "usaha"}
+        ).status_code
+        == 404
+    )
+
+
+def _client_fresh():
+    """A client with no cookie jar, so each test starts signed out."""
+    return TestClient(app)

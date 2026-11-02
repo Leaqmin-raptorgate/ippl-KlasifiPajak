@@ -91,7 +91,8 @@ export interface Transaction {
   category: Kategori;
   source: Sumber;
   description: string;
-  classification?: Classification | null;
+  /** Always sent. `requires_clarification` is the "not classified yet" signal, not `confidence`. */
+  classification: Classification;
 }
 
 export interface TransactionList {
@@ -116,6 +117,8 @@ export interface TransactionCreate {
 
 export interface Clarification {
   transaction_id: string;
+  /** The placeholder category the row was stored with, not a determination. */
+  provisional_category: Kategori;
   question: string;
   options: { value: Kategori; label: string }[];
 }
@@ -147,6 +150,8 @@ export interface Dashboard {
       limit_idr: number;
       ytd_usaha_omzet_idr: number;
       remaining_free_band_idr: number;
+      /** Part of `ytd_usaha_omzet_idr` still sitting on provisional rows. */
+      provisional_omzet_idr: number;
       split_month: string | null;
       annotation: string;
     };
@@ -165,6 +170,8 @@ export interface Dashboard {
       spouse_current_year_pekerjaan_bebas_omzet_idr: number;
       spouse_current_year_already_final_omzet_idr: number;
       ytd_combined_gross_idr: number;
+      /** Part of `ytd_usaha_omzet_idr` still sitting on provisional rows. */
+      provisional_usaha_omzet_idr: number;
       next_year_ineligible: boolean;
     };
     pasal_58: {

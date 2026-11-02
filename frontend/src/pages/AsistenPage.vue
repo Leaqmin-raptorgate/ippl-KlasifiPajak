@@ -8,6 +8,7 @@ import AppIcon from "@/components/ui/AppIcon.vue";
 import AppPill from "@/components/ui/AppPill.vue";
 import WorkpaperNote from "@/components/app/WorkpaperNote.vue";
 import { ApiFailure, api } from "@/lib/api";
+import { CAPABILITIES } from "@/lib/capabilities";
 import { useKuotaStore } from "@/stores/kuota";
 import { useSessionStore } from "@/stores/session";
 import type { AssistantAnswer } from "@/lib/wire";
@@ -73,7 +74,7 @@ function isiPertanyaan(teks: string) {
             baru, tidak mengubah klasifikasi, dan tidak mengirim apa pun ke DJP.
           </p>
         </div>
-        <div class="kuota">
+        <div v-if="CAPABILITIES.assistantChat" class="kuota">
           <AppPill
             :tone="sisa <= 2 ? 'ask' : 'accent'"
             icon="kuota"
@@ -83,6 +84,7 @@ function isiPertanyaan(teks: string) {
       </header>
 
       <AppCard
+        v-if="CAPABILITIES.assistantChat"
         title="Tanya kertas kerja Anda"
         subtitle="Jawabannya disusun dari baris yang tersimpan, lalu ditampilkan di halaman ini."
       >
@@ -139,6 +141,7 @@ function isiPertanyaan(teks: string) {
       </AppCard>
 
       <AppCard
+        v-if="CAPABILITIES.assistantChat"
         title="Pertanyaan yang sering diajukan"
         subtitle="Ketuk satu untuk mengisi kolom di atas."
       >

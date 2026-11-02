@@ -12,6 +12,7 @@ import AppSelect from "@/components/ui/AppSelect.vue";
 import SourceTag from "@/components/app/SourceTag.vue";
 import WorkpaperNote from "@/components/app/WorkpaperNote.vue";
 import { ApiFailure } from "@/lib/api";
+import { CAPABILITIES } from "@/lib/capabilities";
 import {
   KATEGORI_LABEL,
   PUBLIC_RULESET,
@@ -313,7 +314,7 @@ async function simpan() {
             <AppSelect id="kanal" v-model="kanal" :options="kanalOpsi" />
           </AppField>
 
-          <AppField label="Bukti pendukung">
+          <AppField v-if="CAPABILITIES.ocrUpload" label="Bukti pendukung">
             <div
               class="drop"
               role="button"

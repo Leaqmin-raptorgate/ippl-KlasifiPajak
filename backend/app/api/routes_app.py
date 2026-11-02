@@ -21,6 +21,8 @@ from app.schemas.account import (
     RevokedOut,
 )
 from app.schemas.transaction import (
+    ClarificationAnswer,
+    ClarificationOut,
     TransactionCreate,
     TransactionListOut,
     TransactionOut,
@@ -150,6 +152,42 @@ def create_transaction(
 ) -> TransactionOut:
     ruleset = active_ruleset(settings.ruleset_path)
     return transaction_service.create_transaction(db, context.user, payload, ruleset)
+
+
+@router.get("/transactions/{transaction_id}", response_model=TransactionOut)
+def get_transaction(
+    transaction_id: str,
+    context: AuthContext = Depends(current_session),
+    db: Session = Depends(get_db),
+) -> TransactionOut:
+    return transaction_service.row_out(
+        transaction_service.get_transaction(db, context.user, transaction_id)
+    )
+
+
+@router.get("/transactions/{transaction_id}/clarification", response_model=ClarificationOut)
+def get_clarification(
+    transaction_id: str,
+    context: AuthContext = Depends(current_session),
+    db: Session = Depends(get_db),
+) -> ClarificationOut:
+    """The closed question a provisional row waits on. 404 when there is none."""
+    return transaction_service.clarification_for(db, context.user, transaction_id)
+
+
+@router.post("/transactions/{transaction_id}/clarification", response_model=TransactionOut)
+def answer_clarification(
+    transaction_id: str,
+    payload: ClarificationAnswer,
+    context: AuthContext = Depends(current_session),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> TransactionOut:
+    """Resolve a provisional row and rebuild the snapshots it feeds."""
+    ruleset = active_ruleset(settings.ruleset_path)
+    return transaction_service.answer_clarification(
+        db, context.user, transaction_id, payload, ruleset
+    )
 
 
 @router.get("/tax/dashboard")

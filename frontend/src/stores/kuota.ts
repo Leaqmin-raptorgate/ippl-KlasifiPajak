@@ -2,6 +2,7 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { ApiFailure, api } from "@/lib/api";
+import { CAPABILITIES } from "@/lib/capabilities";
 import type { Quotas, SubscriptionOrder, SubscriptionStatus } from "@/lib/wire";
 
 export const useKuotaStore = defineStore("kuota", () => {
@@ -37,12 +38,18 @@ export const useKuotaStore = defineStore("kuota", () => {
       status.value = null;
       if (!pesan.value && error instanceof ApiFailure) pesan.value = error.message;
     }
-    try {
-      const data = await api<{ items?: SubscriptionOrder[] } | SubscriptionOrder[]>(
-        "/subscriptions/orders",
-      );
-      orders.value = Array.isArray(data) ? data : (data.items ?? []);
-    } catch {
+    // Only ask for order history when the route exists. A call that can only
+    // 404 is noise in the network tab and a lie in the console.
+    if (CAPABILITIES.subscriptionPurchase) {
+      try {
+        const data = await api<{ items?: SubscriptionOrder[] } | SubscriptionOrder[]>(
+          "/subscriptions/orders",
+        );
+        orders.value = Array.isArray(data) ? data : (data.items ?? []);
+      } catch {
+        orders.value = [];
+      }
+    } else {
       orders.value = [];
     }
   }

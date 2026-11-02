@@ -9,12 +9,22 @@
  *
  * The scrim is the only thing that blocks input, and it dismisses on tap. There
  * is no busy state to wait out, so nothing ever locks the user mid-transition.
+ *
+ * `error` is rendered inside the panel, above the footer, so a failed action
+ * cannot hide behind the scrim. It is a controlled prop: the owner clears it
+ * when the sheet closes, and again when it reopens.
  */
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import AppIcon from "./AppIcon.vue";
 
 const props = withDefaults(
-  defineProps<{ open: boolean; title: string; subtitle?: string; wide?: boolean }>(),
+  defineProps<{
+    open: boolean;
+    title: string;
+    subtitle?: string;
+    wide?: boolean;
+    error?: string;
+  }>(),
   { wide: false },
 );
 
@@ -80,6 +90,7 @@ onBeforeUnmount(() => {
             </button>
           </header>
           <div class="body"><slot /></div>
+          <p v-if="error" class="err" role="alert">{{ error }}</p>
           <footer v-if="$slots.footer" class="foot"><slot name="footer" /></footer>
         </div>
       </div>
@@ -175,6 +186,17 @@ onBeforeUnmount(() => {
   gap: var(--s-3);
   padding: var(--s-4) var(--s-5);
   border-top: 1px solid var(--hairline);
+}
+
+.err {
+  margin: 0 var(--s-5) var(--s-5);
+  padding: var(--s-3);
+  border: 1px solid var(--cat-ask-line);
+  border-radius: var(--r-md);
+  background: var(--cat-ask-bg);
+  color: var(--cat-ask-ink);
+  font: var(--t-body-sm);
+  line-height: 1.45;
 }
 
 @media (min-width: 768px) {
