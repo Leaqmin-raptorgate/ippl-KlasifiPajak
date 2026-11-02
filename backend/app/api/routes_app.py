@@ -56,23 +56,24 @@ router = APIRouter()
 
 
 def _client_ip(request: Request) -> str:
-    """Resolve the client IP.
+    """Resolve the client IP for rate limits (ARGON-1).
 
-    ``TRUSTED_PROXY_COUNT`` (default 0) must be set to the number of reverse
-    proxies that append to ``X-Forwarded-For``. When 0, the header is ignored
-    so clients cannot spoof the IP used for rate limits (Code Review N4).
+    ``TRUSTED_PROXY_COUNT`` (default 0) is the number of reverse proxies that
+    *append* to ``X-Forwarded-For``. When 0, the header is ignored entirely so
+    clients cannot spoof the IP. When ``trusted >= 1``, the client is
+    ``parts[len(parts) - trusted]`` (the hop just left of the trusted suffix).
+    If the header is missing or shorter than ``trusted``, fall back to
+    ``request.client.host``.
     """
     trusted = int(os.environ.get("TRUSTED_PROXY_COUNT", "0") or "0")
-    if trusted > 0:
+    if trusted < 0:
+        trusted = 0
+    if trusted >= 1:
         forwarded = request.headers.get("X-Forwarded-For")
         if forwarded:
             parts = [part.strip() for part in forwarded.split(",") if part.strip()]
-            # Rightmost ``trusted`` hops are proxies; client sits just before them.
-            index = len(parts) - trusted - 1
-            if index >= 0:
-                return parts[index]
-            if parts:
-                return parts[0]
+            if len(parts) >= trusted:
+                return parts[len(parts) - trusted]
     if request.client and request.client.host:
         return request.client.host
     return "0.0.0.0"

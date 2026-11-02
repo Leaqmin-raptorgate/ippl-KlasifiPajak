@@ -4,16 +4,15 @@ from __future__ import annotations
 
 import hmac
 import unicodedata
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import inspect, select, text, update
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.errors import ApiError
 from app.config.settings import Settings
 from app.logging_redaction import get_logger
-from app.models import AuthRateLimit, PasswordResetToken, User
+from app.models import PasswordResetToken, User
 from app.models import Session as SessionRow
 from app.schemas.account import (
     DeleteAccountIn,
@@ -71,13 +70,6 @@ def _display(value: str) -> str:
     return unicodedata.normalize("NFKC", value).strip()
 
 
-def _client_ip(raw: str | None) -> str:
-    if not raw:
-        return "0.0.0.0"
-    # First hop only; X-Forwarded-For may list several.
-    return raw.split(",")[0].strip() or "0.0.0.0"
-
-
 def _window_start():
     """Floor the current UTC instant to a 15-minute bucket."""
     now = now_utc()
@@ -87,45 +79,65 @@ def _window_start():
 
 
 def _hit(db: Session, subject: str, limit: int) -> None:
-    """Increment a rate-limit counter and raise 429 when the limit is exceeded."""
+    """Atomically increment a rate-limit counter; raise 429 when over the limit.
+
+    Uses MySQL ``INSERT ... ON DUPLICATE KEY UPDATE hit_count = hit_count + 1``
+    on the ``(subject, window_start_utc)`` primary key so concurrent callers
+    cannot lose increments (ARGON-2d).
+    """
     window = _window_start()
-    row = db.get(AuthRateLimit, {"subject": subject, "window_start_utc": window})
-    if row is None:
-        row = AuthRateLimit(subject=subject, window_start_utc=window, hit_count=0)
-        db.add(row)
-        try:
-            db.flush()
-        except IntegrityError:
-            # Concurrent first insert for the same window (N5).
-            db.rollback()
-            row = db.get(AuthRateLimit, {"subject": subject, "window_start_utc": window})
-            if row is None:
-                raise
-    if row.hit_count >= limit:
+    db.execute(
+        text(
+            "INSERT INTO auth_rate_limits (subject, window_start_utc, hit_count) "
+            "VALUES (:subject, :window, 1) "
+            "ON DUPLICATE KEY UPDATE hit_count = hit_count + 1"
+        ),
+        {"subject": subject, "window": window},
+    )
+    hit_count = db.execute(
+        text(
+            "SELECT hit_count FROM auth_rate_limits "
+            "WHERE subject = :subject AND window_start_utc = :window"
+        ),
+        {"subject": subject, "window": window},
+    ).scalar()
+    if hit_count is None or int(hit_count) > limit:
         db.commit()
         raise ApiError(
             429,
             "RATE_LIMITED",
             "Terlalu banyak percobaan. Coba lagi dalam 15 menit.",
         )
-    row.hit_count += 1
     db.commit()
 
 
+def _rate_ip(client_ip: str) -> str:
+    """Normalize an already-resolved client IP for rate-limit subject keys."""
+    return (client_ip or "").strip() or "0.0.0.0"
+
+
 def enforce_register_rate_limit(db: Session, client_ip: str) -> None:
-    _hit(db, f"ip:{_client_ip(client_ip)}", REGISTER_IP_LIMIT)
+    # Per-endpoint IP bucket so login attempts cannot block registration (ARGON-2a).
+    _hit(db, f"register-ip:{_rate_ip(client_ip)}", REGISTER_IP_LIMIT)
 
 
-def enforce_login_rate_limits(db: Session, identifier: str, client_ip: str) -> None:
-    # Identity first (5), then IP (20) — API §5.2.
-    _hit(db, f"id:{normalize_identifier(identifier)}", LOGIN_ID_LIMIT)
-    _hit(db, f"ip:{_client_ip(client_ip)}", LOGIN_IP_LIMIT)
+def enforce_login_ip_rate_limit(db: Session, client_ip: str) -> None:
+    _hit(db, f"login-ip:{_rate_ip(client_ip)}", LOGIN_IP_LIMIT)
 
 
-def enforce_reset_rate_limits(db: Session, email: str, client_ip: str) -> None:
-    # Same window as login; checked before the generic response (API §5.2 / §5.4).
-    _hit(db, f"id:{normalize_identifier(email)}", LOGIN_ID_LIMIT)
-    _hit(db, f"ip:{_client_ip(client_ip)}", LOGIN_IP_LIMIT)
+def enforce_login_id_rate_limit(db: Session, identifier: str, user_id: str | None) -> None:
+    """Key on resolved user_id when known so email and username share one bucket."""
+    key = f"login-id:{user_id}" if user_id else f"login-id:{normalize_identifier(identifier)}"
+    _hit(db, key, LOGIN_ID_LIMIT)
+
+
+def enforce_reset_ip_rate_limit(db: Session, client_ip: str) -> None:
+    _hit(db, f"reset-ip:{_rate_ip(client_ip)}", LOGIN_IP_LIMIT)
+
+
+def enforce_reset_id_rate_limit(db: Session, email: str, user_id: str | None) -> None:
+    key = f"reset-id:{user_id}" if user_id else f"reset-id:{normalize_identifier(email)}"
+    _hit(db, key, LOGIN_ID_LIMIT)
 
 
 def register(db: Session, payload: RegisterIn, client_ip: str = "0.0.0.0") -> User:
@@ -179,11 +191,14 @@ def login(
     client_ip: str = "0.0.0.0",
 ) -> tuple[User, SessionRow]:
     """Authenticate and insert one session. A sixth login revokes the oldest."""
-    enforce_login_rate_limits(db, payload.identifier, client_ip)
+    # ARGON-2c: IP limit before identity so a blocked IP cannot burn id buckets.
+    enforce_login_ip_rate_limit(db, client_ip)
     identifier = normalize_identifier(payload.identifier)
     user = db.scalar(
         select(User).where((User.email_norm == identifier) | (User.username_norm == identifier))
     )
+    # ARGON-2b: one bucket per account (user_id) whether login used email or username.
+    enforce_login_id_rate_limit(db, payload.identifier, user.id if user is not None else None)
     if user is None:
         # B1: always pay argon2id verify cost so timing does not leak existence.
         verify_password(payload.password, _DUMMY_PASSWORD_HASH)
@@ -288,9 +303,11 @@ def request_password_reset(
     """Always return the generic message; never reveal whether the email exists."""
     # N2 / HB-04: shape check before rate limit so 422 does not leak existence.
     validate_email_shape(payload.email)
-    enforce_reset_rate_limits(db, payload.email, client_ip)
+    # ARGON-2a/c: per-endpoint IP bucket first, then identity (user_id when known).
+    enforce_reset_ip_rate_limit(db, client_ip)
     email_norm = normalize_identifier(payload.email)
     user = db.scalar(select(User).where(User.email_norm == email_norm))
+    enforce_reset_id_rate_limit(db, payload.email, user.id if user is not None else None)
     # B2: always mint + hash so known/unknown pay the same CPU before branching.
     plaintext = new_reset_token()
     digest = hash_reset_token(plaintext)
@@ -331,6 +348,42 @@ def request_password_reset(
     db.commit()
     log.info("password reset requested for unknown email")
     return ""
+
+
+def mint_password_reset_token_for_tests(db: Session, email: str) -> tuple[str, datetime]:
+    """Issue a reset token for the test-support route (API §5.32).
+
+    Returns ``(plaintext, expires_at_utc)``. Raises ``USER_NOT_FOUND`` when the
+    email is unknown — test helpers should not hide missing fixtures.
+    """
+    validate_email_shape(email)
+    email_norm = normalize_identifier(email)
+    user = db.scalar(select(User).where(User.email_norm == email_norm))
+    if user is None:
+        raise ApiError(404, "USER_NOT_FOUND", "Pengguna tidak ditemukan.")
+    now = now_utc()
+    db.execute(
+        update(PasswordResetToken)
+        .where(
+            PasswordResetToken.user_id == user.id,
+            PasswordResetToken.used_at.is_(None),
+        )
+        .values(used_at=now)
+    )
+    plaintext = new_reset_token()
+    expires = now + timedelta(minutes=RESET_TOKEN_MINUTES)
+    db.add(
+        PasswordResetToken(
+            id=new_id("rst_"),
+            user_id=user.id,
+            token_hash=hash_reset_token(plaintext),
+            expires_at_utc=expires,
+            used_at=None,
+        )
+    )
+    db.commit()
+    log.info("test-support password reset token issued user_id=%s", user.id)
+    return plaintext, expires
 
 
 def confirm_password_reset(db: Session, payload: PasswordResetConfirmIn) -> None:
@@ -421,6 +474,11 @@ def revoke_session(db: Session, user: User, session_id: str) -> None:
 
 
 def revoke_other_sessions(db: Session, user: User, current: SessionRow) -> int:
+    """Revoke every other *active* session so revoked_count matches GET /auth/sessions.
+
+    ARGON-5: skip already-expired rows (``expires_at_utc <= now``) the same way
+    ``list_sessions`` does, so the count is not inflated by dead sessions.
+    """
     now = now_utc()
     count = 0
     for row in db.scalars(
@@ -428,6 +486,7 @@ def revoke_other_sessions(db: Session, user: User, current: SessionRow) -> int:
             SessionRow.user_id == user.id,
             SessionRow.id != current.id,
             SessionRow.revoked_at.is_(None),
+            SessionRow.expires_at_utc > now,
         )
     ).all():
         row.revoked_at = now

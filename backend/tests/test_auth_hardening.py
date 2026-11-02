@@ -20,7 +20,7 @@ from app.config.settings import _jwt_secret
 from app.db import SessionLocal
 from app.logging_redaction import RedactingFilter, redact_text
 from app.main import app
-from app.models import PasswordResetToken, User
+from app.models import AuthRateLimit, PasswordResetToken, User
 from app.models import Session as SessionRow
 from app.schemas.account import PasswordResetRequestIn
 from app.security import (
@@ -447,12 +447,13 @@ def test_tc_4_10_44_45_47_delete_account(client):
     assert _register(fresh).status_code == 201
 
 
-def test_tc_4_10_63_login_ip_limit_twenty(client):
+def test_tc_4_10_63_login_ip_limit_twenty(client, monkeypatch):
     """TC-4.10-63 / H-03: 21st login from the same IP → 429 RATE_LIMITED.
 
-    Registers users from distinct IPs so the shared ``ip:`` rate-limit counter
-    is not pre-filled by REGISTER_IP_LIMIT, then fires logins from one IP.
+    Registers users from distinct IPs (TRUSTED_PROXY_COUNT=1) so register-ip
+    buckets stay separate, then fires logins from one shared login-ip bucket.
     """
+    monkeypatch.setenv("TRUSTED_PROXY_COUNT", "1")
     shared_ip = "203.0.113.63"
     for i in range(21):
         reg = client.post(
@@ -1012,3 +1013,327 @@ def test_disclaimer_remains_workpaper_spelling():
 
     assert "WORKPAPER" in DISCLAIMER
     assert "WORKOBER" not in DISCLAIMER
+
+
+# --- ARGON external review follow-ups ----------------------------------------
+
+
+def test_argon1_client_ip_xff_parsing(monkeypatch):
+    """ARGON-1: XFF client index is parts[len-trusted]; trusted=0 ignores XFF."""
+    from unittest.mock import Mock
+
+    from app.api.routes_app import _client_ip
+
+    def make_request(xff: str | None, peer: str = "10.0.0.1"):
+        req = Mock()
+        req.headers = {}
+        if xff is not None:
+            req.headers["X-Forwarded-For"] = xff
+        req.client = Mock()
+        req.client.host = peer
+        return req
+
+    # trusted=0 → ignore XFF entirely
+    monkeypatch.setenv("TRUSTED_PROXY_COUNT", "0")
+    assert _client_ip(make_request("1.2.3.4, 203.0.113.9", peer="10.0.0.1")) == "10.0.0.1"
+
+    # trusted=1 → rightmost hop is the client the proxy saw
+    monkeypatch.setenv("TRUSTED_PROXY_COUNT", "1")
+    assert _client_ip(make_request("1.2.3.4, 203.0.113.9")) == "203.0.113.9"
+    # spoofed prefix must not win
+    assert _client_ip(make_request("198.51.100.1, 203.0.113.50")) == "203.0.113.50"
+
+    # trusted=2
+    monkeypatch.setenv("TRUSTED_PROXY_COUNT", "2")
+    assert _client_ip(make_request("spoof, 203.0.113.7, 10.1.1.1")) == "203.0.113.7"
+
+    # short header → fall back to peer
+    monkeypatch.setenv("TRUSTED_PROXY_COUNT", "2")
+    assert _client_ip(make_request("only-one", peer="10.0.0.9")) == "10.0.0.9"
+
+    # garbage / empty parts → fall back
+    monkeypatch.setenv("TRUSTED_PROXY_COUNT", "1")
+    assert _client_ip(make_request("  ,  , ", peer="10.0.0.8")) == "10.0.0.8"
+    assert _client_ip(make_request(None, peer="10.0.0.7")) == "10.0.0.7"
+
+
+def test_argon2a_login_ip_does_not_block_register(client, monkeypatch):
+    """ARGON-2a: login-ip and register-ip are separate buckets on a NAT IP."""
+    monkeypatch.setenv("TRUSTED_PROXY_COUNT", "1")
+    shared = "203.0.113.80"
+    assert (
+        client.post(
+            "/api/v1/auth/register",
+            json={**AUTH, "email": "nat0@example.com", "username": "nat0"},
+            headers={"X-Forwarded-For": "198.51.100.1"},
+        ).status_code
+        == 201
+    )
+    # Burn 5 login attempts from the shared NAT IP (identity bucket separate).
+    for i in range(5):
+        bad = client.post(
+            "/api/v1/auth/login",
+            json={"identifier": "nat0@example.com", "password": "WrongPassword123"},
+            headers={"X-Forwarded-For": shared},
+        )
+        assert bad.status_code == 401, bad.text
+    # Registration from the same NAT IP must still succeed (register-ip unused).
+    ok = client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "nat1@example.com",
+            "username": "nat1",
+            "password": AUTH["password"],
+        },
+        headers={"X-Forwarded-For": shared},
+    )
+    assert ok.status_code == 201, ok.text
+
+
+def test_argon2b_email_and_username_share_login_id_bucket(client):
+    """ARGON-2b: email and username logins share one login-id bucket per user."""
+    assert _register(client).status_code == 201
+    # 3 failures via email + 2 via username = 5; 6th must 429.
+    for _ in range(3):
+        assert (
+            client.post(
+                "/api/v1/auth/login",
+                json={"identifier": AUTH["email"], "password": "WrongPassword123"},
+            ).status_code
+            == 401
+        )
+    for _ in range(2):
+        assert (
+            client.post(
+                "/api/v1/auth/login",
+                json={"identifier": AUTH["username"], "password": "WrongPassword123"},
+            ).status_code
+            == 401
+        )
+    sixth = client.post(
+        "/api/v1/auth/login",
+        json={"identifier": AUTH["email"], "password": "WrongPassword123"},
+    )
+    assert sixth.status_code == 429
+    assert sixth.json()["error"]["code"] == "RATE_LIMITED"
+
+
+def test_argon2c_ip_block_does_not_increment_id_bucket(client, monkeypatch):
+    """ARGON-2c: once login-ip is exhausted, further attempts do not burn login-id."""
+    monkeypatch.setenv("TRUSTED_PROXY_COUNT", "1")
+    # Victim registers from a clean IP.
+    assert (
+        client.post(
+            "/api/v1/auth/register",
+            json=AUTH,
+            headers={"X-Forwarded-For": "198.51.100.2"},
+        ).status_code
+        == 201
+    )
+    attacker_ip = "203.0.113.66"
+    # Exhaust the 20/IP login bucket against a non-existent account (own id bucket).
+    for i in range(20):
+        r = client.post(
+            "/api/v1/auth/login",
+            json={"identifier": f"attacker{i}@ex.com", "password": "WrongPassword123"},
+            headers={"X-Forwarded-For": attacker_ip},
+        )
+        assert r.status_code in {401, 429}, r.text
+    # IP is now blocked; attempts against the victim must 429 without locking them.
+    blocked = client.post(
+        "/api/v1/auth/login",
+        json={"identifier": AUTH["email"], "password": "WrongPassword123"},
+        headers={"X-Forwarded-For": attacker_ip},
+    )
+    assert blocked.status_code == 429
+    # Victim can still fail-login 5 times from their own IP.
+    for i in range(5):
+        r = client.post(
+            "/api/v1/auth/login",
+            json={"identifier": AUTH["email"], "password": "WrongPassword123"},
+            headers={"X-Forwarded-For": "198.51.100.2"},
+        )
+        assert r.status_code == 401, (i, r.text)
+
+
+def test_argon2d_hit_atomic_no_lost_increments(client):
+    """ARGON-2d: concurrent _hit callers do not lose increments (MySQL upsert)."""
+    import threading
+
+    from app.db import SessionLocal
+
+    subject = "login-ip:198.51.100.77"
+    n_threads = 25
+    barrier = threading.Barrier(n_threads)
+    errors: list[BaseException] = []
+
+    def worker() -> None:
+        db = SessionLocal()
+        try:
+            barrier.wait(timeout=10)
+            try:
+                auth_service._hit(db, subject, limit=10_000)
+            except Exception as exc:  # noqa: BLE001 — collect for assertion
+                errors.append(exc)
+        finally:
+            db.close()
+
+    threads = [threading.Thread(target=worker) for _ in range(n_threads)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+    assert errors == [], errors
+
+    db = SessionLocal()
+    try:
+        row = db.get(
+            AuthRateLimit,
+            {"subject": subject, "window_start_utc": auth_service._window_start()},
+        )
+        assert row is not None
+        assert row.hit_count == n_threads
+    finally:
+        db.close()
+
+
+def test_argon3_authorization_and_cookie_redaction_and_selective_args():
+    """ARGON-3: full Authorization value + Cookie kp_session; user.id survives."""
+    from app.logging_redaction import RedactingFilter, is_sensitive_value, redact_text
+
+    bearer = (
+        "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIn0.signaturepart"
+    )
+    redacted = redact_text(bearer)
+    assert "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" not in redacted
+    assert "[REDACTED]" in redacted
+
+    basic = "authorization: Basic dXNlcjpwYXNz"
+    assert "dXNlcjpwYXNz" not in redact_text(basic)
+
+    cookie = "Cookie: theme=dark; kp_session=eyJ.abc.def; other=1"
+    cookie_out = redact_text(cookie)
+    assert "eyJ.abc.def" not in cookie_out
+    assert "theme=dark" in cookie_out
+
+    set_cookie = "Set-Cookie: kp_session=secretjwtvalue; Path=/; HttpOnly"
+    assert "secretjwtvalue" not in redact_text(set_cookie)
+
+    # sensitive_msg must NOT redact a plain user id just because msg says password
+    record = logging.LogRecord(
+        name="app.auth",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="password reset token issued user_id=%s",
+        args=("usr_abc123_not_a_secret________",),
+        exc_info=None,
+    )
+    RedactingFilter().filter(record)
+    combined = str(record.msg) + str(record.args)
+    assert "usr_abc123_not_a_secret________" in combined
+    assert not is_sensitive_value("usr_abc123_not_a_secret________")
+
+    # But a JWT-shaped arg is redacted
+    jwt_arg = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIn0.sig"
+    record2 = logging.LogRecord(
+        name="app.auth",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="token issued %s",
+        args=(jwt_arg,),
+        exc_info=None,
+    )
+    RedactingFilter().filter(record2)
+    assert jwt_arg not in str(record2.args)
+
+
+def test_argon4_test_support_password_reset_token_loopback_and_fail_closed(client, monkeypatch):
+    """ARGON-4 / TC-4.10-41 / TC-SEC-TS-01: §5.32 loopback-only; 404 outside test."""
+    assert _register(client).status_code == 201
+
+    loopback = TestClient(app, client=("127.0.0.1", 50000))
+    ok = loopback.post(
+        "/api/v1/test-support/password-reset-token",
+        json={"email": AUTH["email"]},
+    )
+    assert ok.status_code == 200, ok.text
+    body = ok.json()
+    assert body["reset_token"]
+    assert "expires_at_utc" in body
+
+    # Non-loopback peer → empty 404 (XFF must not count)
+    remote = TestClient(app, client=("203.0.113.10", 50000))
+    denied = remote.post(
+        "/api/v1/test-support/password-reset-token",
+        json={"email": AUTH["email"]},
+        headers={"X-Forwarded-For": "127.0.0.1"},
+    )
+    assert denied.status_code == 404
+    assert denied.content == b""
+
+    # Outside test mode → 404 even from loopback
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("JWT_SECRET", "production-secret-at-least-32-bytes-long")
+    outside = TestClient(app, client=("127.0.0.1", 50000))
+    prod = outside.post(
+        "/api/v1/test-support/password-reset-token",
+        json={"email": AUTH["email"]},
+    )
+    assert prod.status_code == 404
+    assert prod.content == b""
+    monkeypatch.setenv("APP_ENV", "test")
+
+
+def test_argon5_revoke_other_sessions_skips_expired(client):
+    """ARGON-5: revoked_count matches GET /auth/sessions (ignores expired rows)."""
+    assert _register(client).status_code == 201
+    # Current session
+    assert _login(client).status_code == 200
+    # Second active session via non-browser
+    other = _client()
+    login2 = other.post(
+        "/api/v1/auth/login",
+        json={"identifier": AUTH["email"], "password": AUTH["password"]},
+        headers={"X-Client-Type": "non-browser"},
+    )
+    assert login2.status_code == 200
+    # Third session already expired (should not count)
+    db = SessionLocal()
+    try:
+        user = db.scalar(select(User).where(User.email_norm == AUTH["email"]))
+        db.add(
+            SessionRow(
+                id="jti_expired_argon5________________",
+                user_id=user.id,
+                device_label="expired-device",
+                issued_at_utc=now_utc() - timedelta(hours=5),
+                expires_at_utc=now_utc() - timedelta(minutes=1),
+                last_seen_at=now_utc() - timedelta(hours=4),
+                revoked_at=None,
+            )
+        )
+        db.commit()
+        listed_before = [
+            s
+            for s in db.scalars(
+                select(SessionRow).where(
+                    SessionRow.user_id == user.id,
+                    SessionRow.revoked_at.is_(None),
+                    SessionRow.expires_at_utc > now_utc(),
+                )
+            ).all()
+        ]
+        assert len(listed_before) == 2  # current + other; expired excluded
+    finally:
+        db.close()
+
+    listed = client.get("/api/v1/auth/sessions")
+    assert listed.status_code == 200
+    assert len(listed.json()["items"]) == 2
+
+    revoked = client.delete("/api/v1/auth/sessions")
+    assert revoked.status_code == 200
+    # Only the other active session is revoked — not the expired one.
+    assert revoked.json()["revoked_count"] == 1
