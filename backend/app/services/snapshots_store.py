@@ -403,11 +403,7 @@ def _rebuild_locked(
     written: list[MonthSnapshot] = []
     for month_key in target_keys:
         engine_month = engine_months.get(month_key)
-        month_rows = [
-            row
-            for row in included
-            if row.tx_date.strftime("%Y-%m") == month_key
-        ]
+        month_rows = [row for row in included if row.tx_date.strftime("%Y-%m") == month_key]
         categories = {"pekerjaan_bebas": 0, "already_final": 0, "non_object": 0}
         for row in month_rows:
             if row.category in categories:
