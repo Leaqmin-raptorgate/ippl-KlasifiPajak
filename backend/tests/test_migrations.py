@@ -115,7 +115,7 @@ def test_tc_hard_12_alembic_upgrade_empty_to_head_and_downgrade():
     engine = create_engine(MIGRATE_URL, pool_pre_ping=True)
     with engine.connect() as conn:
         version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
-        assert version == "2ee6fe5471b9"
+        assert version == "1320d317fad2"
         tables = {row[0] for row in conn.execute(text("SHOW TABLES")).fetchall()}
     engine.dispose()
     for required in (
@@ -197,7 +197,7 @@ def test_tc_hard_23_runtime_app_denied_migrate_allowed_ddl():
 
 
 def test_tc_hard_24_uk_fk_indexes_present_after_upgrade():
-    """TC-HARD-24: UK/FK/indexes from ERD + D-11 present after upgrade."""
+    """TC-HARD-24: UK/FK/indexes from ERD r3 + D-11 present after upgrade."""
     if not _mysql_reachable(MIGRATE_URL):
         pytest.skip(f"MySQL not reachable for MIGRATE_URL={MIGRATE_URL}")
     _wipe_schema(MIGRATE_URL)
@@ -273,6 +273,91 @@ def test_tc_hard_24_uk_fk_indexes_present_after_upgrade():
         assert ("transactions", "image_id", "receipt_images") in fks
         assert ("quota_counters", "user_id", "users") in fks
         assert ("payment_events", "order_id", "subscription_orders") in fks
+
+        # ERD r3: null-safe transactions UK via STORED generated duplicate_key
+        gen = conn.execute(
+            text(
+                """
+                SELECT EXTRA, GENERATION_EXPRESSION, COLLATION_NAME
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = 'transactions'
+                  AND COLUMN_NAME = 'duplicate_key'
+                """
+            )
+        ).one()
+        extra, expression, gen_collation = gen
+        assert "GENERATED" in extra.upper()
+        assert "STORED" in extra.upper()
+        assert expression is not None and "invoice_no_norm" in expression
+        assert gen_collation == "utf8mb4_bin"
+
+        uk_tx = {
+            row[0]
+            for row in conn.execute(
+                text(
+                    """
+                    SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS
+                    WHERE TABLE_SCHEMA = DATABASE()
+                      AND TABLE_NAME = 'transactions'
+                      AND CONSTRAINT_TYPE = 'UNIQUE'
+                    """
+                )
+            ).fetchall()
+        }
+        assert "uq_transactions_duplicate_key" in uk_tx
+
+        uk_tx_cols = [
+            row[0]
+            for row in conn.execute(
+                text(
+                    """
+                    SELECT COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE
+                    WHERE TABLE_SCHEMA = DATABASE()
+                      AND TABLE_NAME = 'transactions'
+                      AND CONSTRAINT_NAME = 'uq_transactions_duplicate_key'
+                    ORDER BY ORDINAL_POSITION
+                    """
+                )
+            ).fetchall()
+        ]
+        assert uk_tx_cols == ["duplicate_key"]
+
+        # ERD r3: norm columns use utf8mb4_bin (not 0900_ai_ci)
+        coll_rows = conn.execute(
+            text(
+                """
+                SELECT TABLE_NAME, COLUMN_NAME, COLLATION_NAME
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND (
+                    (TABLE_NAME = 'users' AND COLUMN_NAME IN ('email_norm', 'username_norm'))
+                    OR (TABLE_NAME = 'transactions'
+                        AND COLUMN_NAME IN ('client_name_norm', 'invoice_no_norm'))
+                  )
+                """
+            )
+        ).fetchall()
+        got = {(r[0], r[1]): r[2] for r in coll_rows}
+        for key in (
+            ("users", "email_norm"),
+            ("users", "username_norm"),
+            ("transactions", "client_name_norm"),
+            ("transactions", "invoice_no_norm"),
+        ):
+            assert got.get(key) == "utf8mb4_bin", f"{key} collation={got.get(key)}"
+
+        # ERD r3: instants are DATETIME(6)
+        dt_type = conn.execute(
+            text(
+                """
+                SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = 'users' AND COLUMN_NAME = 'created_at'
+                """
+            )
+        ).scalar()
+        assert dt_type == "datetime(6)"
     engine.dispose()
 
 
@@ -304,3 +389,33 @@ def test_tc_hard_26_dockerfile_healthcheck():
     text = DOCKERFILE.read_text(encoding="utf-8")
     assert re.search(r"^HEALTHCHECK\b", text, re.M)
     assert "/health" in text
+
+
+
+def test_init_db_create_all_fail_closed_allowlist(monkeypatch):
+    """create_all runs only when APP_ENV casefolded is development or test."""
+    import app.db as db_mod
+
+    calls: list[object] = []
+
+    def fake_create_all(bind):  # noqa: ANN001
+        calls.append(bind)
+
+    monkeypatch.setattr(db_mod.Base.metadata, "create_all", fake_create_all)
+
+    for env, expect_call in (
+        ("development", True),
+        ("Development", True),
+        ("test", True),
+        ("TEST", True),
+        ("production", False),
+        ("staging", False),
+        ("", False),
+        ("prod", False),
+    ):
+        calls.clear()
+        monkeypatch.setenv("APP_ENV", env)
+        # Settings() reads env at property access time for app_env
+        monkeypatch.setattr(db_mod, "_settings", db_mod.Settings())
+        db_mod.init_db()
+        assert bool(calls) is expect_call, f"APP_ENV={env!r} calls={calls}"

@@ -1,8 +1,8 @@
 """Database engine and request-scoped sessions.
 
-MySQL 8 is the only supported store (ERD r2). Instants are UTC
+MySQL 8 is the only supported store (ERD r3). Instants are UTC
 ``DATETIME(6)`` values written by the application. Schema changes go through
-Alembic; ``create_all`` is limited to non-production bootstraps and tests.
+Alembic; ``create_all`` is fail-closed to an explicit APP_ENV allowlist.
 """
 
 from collections.abc import Iterator
@@ -11,6 +11,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config.settings import Settings
+
+# create_all only for local/dev and the test suite — never staging/prod/empty.
+_CREATE_ALL_ENVS = frozenset({"development", "test"})
 
 
 class Base(DeclarativeBase):
@@ -32,13 +35,14 @@ def get_db() -> Iterator[Session]:
 
 
 def init_db() -> None:
-    """Create tables for a fresh local/dev database.
+    """Create tables only when ``APP_ENV`` is development or test (fail-closed).
 
-    Production must use Alembic (``alembic upgrade head``) and never relies on
-    ``create_all``. Tests keep using ``Base.metadata.create_all`` in conftest.
+    Production and any other/unknown env must use Alembic
+    (``alembic upgrade head``). Tests also call ``Base.metadata.create_all``
+    directly in conftest.
     """
     import app.models  # noqa: F401  (registers the mappers)
 
-    if _settings.is_production:
+    if _settings.app_env.casefold() not in _CREATE_ALL_ENVS:
         return
     Base.metadata.create_all(engine)
