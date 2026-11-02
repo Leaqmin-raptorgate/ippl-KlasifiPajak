@@ -110,15 +110,22 @@ async function unduh() {
         </p>
       </div>
       <div class="acts">
+        <AppButton v-if="!pajak.dashboard" to="/profil" variant="primary" icon="profil">
+          Buat profil tahun pajak
+        </AppButton>
         <AppButton
-          v-if="CAPABILITIES.workpaperExport"
+          v-else-if="CAPABILITIES.workpaperExport"
           variant="outline"
           icon="unduh"
           @click="unduh"
         >
           Unduh workpaper
         </AppButton>
-        <AppButton to="/transaksi/baru" variant="primary" icon="tambah">
+        <AppButton
+          to="/transaksi/baru"
+          :variant="pajak.dashboard ? 'primary' : 'outline'"
+          icon="tambah"
+        >
           Catat transaksi
         </AppButton>
       </div>
@@ -128,7 +135,12 @@ async function unduh() {
       <div class="hero-grid">
         <div class="hero-main">
           <p class="eyebrow">Sisa omzet bebas pajak</p>
-          <p v-if="pajak.pesan" class="basis" role="alert">{{ pajak.pesan }}</p>
+          <div v-if="!pajak.dashboard && pajak.pesan" class="onboarding-box">
+            <p class="onboarding-teks" role="alert">{{ pajak.pesan }}</p>
+            <AppButton to="/profil" variant="primary" size="sm" icon="profil">
+              Buat profil sekarang
+            </AppButton>
+          </div>
           <p v-if="pdfPesan" class="basis" role="alert">{{ pdfPesan }}</p>
           <p class="big figure">{{ pita ? rupiah(pita.remaining_free_band_idr) : "—" }}</p>
           <p class="basis">
@@ -137,11 +149,21 @@ async function unduh() {
               · terbelah pada {{ bulanTahun(pita.split_month + "-01") }}
             </template>
           </p>
-          <p v-if="omzetBelumTerklasifikasi > 0" class="belum">
-            Dari {{ pita ? rupiah(pita.ytd_usaha_omzet_idr) : "—" }} omzet usaha di pita ini,
-            {{ rupiah(omzetBelumTerklasifikasi) }} masih belum terklasifikasi. Menjawab baris-baris
-            itu akan mengubah angka di atas.
-          </p>
+          <div v-if="omzetBelumTerklasifikasi > 0" class="belum-wrap">
+            <p class="belum">
+              Dari {{ pita ? rupiah(pita.ytd_usaha_omzet_idr) : "—" }} omzet usaha di pita ini,
+              {{ rupiah(omzetBelumTerklasifikasi) }} masih belum terklasifikasi. Menjawab
+              baris-baris itu akan mengubah angka di atas.
+            </p>
+            <AppButton
+              to="/transaksi?kategori=pending"
+              variant="outline"
+              size="sm"
+              icon="helpCircle"
+            >
+              Jawab pertanyaan
+            </AppButton>
+          </div>
           <AppMeter
             v-if="pita"
             class="meter"
@@ -205,9 +227,13 @@ async function unduh() {
           icon="pena"
         />
         <StatCard
-          label="Cap tahun lalu"
+          label="Kelayakan skema (omzet lalu)"
           :value="statusSkema"
-          :caption="lalu ? rupiah(lalu.combined_prior_year_gross_idr) : 'Menunggu dasbor'"
+          :caption="
+            lalu
+              ? `Omzet gabungan: ${rupiah(lalu.combined_prior_year_gross_idr)}`
+              : 'Menunggu dasbor'
+          "
           icon="helpCircle"
           :tone="lalu?.status === 'scheme_ineligible' ? 'warn' : 'default'"
         />
@@ -227,7 +253,7 @@ async function unduh() {
             <span>{{ bulanTahun(bulan.month + "-01") }}</span>
             <span class="figure">omzet {{ rupiahPlain(bulan.usaha_omzet_idr) }}</span>
             <span class="figure">pajak {{ rupiahPlain(bulan.tax_0_5_pct_idr) }}</span>
-            <span class="figure">sisa {{ rupiahPlain(bulan.sisa_bayar_idr) }}</span>
+            <span class="figure">kurang bayar {{ rupiahPlain(bulan.sisa_bayar_idr) }}</span>
             <AppPill
               size="sm"
               :label="OVER_LABEL[bulan.overwithheld_status] ?? bulan.overwithheld_status"
@@ -264,7 +290,11 @@ async function unduh() {
           </svg>
         </RouterLink>
       </div>
-      <TransactionLedger :rows="terbaru" @open="goto" />
+      <TransactionLedger
+        :rows="terbaru"
+        empty-text="Belum ada transaksi yang tercatat tahun ini."
+        @open="goto"
+      />
       <WorkpaperNote class="stamp" />
     </section>
   </div>
@@ -353,8 +383,37 @@ async function unduh() {
 .belum {
   font: var(--t-body-sm);
   color: var(--cat-ask-ink);
-  margin-top: var(--s-2);
   line-height: 1.45;
+}
+
+.belum-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s-2);
+  margin-top: var(--s-2);
+  padding: var(--s-3);
+  border-radius: var(--r-md);
+  background: var(--cat-ask-bg);
+  border: 1px solid var(--cat-ask-line);
+}
+
+.onboarding-box {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s-3);
+  margin-top: var(--s-3);
+  padding: var(--s-4);
+  border-radius: var(--r-md);
+  background: var(--surface-sunken);
+  border: 1px solid var(--hairline-strong);
+}
+
+.onboarding-teks {
+  font: var(--t-body);
+  color: var(--ink);
+  line-height: 1.4;
 }
 
 .meter {

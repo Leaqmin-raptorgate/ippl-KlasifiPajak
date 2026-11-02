@@ -16,7 +16,7 @@ const router = useRouter();
 const route = useRoute();
 const session = useSessionStore();
 
-const mode = ref("masuk");
+const mode = ref(route.query.mode === "daftar" ? "daftar" : "masuk");
 const username = ref("");
 const email = ref("");
 const sandi = ref("");
@@ -58,7 +58,8 @@ async function submit() {
     if (daftar.value) {
       await session.daftar(email.value.trim(), username.value.trim(), sandi.value);
       mode.value = "masuk";
-      info.value = "Akun dibuat. Masuk dengan surel atau nama pengguna.";
+      sandi.value = "";
+      info.value = "Akun dibuat. Masuk dengan surel atau nama pengguna dan kata sandi Anda.";
       return;
     }
     await session.masuk(email.value.trim(), sandi.value);

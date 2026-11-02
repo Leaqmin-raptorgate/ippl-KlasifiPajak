@@ -180,7 +180,8 @@ function aktif(path: string) {
     letter-spacing: var(--track-caption);
     color: inherit;
     opacity: 0.78;
-    padding-inline: 0.25rem;
+    padding-inline: 0.125rem;
+    text-align: center;
   }
 
   .item.on .label {

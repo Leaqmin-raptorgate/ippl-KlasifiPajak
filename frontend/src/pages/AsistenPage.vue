@@ -159,6 +159,26 @@ function isiPertanyaan(teks: string) {
         </div>
       </AppCard>
 
+      <AppCard
+        v-if="!CAPABILITIES.assistantChat"
+        title="Tanya kertas kerja"
+        subtitle="Layanan asisten interaktif saat ini belum diaktifkan pada server ini."
+      >
+        <div class="belum-aktif">
+          <p class="belum-aktif-teks">
+            Fitur tanya-jawab asisten berbasis model bahasa sedang dalam tahap penyiapan. Kertas
+            kerja dan ringkasan pajak Anda tetap dapat dipantau langsung melalui dasbor dan daftar
+            transaksi.
+          </p>
+          <div class="belum-aktif-aksi">
+            <AppButton to="/dasbor" variant="outline" icon="dasbor"> Buka dasbor pajak </AppButton>
+            <AppButton to="/transaksi" variant="outline" icon="transaksi">
+              Buka daftar transaksi
+            </AppButton>
+          </div>
+        </div>
+      </AppCard>
+
       <AppCard class="batas-ases" inset>
         <div class="batas-isi">
           <span class="batas-ic"><AppIcon name="info" :size="18" /></span>
@@ -580,5 +600,23 @@ function isiPertanyaan(teks: string) {
   color: var(--ink-2);
   line-height: 1.5;
   margin-top: var(--s-1);
+}
+
+.belum-aktif {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+
+.belum-aktif-teks {
+  font: var(--t-body);
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+
+.belum-aktif-aksi {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3);
 }
 </style>

@@ -15,7 +15,7 @@ import WorkpaperNote from "@/components/app/WorkpaperNote.vue";
 import { ApiFailure } from "@/lib/api";
 import { CAPABILITIES } from "@/lib/capabilities";
 import { HAPUS_AKUN } from "@/lib/domain";
-import { parseRupiah } from "@/lib/format";
+import { parseRupiah, rupiah, tanggalWaktuJakarta } from "@/lib/format";
 import { useKuotaStore } from "@/stores/kuota";
 import { useProfilStore } from "@/stores/profil";
 import { useSessionStore } from "@/stores/session";
@@ -69,16 +69,71 @@ const kawinOpsi = [
   { value: "yes", label: "Ya" },
 ];
 
+const FIELD_LABELS: Record<string, string> = {
+  name: "Nama",
+  nib_status: "Status NIB",
+  nib_last_4: "Empat digit NIB",
+  kbli_code: "KBLI",
+  business_description: "Uraian usaha",
+  marital_status: "Status perkawinan",
+  spouse_aggregation_active: "Agregasi Pasal 58",
+  is_new_taxpayer_current_year: "Wajib pajak baru",
+  spouse_current_usaha_idr: "Omzet usaha pasangan tahun ini",
+  spouse_current_pekerjaan_bebas_idr: "Pekerjaan bebas pasangan tahun ini",
+  spouse_current_already_final_idr: "Final tersendiri pasangan tahun ini",
+  prior_user_usaha_idr: "Usaha Anda tahun lalu",
+  prior_user_pekerjaan_bebas_idr: "Pekerjaan bebas Anda tahun lalu",
+  prior_user_already_final_idr: "Final tersendiri Anda tahun lalu",
+  prior_spouse_usaha_idr: "Usaha pasangan tahun lalu",
+  prior_spouse_pekerjaan_bebas_idr: "Pekerjaan bebas pasangan tahun lalu",
+  prior_spouse_already_final_idr: "Final tersendiri pasangan tahun lalu",
+};
+
+function labelNib(status?: string, masked?: string | null): string {
+  if (masked) return masked;
+  if (status === "no_nib") return "Tidak punya NIB";
+  if (status === "has_nib") return "Punya NIB";
+  return "Belum diketahui";
+}
+
+function labelKawin(status?: string): string {
+  if (status === "yes") return "Kawin";
+  if (status === "no") return "Tidak kawin";
+  return "Belum diketahui";
+}
+
+function formatNilaiJejak(field: string, val?: string | null): string {
+  if (!val || val === "kosong") return "kosong";
+  if (field === "nib_status") {
+    if (val === "no_nib") return "Tidak punya NIB";
+    if (val === "has_nib") return "Punya NIB";
+    if (val === "unknown") return "Belum diketahui";
+  }
+  if (field === "marital_status") {
+    if (val === "yes") return "Kawin";
+    if (val === "no") return "Tidak kawin";
+    if (val === "unknown") return "Belum diketahui";
+  }
+  if (field === "spouse_aggregation_active" || field === "is_new_taxpayer_current_year") {
+    if (val === "True" || val === "true") return "Ya";
+    if (val === "False" || val === "false") return "Tidak";
+  }
+  if (field.endsWith("_idr") && /^[0-9]+$/.test(val)) {
+    return rupiah(Number(val));
+  }
+  return val;
+}
+
 const baris = computed(() => {
   const p = profil.profile;
   if (!p) return [];
   return [
     { key: "name", label: "Nama", nilai: p.name || "Belum diisi" },
     { key: "entity", label: "Jenis wajib pajak", nilai: "Orang pribadi" },
-    { key: "nib", label: "Status NIB", nilai: p.nib_masked || p.nib_status },
+    { key: "nib", label: "Status NIB", nilai: labelNib(p.nib_status, p.nib_masked) },
     { key: "kbli", label: "KBLI", nilai: p.kbli_code || "Belum diisi" },
     { key: "usaha", label: "Uraian usaha", nilai: p.business_description || "Belum diisi" },
-    { key: "kawin", label: "Status perkawinan", nilai: p.marital_status },
+    { key: "kawin", label: "Status perkawinan", nilai: labelKawin(p.marital_status) },
     {
       key: "pasal",
       label: "Agregasi Pasal 58",
@@ -224,18 +279,27 @@ async function jalankanHapus() {
         Profil tahun ini belum dibuat. Isi status NIB sebelum mencatat transaksi.
       </p>
       <p v-if="galat" class="demo-cat" role="alert">{{ galat }}</p>
-      <dl v-if="!sedangUbah && baris.length" class="baca">
-        <div v-for="b in baris" :key="b.key" class="baca-row">
-          <dt class="u-label">{{ b.label }}</dt>
-          <dd class="nilai figure">{{ b.nilai }}</dd>
+
+      <template v-if="!sedangUbah && baris.length">
+        <dl class="baca">
+          <div v-for="b in baris" :key="b.key" class="baca-row">
+            <dt class="u-label">{{ b.label }}</dt>
+            <dd class="nilai figure">{{ b.nilai }}</dd>
+          </div>
+        </dl>
+        <div v-if="profil.profile?.audit_trail.length" class="riwayat">
+          <p class="u-label riwayat-judul">Riwayat perubahan</p>
+          <ul class="baca">
+            <li v-for="(jejak, i) in profil.profile.audit_trail" :key="i" class="baca-row">
+              <span class="u-label">{{ FIELD_LABELS[jejak.field] || jejak.field }}</span>
+              <span>
+                {{ formatNilaiJejak(jejak.field, jejak.old_value) }} →
+                {{ formatNilaiJejak(jejak.field, jejak.new_value) }}
+              </span>
+            </li>
+          </ul>
         </div>
-      </dl>
-      <ul v-if="profil.profile?.audit_trail.length" class="baca">
-        <li v-for="(jejak, i) in profil.profile.audit_trail" :key="i" class="baca-row">
-          <span class="u-label">{{ jejak.field }}</span>
-          <span>{{ jejak.old_value || "kosong" }} → {{ jejak.new_value || "kosong" }}</span>
-        </li>
-      </ul>
+      </template>
 
       <div v-else class="form">
         <AppField label="Nama" for-id="p-nama">
@@ -403,7 +467,7 @@ async function jalankanHapus() {
         <div v-for="s in profil.sesi" :key="s.id" class="kunci-row">
           <span>
             {{ s.device_label }}
-            <span class="kunci-sub">{{ s.last_seen_at }}</span>
+            <span class="kunci-sub">{{ tanggalWaktuJakarta(s.last_seen_at) }}</span>
           </span>
           <AppPill v-if="s.current" size="sm" label="Perangkat ini" tone="usaha" />
           <AppButton v-else variant="ghost" size="sm" @click="profil.cabut(s.id)">Cabut</AppButton>
@@ -450,8 +514,8 @@ async function jalankanHapus() {
           for-id="konfirmasi-hapus"
           :hint="
             konfirmasi
-              ? 'Harus huruf kapital semua, tanpa spasi di tengah.'
-              : 'Lima huruf kapital, tanpa spasi.'
+              ? `Ketik persis ${HAPUS_AKUN}, huruf kapital semua.`
+              : 'Tiga kata huruf kapital semua, persis seperti contoh di atas.'
           "
         >
           <AppInput
@@ -577,6 +641,18 @@ async function jalankanHapus() {
   color: var(--ink);
   text-align: right;
   overflow-wrap: anywhere;
+}
+
+.riwayat {
+  margin-top: var(--s-5);
+  padding-top: var(--s-4);
+  border-top: 1px solid var(--hairline);
+}
+
+.riwayat-judul {
+  margin-bottom: var(--s-3);
+  font-weight: 600;
+  color: var(--ink-2);
 }
 
 /* ---- Edit mode --------------------------------------------------------- */

@@ -47,7 +47,8 @@ export function rupiahShort(value: number): string {
 
 function trim(value: number): string {
   const fixed = value.toFixed(1);
-  return fixed.endsWith(".0") ? fixed.slice(0, -2) : fixed;
+  const formatted = fixed.endsWith(".0") ? fixed.slice(0, -2) : fixed;
+  return formatted.replace(".", ",");
 }
 
 /** `2026-10-24` -> `24 Okt 2026` */
@@ -76,6 +77,26 @@ export function bulanTahun(iso: string): string {
 export function jam(iso: string): string {
   const [h, m] = iso.split("T")[1]?.split(":") ?? ["00", "00"];
   return `${h}.${m}`;
+}
+
+/** Formats UTC ISO instant to Asia/Jakarta date and time with WIB suffix. */
+export function tanggalWaktuJakarta(iso: string): string {
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    const parts = new Intl.DateTimeFormat("id-ID", {
+      timeZone: "Asia/Jakarta",
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(d);
+    return `${parts.replace(" pukul ", ", ")} WIB`;
+  } catch {
+    return iso;
+  }
 }
 
 export function persen(value: number, digits = 1): string {

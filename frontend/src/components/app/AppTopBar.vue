@@ -8,6 +8,7 @@
 import { computed, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import AppIcon from "@/components/ui/AppIcon.vue";
+import { PUBLIC_RULESET } from "@/lib/domain";
 import { tanggalPanjang } from "@/lib/format";
 import { useKuotaStore } from "@/stores/kuota";
 import { usePajakStore } from "@/stores/pajak";
@@ -21,8 +22,10 @@ const profil = useProfilStore();
 const pajak = usePajakStore();
 const kuota = useKuotaStore();
 const open = ref(false);
-const stampId = computed(() => pajak.dashboard?.metadata.ruleset_id ?? "");
-const stampDate = computed(() => pajak.dashboard?.metadata.effective_date ?? "");
+const stampId = computed(() => pajak.dashboard?.metadata.ruleset_id ?? PUBLIC_RULESET.id);
+const stampDate = computed(
+  () => pajak.dashboard?.metadata.effective_date ?? PUBLIC_RULESET.berlaku,
+);
 const nama = computed(() => profil.profile?.name || session.tampilanNama);
 const usaha = computed(() => profil.profile?.business_description || session.user?.email || "");
 

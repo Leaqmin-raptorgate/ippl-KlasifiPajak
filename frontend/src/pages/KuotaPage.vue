@@ -31,6 +31,12 @@ const ai = computed(() => kuota.quotas?.ai_classification);
 const rencana = computed(() => kuota.status?.available_plans?.[0]);
 const harga = computed(() => (kuota.status ? rupiah(rencana.value?.price_idr ?? 25_000) : "—"));
 
+function statusLabel(status?: string): string {
+  if (status === "active") return "Aktif";
+  if (status === "exhausted") return "Habis";
+  return status || "—";
+}
+
 onMounted(() => {
   void kuota.muat();
 });
@@ -75,7 +81,7 @@ function gantiTema(nilai: string) {
           :value="chat.used"
           :max="chat.limit"
           label="Jawaban asisten"
-          :caption="chat.status"
+          :caption="statusLabel(chat.status)"
         >
           Reset
           {{ kuota.quotas ? tanggalPanjang(kuota.quotas.reset_timestamp_utc) : "belum dimuat" }} ({{
@@ -95,7 +101,7 @@ function gantiTema(nilai: string) {
           :value="ai.used"
           :max="ai.limit"
           label="Klasifikasi AI"
-          :caption="ai.status"
+          :caption="statusLabel(ai.status)"
         >
           Habisnya kuota tidak menolak pencatatan transaksi. Baris tetap tersimpan dan menunggu
           klarifikasi.
@@ -106,31 +112,37 @@ function gantiTema(nilai: string) {
     <section aria-labelledby="h-paket">
       <div class="sec-head">
         <div>
-          <p class="u-eyebrow">Paket</p>
-          <h3 id="h-paket" class="t3">Satu paket berbayar, 30 hari</h3>
+          <p class="u-eyebrow">Status akun</p>
+          <h3 id="h-paket" class="t3">Tingkat akun dan paket</h3>
         </div>
       </div>
 
       <div class="plans">
         <AppCard class="plan" :class="{ on: kuota.berbayar }">
           <div class="plan-top">
-            <h4 class="plan-nama">{{ kuota.labelTier || "Status belum tersedia" }}</h4>
+            <h4 class="plan-nama">Akun {{ kuota.labelTier || "Gratis" }}</h4>
             <AppPill
               v-if="kuota.status"
               tone="accent"
               size="sm"
-              :label="kuota.status.subscription_tier"
+              :label="kuota.status.subscription_tier === 'berbayar' ? 'Berbayar' : 'Gratis'"
               icon="checkCircle"
             />
           </div>
           <div class="plan-harga">
-            <p class="harga figure">{{ harga }}</p>
-            <p class="harga-cat">
-              {{ rencana?.plan_id || "monthly_25k" }} · 30 hari
-              <template v-if="kuota.status?.valid_until_local">
-                · berlaku sampai {{ kuota.status.valid_until_local }}
-              </template>
-            </p>
+            <template v-if="kuota.berbayar">
+              <p class="harga figure">{{ harga }}</p>
+              <p class="harga-cat">
+                Paket aktif · 30 hari
+                <template v-if="kuota.status?.valid_until_local">
+                  · berlaku sampai {{ kuota.status.valid_until_local }}
+                </template>
+              </p>
+            </template>
+            <template v-else>
+              <p class="harga figure">Rp 0</p>
+              <p class="harga-cat">Tingkat gratis · pencatatan transaksi tanpa batas</p>
+            </template>
           </div>
           <p v-if="kuota.pesan || galat || kuota.bayarPesan" class="plan-tag" role="alert">
             {{ galat || kuota.bayarPesan || kuota.pesan }}
@@ -138,6 +150,9 @@ function gantiTema(nilai: string) {
           <div v-if="CAPABILITIES.subscriptionPurchase" class="plan-cta">
             <AppButton variant="primary" block @click="bayar">Buat tautan bayar</AppButton>
           </div>
+          <p v-else-if="!kuota.berbayar" class="plan-tag">
+            Paket berbayar ({{ harga }} / 30 hari) sedang disiapkan dan akan segera tersedia.
+          </p>
           <ul v-if="CAPABILITIES.subscriptionPurchase && kuota.orders.length" class="fitur">
             <li v-for="order in kuota.orders" :key="order.order_id">
               <span class="fitur-label">{{ order.order_id }}</span>
@@ -145,8 +160,7 @@ function gantiTema(nilai: string) {
             </li>
           </ul>
           <p class="plan-kaki">
-            Paket tidak mengubah {{ PUBLIC_RULESET.nama }}. OCR dan PDF workpaper menolak akun yang
-            tidak berbayar.
+            Paket tidak mengubah tarif atau dasar perhitungan {{ PUBLIC_RULESET.nama }}.
           </p>
         </AppCard>
       </div>

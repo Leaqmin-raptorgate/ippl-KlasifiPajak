@@ -53,7 +53,7 @@ def dashboard(db: Session, user: User, tax_year: int, ruleset: Ruleset) -> dict:
     # and the band total must stay the number the engine actually computed.
     provisional = provisional_usaha_total(db, user, tax_year)
     if provisional:
-        note = f"{provisional:,}".replace(",", ".") + " IDR belum terklasifikasi"
+        note = "Rp " + f"{provisional:,}".replace(",", ".") + " belum terklasifikasi"
         annotation = f"{annotation} {note}".strip() if annotation else note
 
     return {
