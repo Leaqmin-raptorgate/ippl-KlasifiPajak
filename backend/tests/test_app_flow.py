@@ -419,6 +419,58 @@ def test_one_account_cannot_read_or_answer_another_accounts_question():
     )
 
 
+# --- HB-27 / TC-HARD-E2E-01 ---------------------------------------------------
+# Five-step API smoke for the demo path (B-08 Must / M50). No live AI, OCR, or
+# payment gateway — same stubbing posture as the rest of this module.
+
+
+DISCLAIMER_LOCKED = "DOKUMEN KERJA (WORKPAPER) — BUKAN SPT RESMI DAN BUKAN PRODUK DJP/CORETAX."
+
+
+def test_hb27_five_step_demo_smoke(client):
+    """register → profile → transaction → dashboard+disclaimer → logout."""
+    # 1. Register + login (cookie session, browser-shaped client).
+    created = _register(
+        client,
+        email="e2e.smoke@example.com",
+        username="e2esmoke",
+    )
+    assert created.status_code == 201, created.text
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"identifier": "e2e.smoke@example.com", "password": AUTH["password"]},
+    )
+    assert login.status_code == 200, login.text
+    assert client.cookies.get("kp_session")
+
+    # 2. Complete orang_pribadi profile for tax year 2026.
+    profile = _profile(client)
+    assert profile.status_code == 200, profile.text
+    assert profile.json()["entity_type"] == "orang_pribadi"
+
+    # 3. Add one usaha transaction via the keyword/rules path.
+    tx = _transaction(client, invoice_no="INV-E2E-HB27")
+    assert tx.status_code == 201, tx.text
+    body = tx.json()
+    assert body["category"] == "usaha"
+    assert body["classification"]["requires_clarification"] is False
+
+    # 4. Dashboard carries the locked WORKPAPER disclaimer (API §3.3 / NFR-08).
+    dashboard = client.get("/api/v1/tax/dashboard?tax_year=2026")
+    assert dashboard.status_code == 200, dashboard.text
+    payload = dashboard.json()
+    assert payload["metadata"]["disclaimer"] == DISCLAIMER_LOCKED
+    assert payload["metadata"]["ruleset_id"]
+    assert payload["thresholds"]["pita_500_juta"]["ytd_usaha_omzet_idr"] == 12_500_000
+    assert payload["monthly_summaries"]
+
+    # 5. Logout revokes the session.
+    logout = client.post("/api/v1/auth/logout")
+    assert logout.status_code == 200, logout.text
+    assert logout.json() == {"revoked": True}
+    assert client.get("/api/v1/auth/me").status_code == 401
+
+
 def _client_fresh():
     """A client with no cookie jar, so each test starts signed out."""
     return TestClient(app)
