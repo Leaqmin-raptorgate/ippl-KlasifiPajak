@@ -1,6 +1,9 @@
 """Storage-lane migration and hardening checks (M50 / HB-18 / HB-21).
 
 TC ids: TC-HARD-12, TC-HARD-23, TC-HARD-24, TC-HARD-25, TC-HARD-26.
+
+Static checks that read repo-root infra files (Dockerfile, docker/mysql-init.sql)
+skip when those paths are absent — the runtime image only COPYs ``backend/``.
 """
 
 from __future__ import annotations
@@ -9,9 +12,11 @@ import os
 import re
 from pathlib import Path
 
+import pymysql
 import pytest
 from alembic.config import Config
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import OperationalError, ProgrammingError
 
 from alembic import command
 
@@ -30,6 +35,34 @@ MIGRATE_URL = os.environ.get(
 )
 
 
+def _mysql_host() -> str:
+    return os.environ.get("MYSQL_HOST", "127.0.0.1")
+
+
+def _mysql_port() -> int:
+    return int(os.environ.get("MYSQL_PORT", "3306"))
+
+
+def _app_dsn() -> str:
+    """Runtime DML user DSN (matches docker/mysql-init.sql + compose)."""
+    if url := os.environ.get("APP_DATABASE_URL"):
+        return url
+    user = os.environ.get("MYSQL_APP_USER", "klasifipajak_app")
+    password = os.environ.get("MYSQL_APP_PASSWORD", "klasifipajak_app")
+    database = os.environ.get("MYSQL_APP_DATABASE", "klasifipajak")
+    return f"mysql+pymysql://{user}:{password}@{_mysql_host()}:{_mysql_port()}/{database}"
+
+
+def _migrate_dsn() -> str:
+    """DDL migration user DSN (matches docker/mysql-init.sql + compose)."""
+    if url := os.environ.get("MIGRATE_DATABASE_URL"):
+        return url
+    user = os.environ.get("MYSQL_MIGRATE_USER", "klasifipajak_migrate")
+    password = os.environ.get("MYSQL_MIGRATE_PASSWORD", "klasifipajak_migrate")
+    database = os.environ.get("MYSQL_MIGRATE_DATABASE", "klasifipajak")
+    return f"mysql+pymysql://{user}:{password}@{_mysql_host()}:{_mysql_port()}/{database}"
+
+
 @pytest.fixture(autouse=True)
 def fresh_database():
     """Override conftest: migration tests own the schema lifecycle."""
@@ -38,7 +71,6 @@ def fresh_database():
 
 def _alembic_config(url: str) -> Config:
     cfg = Config(str(ALEMBIC_INI))
-    # env.py prefers MIGRATE_DATABASE_URL
     os.environ["MIGRATE_DATABASE_URL"] = url
     return cfg
 
@@ -54,11 +86,23 @@ def _wipe_schema(url: str) -> None:
     engine.dispose()
 
 
+def _mysql_reachable(url: str) -> bool:
+    try:
+        engine = create_engine(url, pool_pre_ping=True)
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        engine.dispose()
+        return True
+    except Exception:
+        return False
+
+
 def test_tc_hard_12_alembic_upgrade_empty_to_head_and_downgrade():
     """TC-HARD-12: alembic upgrade empty→head (and downgrade back to base)."""
+    if not _mysql_reachable(MIGRATE_URL):
+        pytest.skip(f"MySQL not reachable for MIGRATE_URL={MIGRATE_URL}")
     _wipe_schema(MIGRATE_URL)
     cfg = _alembic_config(MIGRATE_URL)
-    # cwd must be backend so script_location=alembic resolves
     old = os.getcwd()
     try:
         os.chdir(BACKEND_ROOT)
@@ -89,7 +133,16 @@ def test_tc_hard_12_alembic_upgrade_empty_to_head_and_downgrade():
 
 
 def test_tc_hard_23_app_vs_migrate_mysql_grants_in_init_sql():
-    """TC-HARD-23: init SQL defines distinct app (DML) vs migrate (DDL) users."""
+    """TC-HARD-23 (static): init SQL defines distinct app (DML) vs migrate (DDL) users.
+
+    Skips inside the runtime image, which only COPYs ``backend/`` and has no
+    ``docker/mysql-init.sql`` at the repo root.
+    """
+    if not MYSQL_INIT.is_file():
+        pytest.skip(
+            f"docker/mysql-init.sql not present at {MYSQL_INIT} "
+            "(runtime image copies backend/ only; host/CI checkout runs this assert)"
+        )
     sql = MYSQL_INIT.read_text(encoding="utf-8")
     assert "klasifipajak_app" in sql
     assert "klasifipajak_migrate" in sql
@@ -103,7 +156,6 @@ def test_tc_hard_23_app_vs_migrate_mysql_grants_in_init_sql():
         sql,
         re.I,
     )
-    # App user must not be granted DDL verbs in this file.
     assert not re.search(
         r"GRANT\s+[^;]*\b(CREATE|ALTER|DROP|INDEX|REFERENCES)\b[^;]*klasifipajak_app",
         sql,
@@ -111,8 +163,43 @@ def test_tc_hard_23_app_vs_migrate_mysql_grants_in_init_sql():
     )
 
 
+def test_tc_hard_23_runtime_app_denied_migrate_allowed_ddl():
+    """TC-HARD-23 (runtime): app user cannot DDL; migrate user can.
+
+    Credentials/host come from env matching ``docker/mysql-init.sql`` / compose
+    (``APP_DATABASE_URL`` / ``MIGRATE_DATABASE_URL`` or ``MYSQL_APP_*`` /
+    ``MYSQL_MIGRATE_*``). Skips when MySQL or those users are unreachable.
+    """
+    app_url = _app_dsn()
+    migrate_url = _migrate_dsn()
+    if not _mysql_reachable(app_url):
+        pytest.skip(f"app MySQL user not reachable ({app_url.split('@')[-1]})")
+    if not _mysql_reachable(migrate_url):
+        pytest.skip(f"migrate MySQL user not reachable ({migrate_url.split('@')[-1]})")
+
+    probe = "tc_hard_23_probe_ddl"
+    app_engine = create_engine(app_url, pool_pre_ping=True)
+    with app_engine.connect() as conn:
+        with pytest.raises((OperationalError, ProgrammingError, pymysql.err.Error)) as raised:
+            conn.execute(text(f"CREATE TABLE `{probe}` (id INT PRIMARY KEY)"))
+            conn.commit()
+        # MySQL 1142 = ER_TABLEACCESS_DENIED_ERROR
+        err = str(raised.value)
+        assert "1142" in err or "denied" in err.lower() or "CREATE" in err
+    app_engine.dispose()
+
+    migrate_engine = create_engine(migrate_url, pool_pre_ping=True)
+    with migrate_engine.begin() as conn:
+        conn.execute(text(f"DROP TABLE IF EXISTS `{probe}`"))
+        conn.execute(text(f"CREATE TABLE `{probe}` (id INT PRIMARY KEY)"))
+        conn.execute(text(f"DROP TABLE `{probe}`"))
+    migrate_engine.dispose()
+
+
 def test_tc_hard_24_uk_fk_indexes_present_after_upgrade():
     """TC-HARD-24: UK/FK/indexes from ERD + D-11 present after upgrade."""
+    if not _mysql_reachable(MIGRATE_URL):
+        pytest.skip(f"MySQL not reachable for MIGRATE_URL={MIGRATE_URL}")
     _wipe_schema(MIGRATE_URL)
     cfg = _alembic_config(MIGRATE_URL)
     old = os.getcwd()
@@ -124,7 +211,6 @@ def test_tc_hard_24_uk_fk_indexes_present_after_upgrade():
 
     engine = create_engine(MIGRATE_URL, pool_pre_ping=True)
     with engine.connect() as conn:
-        # D-11 UK (profile_id, month_key, version)
         uk = conn.execute(
             text(
                 """
@@ -154,7 +240,6 @@ def test_tc_hard_24_uk_fk_indexes_present_after_upgrade():
         ]
         assert uk_cols == ["profile_id", "month_key", "version"]
 
-        # Index (profile_id, month_key, status)
         idx_cols = [
             row[0]
             for row in conn.execute(
@@ -171,7 +256,6 @@ def test_tc_hard_24_uk_fk_indexes_present_after_upgrade():
         ]
         assert idx_cols == ["profile_id", "month_key", "status"]
 
-        # Sample FKs
         fks = {
             (row[0], row[1], row[2])
             for row in conn.execute(
@@ -193,14 +277,30 @@ def test_tc_hard_24_uk_fk_indexes_present_after_upgrade():
 
 
 def test_tc_hard_25_dockerfile_non_root_user():
-    """TC-HARD-25: Dockerfile runs as non-root USER."""
+    """TC-HARD-25: Dockerfile runs as non-root USER.
+
+    Skips inside the runtime image (``COPY backend`` only; no repo-root Dockerfile).
+    """
+    if not DOCKERFILE.is_file():
+        pytest.skip(
+            f"Dockerfile not present at {DOCKERFILE} "
+            "(runtime image copies backend/ only; host/CI checkout runs this assert)"
+        )
     text = DOCKERFILE.read_text(encoding="utf-8")
     assert re.search(r"^USER\s+appuser\s*$", text, re.M)
     assert "useradd" in text
 
 
 def test_tc_hard_26_dockerfile_healthcheck():
-    """TC-HARD-26: Dockerfile HEALTHCHECK probes /health."""
+    """TC-HARD-26: Dockerfile HEALTHCHECK probes /health.
+
+    Skips inside the runtime image (``COPY backend`` only; no repo-root Dockerfile).
+    """
+    if not DOCKERFILE.is_file():
+        pytest.skip(
+            f"Dockerfile not present at {DOCKERFILE} "
+            "(runtime image copies backend/ only; host/CI checkout runs this assert)"
+        )
     text = DOCKERFILE.read_text(encoding="utf-8")
     assert re.search(r"^HEALTHCHECK\b", text, re.M)
     assert "/health" in text

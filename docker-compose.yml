@@ -24,6 +24,14 @@ services:
       # pytest create_all needs DDL on the test schema (MYSQL_USER grants).
       DATABASE_URL: mysql+pymysql://klasifipajak:klasifipajak@mysql:3306/klasifipajak_test
       JWT_SECRET: test-secret-change-me
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+      MYSQL_APP_USER: klasifipajak_app
+      MYSQL_APP_PASSWORD: klasifipajak_app
+      MYSQL_MIGRATE_USER: klasifipajak_migrate
+      MYSQL_MIGRATE_PASSWORD: klasifipajak_migrate
+      APP_DATABASE_URL: mysql+pymysql://klasifipajak_app:klasifipajak_app@mysql:3306/klasifipajak
+      MIGRATE_DATABASE_URL: mysql+pymysql://klasifipajak_migrate:klasifipajak_migrate@mysql:3306/klasifipajak
     # Image HEALTHCHECK probes /health; pytest CMD has no listener.
     healthcheck:
       disable: true
