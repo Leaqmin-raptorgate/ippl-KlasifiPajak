@@ -1,7 +1,8 @@
 """Database engine and request-scoped sessions.
 
-MySQL 8 is the only supported store (ERD v1.2.2). Instants are UTC
-``DATETIME(6)`` values written by the application.
+MySQL 8 is the only supported store (ERD r3). Instants are UTC
+``DATETIME(6)`` values written by the application. Schema changes go through
+Alembic only — ``create_all`` is never invoked at API boot (HB-18 / B-11).
 """
 
 from collections.abc import Iterator
@@ -31,7 +32,11 @@ def get_db() -> Iterator[Session]:
 
 
 def init_db() -> None:
-    """Create tables for a fresh local database."""
-    import app.models  # noqa: F401  (registers the mappers)
+    """Register mappers; do not create tables.
 
-    Base.metadata.create_all(engine)
+    Schema is applied by ``alembic upgrade head`` (compose migrate service /
+    ops). Tests call ``Base.metadata.create_all`` in conftest only. Fail-closed
+    when ``APP_ENV`` is unset or any non-test runtime: never ``create_all`` here
+    (B-11), so a DML-only app user cannot hit MySQL 1142 on boot.
+    """
+    import app.models  # noqa: F401  (registers the mappers)

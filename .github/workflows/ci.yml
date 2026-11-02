@@ -53,6 +53,14 @@ jobs:
           --health-retries=20
     env:
       DATABASE_URL: mysql+pymysql://klasifipajak:klasifipajak@127.0.0.1:3306/klasifipajak_test
+      MYSQL_HOST: 127.0.0.1
+      MYSQL_PORT: "3306"
+      MYSQL_APP_USER: klasifipajak_app
+      MYSQL_APP_PASSWORD: klasifipajak_app
+      MYSQL_MIGRATE_USER: klasifipajak_migrate
+      MYSQL_MIGRATE_PASSWORD: klasifipajak_migrate
+      APP_DATABASE_URL: mysql+pymysql://klasifipajak_app:klasifipajak_app@127.0.0.1:3306/klasifipajak
+      MIGRATE_DATABASE_URL: mysql+pymysql://klasifipajak_migrate:klasifipajak_migrate@127.0.0.1:3306/klasifipajak_migrate_test
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -61,6 +69,61 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: pip install -r requirements.txt
+      - name: Bootstrap app/migrate MySQL users (HB-18 / TC-HARD-23)
+        run: |
+          python - <<'PY'
+          import time
+          import pymysql
+
+          for attempt in range(30):
+              try:
+                  conn = pymysql.connect(
+                      host="127.0.0.1",
+                      user="root",
+                      password="root",
+                      autocommit=True,
+                  )
+                  break
+              except pymysql.err.OperationalError:
+                  time.sleep(2)
+          else:
+              raise SystemExit("MySQL not ready")
+
+          cur = conn.cursor()
+          for db in ("klasifipajak", "klasifipajak_migrate_test"):
+              cur.execute(
+                  f"CREATE DATABASE IF NOT EXISTS {db} "
+                  "CHARACTER SET utf8mb4 COLLATE utf8mb4_bin"
+              )
+          # Hosts are fixed literals matching docker/mysql-init.sql.
+          stmts = [
+              "CREATE USER IF NOT EXISTS 'klasifipajak_app'@'%' IDENTIFIED BY 'klasifipajak_app'",
+              "CREATE USER IF NOT EXISTS 'klasifipajak_app'@'localhost' IDENTIFIED BY 'klasifipajak_app'",
+              "CREATE USER IF NOT EXISTS 'klasifipajak_migrate'@'%' IDENTIFIED BY 'klasifipajak_migrate'",
+              "CREATE USER IF NOT EXISTS 'klasifipajak_migrate'@'localhost' IDENTIFIED BY 'klasifipajak_migrate'",
+              "ALTER USER 'klasifipajak_app'@'%' IDENTIFIED BY 'klasifipajak_app'",
+              "ALTER USER 'klasifipajak_app'@'localhost' IDENTIFIED BY 'klasifipajak_app'",
+              "ALTER USER 'klasifipajak_migrate'@'%' IDENTIFIED BY 'klasifipajak_migrate'",
+              "ALTER USER 'klasifipajak_migrate'@'localhost' IDENTIFIED BY 'klasifipajak_migrate'",
+              "GRANT SELECT, INSERT, UPDATE, DELETE ON klasifipajak.* TO 'klasifipajak_app'@'%'",
+              "GRANT SELECT, INSERT, UPDATE, DELETE ON klasifipajak.* TO 'klasifipajak_app'@'localhost'",
+              "GRANT SELECT, INSERT, UPDATE, DELETE ON klasifipajak_test.* TO 'klasifipajak_app'@'%'",
+              "GRANT SELECT, INSERT, UPDATE, DELETE ON klasifipajak_test.* TO 'klasifipajak_app'@'localhost'",
+              "GRANT SELECT, INSERT, UPDATE, DELETE ON klasifipajak_migrate_test.* TO 'klasifipajak_app'@'%'",
+              "GRANT SELECT, INSERT, UPDATE, DELETE ON klasifipajak_migrate_test.* TO 'klasifipajak_app'@'localhost'",
+              "GRANT ALL PRIVILEGES ON klasifipajak.* TO 'klasifipajak_migrate'@'%'",
+              "GRANT ALL PRIVILEGES ON klasifipajak.* TO 'klasifipajak_migrate'@'localhost'",
+              "GRANT ALL PRIVILEGES ON klasifipajak_test.* TO 'klasifipajak_migrate'@'%'",
+              "GRANT ALL PRIVILEGES ON klasifipajak_test.* TO 'klasifipajak_migrate'@'localhost'",
+              "GRANT ALL PRIVILEGES ON klasifipajak_migrate_test.* TO 'klasifipajak_migrate'@'%'",
+              "GRANT ALL PRIVILEGES ON klasifipajak_migrate_test.* TO 'klasifipajak_migrate'@'localhost'",
+              "FLUSH PRIVILEGES",
+          ]
+          for stmt in stmts:
+              cur.execute(stmt)
+          conn.close()
+          print("app/migrate users ready")
+          PY
       - name: Run tests with branch coverage gate (NFR-14)
         run: pytest --cov --cov-fail-under=80 --cov-report=term-missing
 
