@@ -1,18 +1,23 @@
 """Persist month snapshots from stored transactions.
 
 The engine remains the only calculator. This module maps stored rows onto engine
-inputs, runs it once, and writes one *berlaku* row per month from January
-through today's Asia/Jakarta month.
+inputs, runs it once, and writes one *berlaku* row per month in the requested
+range.
 
-D-11 / HB-16: a write never overwrites a berlaku row in place. The prior berlaku
-row is marked ``usang`` and a new row is inserted with ``version + 1``. The
-input_hash and ruleset stamp travel with every new row (B-08 H-07/H-08).
+D-11 / HB-16 / API §5.22: input-changing paths call ``mark_usang`` for affected
+months; ``rebuild`` (and POST recalculate) recompute only ``usang`` months (or
+missing months in a range). A write never overwrites a berlaku row in place:
+the prior berlaku is marked ``usang`` and a new row is inserted with
+``version + 1``, unless the recomputed ``input_hash`` equals the current
+berlaku hash (no-op, no bump).
 
-Race safety: ``rebuild`` takes ``SELECT … FOR UPDATE`` on the profile row (and
-existing snapshot rows for that profile) so concurrent writers for the same
-profile serialize. Inserts that still collide on the
-``(profile_id, month_key, version)`` UK retry inside a savepoint (bounded).
+Race safety: ``rebuild`` takes ``SELECT … FOR UPDATE`` on the profile row as
+its first statement, before any snapshot / max(version) read. UK collisions on
+``(profile_id, month_key, version)`` retry inside a savepoint; exhausted
+retries surface as ``409 VERSION_CONFLICT``.
 """
+
+from __future__ import annotations
 
 from datetime import date
 from zoneinfo import ZoneInfo
@@ -21,6 +26,7 @@ from sqlalchemy import delete, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.api.errors import ApiError
 from app.engine import Profile as EngineProfile
 from app.engine import Ruleset, compute
 from app.engine import Transaction as EngineTransaction
@@ -37,8 +43,9 @@ INELIGIBLE_ANNOTATION = (
 )
 UNVERIFIABLE_ANNOTATION = "Peredaran bruto tahun lalu belum tersedia."
 
-#: Bounded retries when two writers race past the row lock onto the same next version.
 _VERSION_INSERT_RETRIES = 3
+
+VERSION_CONFLICT_MESSAGE = "Data ini sudah diubah di perangkat lain. Muat ulang, lalu simpan lagi."
 
 
 def today_jakarta() -> date:
@@ -73,8 +80,15 @@ def transaction_to_engine(row: TransactionRow) -> EngineTransaction:
     )
 
 
+def month_keys_through(tax_year: int, start_month: int, *, end_month: int = 12) -> list[str]:
+    """Inclusive month_key list from ``start_month`` through ``end_month``."""
+    first = max(1, min(12, start_month))
+    last = max(first, min(12, end_month))
+    return [f"{tax_year}-{index:02d}" for index in range(first, last + 1)]
+
+
 def mark_usang(db: Session, profile: ProfileRow, month_keys: list[str] | None = None) -> int:
-    """Mark berlaku rows ``usang`` for FR-23a stale signalling.
+    """Mark berlaku rows ``usang`` for FR-23a stale signalling (API §5.22).
 
     When ``month_keys`` is None every berlaku row for the profile is marked.
     Returns how many rows flipped.
@@ -84,6 +98,8 @@ def mark_usang(db: Session, profile: ProfileRow, month_keys: list[str] | None = 
         MonthSnapshot.status == "berlaku",
     ]
     if month_keys is not None:
+        if not month_keys:
+            return 0
         conditions.append(MonthSnapshot.month_key.in_(month_keys))
     rows = db.scalars(select(MonthSnapshot).where(*conditions).with_for_update()).all()
     for row in rows:
@@ -92,30 +108,22 @@ def mark_usang(db: Session, profile: ProfileRow, month_keys: list[str] | None = 
     return len(rows)
 
 
-def _lock_profile_and_snapshots(db: Session, profile: ProfileRow) -> ProfileRow:
-    """Serialize writers for one profile via row locks inside the caller's txn.
-
-    Returns the caller's ``profile`` instance (not a re-loaded row) so unflushed
-    mutations — e.g. profile PUT before rebuild — stay visible to the engine.
-    """
-    # Explicit SQL so the lock is always emitted even if the ORM identity map
-    # already holds the Profile row from an earlier SELECT in this session.
+def _lock_profile(db: Session, profile: ProfileRow) -> None:
+    """First statement of a rebuild: exclusive lock on the profile row."""
     db.execute(
         text("SELECT id FROM profiles WHERE id = :id FOR UPDATE"),
         {"id": profile.id},
     )
-    # Lock every existing snapshot row for this profile so version bumps see a
-    # stable set (and so a concurrent rebuild cannot insert while we read max).
+
+
+def _lock_snapshots(db: Session, profile_id: str) -> None:
     db.execute(
         text("SELECT id FROM month_snapshots WHERE profile_id = :pid FOR UPDATE"),
-        {"pid": profile.id},
+        {"pid": profile_id},
     )
-    return profile
 
 
 def _next_version(db: Session, profile_id: str, month_key: str) -> int:
-    # Locking read: under MySQL REPEATABLE READ a plain MAX() would keep the
-    # pre-wait snapshot and collide with a writer we just serialized behind.
     row = db.execute(
         text(
             "SELECT COALESCE(MAX(version), 0) AS v FROM month_snapshots "
@@ -127,7 +135,6 @@ def _next_version(db: Session, profile_id: str, month_key: str) -> int:
 
 
 def _mark_month_usang(db: Session, profile_id: str, month_key: str) -> None:
-    """Flip every berlaku row for one month to usang (heals dual-berlaku too)."""
     priors = db.scalars(
         select(MonthSnapshot)
         .where(
@@ -139,6 +146,10 @@ def _mark_month_usang(db: Session, profile_id: str, month_key: str) -> None:
     ).all()
     for prior in priors:
         prior.status = "usang"
+
+
+def _raise_version_conflict() -> None:
+    raise ApiError(409, "VERSION_CONFLICT", VERSION_CONFLICT_MESSAGE)
 
 
 def _insert_berlaku_month(
@@ -195,53 +206,81 @@ def _insert_berlaku_month(
                 return snapshot_row
         except IntegrityError as exc:
             last_error = exc
-            # Savepoint rolled back; re-read max(version) on the next attempt.
             continue
-    assert last_error is not None
-    raise last_error
+    if last_error is not None:
+        db.rollback()
+        _raise_version_conflict()
+    raise RuntimeError("unreachable")  # pragma: no cover
 
 
-def rebuild(db: Session, profile: ProfileRow, ruleset: Ruleset) -> list[MonthSnapshot]:
-    """Recompute every month through today for one stored profile.
+def rebuild(
+    db: Session,
+    profile: ProfileRow,
+    ruleset: Ruleset,
+    *,
+    month_keys: list[str] | None = None,
+    only_usang: bool = False,
+) -> list[MonthSnapshot]:
+    """Recompute snapshot months for one profile under the profile-row lock.
 
-    Each month that already has a berlaku row is versioned: every old berlaku
-    becomes ``usang`` and a new ``berlaku`` row is inserted with ``version + 1``.
-    Concurrent rebuilds for the same profile serialize on a profile row lock;
-    UK collisions on ``(profile_id, month_key, version)`` retry up to
-    ``_VERSION_INSERT_RETRIES`` times (per month and once more for the whole pass).
+    Parameters
+    ----------
+    month_keys:
+        When set, only these months are candidates (still filtered by
+        ``only_usang`` when that flag is true). When ``None`` and
+        ``only_usang`` is false, rebuilds January through December of the
+        ruleset tax year for any missing/usang month in that band.
+    only_usang:
+        When true (POST recalculate / API §5.22), only months whose current
+        status is ``usang`` are recomputed. Untouched ``berlaku`` rows stay.
     """
-    locked_profile = _lock_profile_and_snapshots(db, profile)
+    # BLOCKER 1: profile FOR UPDATE is the first statement — before any
+    # snapshot or max(version) read.
+    _lock_profile(db, profile)
+    _lock_snapshots(db, profile.id)
 
     last_error: IntegrityError | None = None
     for _pass in range(_VERSION_INSERT_RETRIES):
         try:
             with db.begin_nested():
-                return _rebuild_locked(db, locked_profile, ruleset)
+                return _rebuild_locked(
+                    db,
+                    profile,
+                    ruleset,
+                    month_keys=month_keys,
+                    only_usang=only_usang,
+                )
         except IntegrityError as exc:
             last_error = exc
-            # Re-lock snapshot rows so the next pass sees committed peers.
-            db.execute(
-                text("SELECT id FROM month_snapshots WHERE profile_id = :pid FOR UPDATE"),
-                {"pid": locked_profile.id},
-            )
+            _lock_snapshots(db, profile.id)
             continue
-    assert last_error is not None
-    raise last_error
+        except ApiError:
+            raise
+    if last_error is not None:
+        db.rollback()
+        _raise_version_conflict()
+    raise RuntimeError("unreachable")  # pragma: no cover
 
 
 def _rebuild_locked(
-    db: Session, locked_profile: ProfileRow, ruleset: Ruleset
+    db: Session,
+    profile: ProfileRow,
+    ruleset: Ruleset,
+    *,
+    month_keys: list[str] | None,
+    only_usang: bool,
 ) -> list[MonthSnapshot]:
     rows = db.scalars(
         select(TransactionRow).where(
-            TransactionRow.user_id == locked_profile.user_id,
+            TransactionRow.user_id == profile.user_id,
             TransactionRow.tx_date >= date(ruleset.tax_year, 1, 1),
             TransactionRow.tx_date <= date(ruleset.tax_year, 12, 31),
         )
     ).all()
     engine_rows = [transaction_to_engine(row) for row in rows]
-    engine_profile = profile_to_engine(locked_profile)
-    as_of = today_jakarta()
+    engine_profile = profile_to_engine(profile)
+    # Through December so §5.12 PUT range (earliest month → Dec) is computable.
+    as_of = date(ruleset.tax_year, 12, 31)
     snapshot = compute(engine_rows, engine_profile, ruleset, as_of)
 
     if snapshot.prior_year_resolution_source == "unverifiable":
@@ -254,12 +293,44 @@ def _rebuild_locked(
         scheme_status = "scheme_eligible"
         annotation = ""
 
-    last_month = min(as_of.month, 12) if as_of.year == ruleset.tax_year else 12
-    written: list[MonthSnapshot] = []
     engine_months = {month.month: month for month in snapshot.months}
+    today = today_jakarta()
+    default_end = 12 if today.year != ruleset.tax_year else max(today.month, 1)
 
-    for index in range(1, last_month + 1):
-        month_key = f"{ruleset.tax_year}-{index:02d}"
+    if month_keys is None:
+        candidate_keys = month_keys_through(ruleset.tax_year, 1, end_month=default_end)
+    else:
+        candidate_keys = list(month_keys)
+
+    if only_usang:
+        # §5.22: only months currently without a berlaku row (stale after
+        # mark_usang). Historical usang siblings of a live berlaku are ignored.
+        conditions = [
+            MonthSnapshot.profile_id == profile.id,
+            MonthSnapshot.status == "usang",
+        ]
+        if month_keys is not None:
+            conditions.append(MonthSnapshot.month_key.in_(candidate_keys))
+        usang_keys = {
+            row.month_key for row in db.scalars(select(MonthSnapshot).where(*conditions)).all()
+        }
+        berlaku_keys = {
+            row.month_key
+            for row in db.scalars(
+                select(MonthSnapshot).where(
+                    MonthSnapshot.profile_id == profile.id,
+                    MonthSnapshot.status == "berlaku",
+                )
+            ).all()
+        }
+        target_keys = sorted(usang_keys - berlaku_keys)
+    else:
+        # Create/update path: rebuild the candidate band; leave matching-hash
+        # berlaku untouched (hash no-op).
+        target_keys = candidate_keys
+
+    written: list[MonthSnapshot] = []
+    for month_key in target_keys:
         engine_month = engine_months.get(month_key)
         month_rows = [row for row in rows if row.tx_date.strftime("%Y-%m") == month_key]
         categories = {"pekerjaan_bebas": 0, "already_final": 0, "non_object": 0}
@@ -278,9 +349,25 @@ def _rebuild_locked(
             )
         )
 
+        current_berlaku = db.scalar(
+            select(MonthSnapshot)
+            .where(
+                MonthSnapshot.profile_id == profile.id,
+                MonthSnapshot.month_key == month_key,
+                MonthSnapshot.status == "berlaku",
+            )
+            .with_for_update()
+        )
+        if current_berlaku is not None and current_berlaku.input_hash == input_hash:
+            # No-op: inputs unchanged — keep the berlaku row, no version bump.
+            written.append(current_berlaku)
+            continue
+
+        # D-11 / §5.22: once a month is usang (or missing), insert version+1.
+        # Hash no-op above only skips when a berlaku row already matches.
         snapshot_row = _insert_berlaku_month(
             db,
-            profile=locked_profile,
+            profile=profile,
             month_key=month_key,
             ruleset=ruleset,
             scheme_status=scheme_status,
@@ -293,21 +380,22 @@ def _rebuild_locked(
         )
         written.append(snapshot_row)
 
-    # Months beyond the current Jakarta month do not exist yet — drop future
-    # berlaku placeholders left from an earlier as_of (keep usang history).
-    future_berlaku = db.scalars(
-        select(MonthSnapshot)
-        .where(
-            MonthSnapshot.profile_id == locked_profile.id,
-            MonthSnapshot.status == "berlaku",
-            MonthSnapshot.month_key > f"{ruleset.tax_year}-{last_month:02d}",
-        )
-        .with_for_update()
-    ).all()
-    if future_berlaku:
-        db.execute(
-            delete(MonthSnapshot).where(MonthSnapshot.id.in_([r.id for r in future_berlaku]))
-        )
+    # Drop future berlaku placeholders beyond "today" only on the default seed
+    # path. Explicit month_keys (e.g. §5.12 earliest→Dec) must keep Dec.
+    if month_keys is None:
+        future_berlaku = db.scalars(
+            select(MonthSnapshot)
+            .where(
+                MonthSnapshot.profile_id == profile.id,
+                MonthSnapshot.status == "berlaku",
+                MonthSnapshot.month_key > f"{ruleset.tax_year}-{default_end:02d}",
+            )
+            .with_for_update()
+        ).all()
+        if future_berlaku:
+            db.execute(
+                delete(MonthSnapshot).where(MonthSnapshot.id.in_([r.id for r in future_berlaku]))
+            )
     db.flush()
     return written
 

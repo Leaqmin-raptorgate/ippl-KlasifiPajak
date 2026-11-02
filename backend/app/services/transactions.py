@@ -31,7 +31,12 @@ from app.schemas.transaction import (
 from app.security import iso_utc, new_id, now_utc
 from app.services.profile import find_profile
 from app.services.snapshot import DISCLAIMER
-from app.services.snapshots_store import get_berlaku, rebuild
+from app.services.snapshots_store import (
+    get_berlaku,
+    mark_usang,
+    month_keys_through,
+    rebuild,
+)
 
 _SOURCE_CHANNELS = frozenset({"marketplace", "corporate_client", "retail", "other"})
 
@@ -54,6 +59,24 @@ _CLARIFICATION_QUESTION = (
 def normalize_text(value: str) -> str:
     """NFKC, collapse whitespace, casefold. The database does not casefold."""
     return " ".join(unicodedata.normalize("NFKC", value).casefold().split())
+
+
+def _month_key(d: date) -> str:
+    return d.strftime("%Y-%m")
+
+
+def _stale_and_rebuild(
+    db: Session,
+    profile,
+    ruleset: Ruleset,
+    *,
+    from_month: int,
+    end_month: int = 12,
+) -> list:
+    """Mark affected months usang then recompute them (FR-23a / API §5.12/§5.22)."""
+    keys = month_keys_through(ruleset.tax_year, from_month, end_month=end_month)
+    mark_usang(db, profile, keys)
+    return rebuild(db, profile, ruleset, month_keys=keys, only_usang=False)
 
 
 def _out(row: TransactionRow, classification: ClassificationOut | None = None) -> TransactionOut:
@@ -210,7 +233,7 @@ def create_transaction(
             effective_date=date.fromisoformat(ruleset.effective_date),
         )
     )
-    rebuild(db, profile, ruleset)
+    _stale_and_rebuild(db, profile, ruleset, from_month=payload.tx_date.month)
     db.commit()
 
     return row_out(row)
@@ -335,7 +358,7 @@ def answer_clarification(
             effective_date=date.fromisoformat(ruleset.effective_date),
         )
     )
-    rebuild(db, profile, ruleset)
+    _stale_and_rebuild(db, profile, ruleset, from_month=row.tx_date.month)
     db.commit()
     return row_out(row)
 
@@ -391,6 +414,7 @@ def update_transaction(
                 "Nomor faktur ini sudah tercatat untuk klien, nominal, dan tanggal yang sama.",
             )
 
+    old_month = row.tx_date.month
     row.tx_date = payload.tx_date
     row.amount_idr = payload.amount_idr
     row.withheld_tax_amount_idr = payload.withheld_tax_amount_idr
@@ -401,7 +425,8 @@ def update_transaction(
     row.invoice_no_norm = invoice_norm
     row.source_channel = payload.source_channel
     row.version += 1
-    rebuild(db, profile, ruleset)
+    start = min(old_month, payload.tx_date.month)
+    _stale_and_rebuild(db, profile, ruleset, from_month=start, end_month=12)
     db.commit()
     return row_out(row)
 
@@ -417,9 +442,10 @@ def delete_transaction(db: Session, user: User, transaction_id: str, ruleset: Ru
         select(ClassificationEvent).where(ClassificationEvent.transaction_id == row.id)
     ).all():
         db.delete(event)
+    deleted_month = row.tx_date.month
     db.delete(row)
     db.flush()
-    rebuild(db, profile, ruleset)
+    _stale_and_rebuild(db, profile, ruleset, from_month=deleted_month, end_month=12)
     db.commit()
     return {"deleted": True, "id": transaction_id}
 
@@ -462,7 +488,7 @@ def override_category(
             effective_date=date.fromisoformat(ruleset.effective_date),
         )
     )
-    rebuild(db, profile, ruleset)
+    _stale_and_rebuild(db, profile, ruleset, from_month=row.tx_date.month, end_month=12)
     db.commit()
     return row_out(row)
 
@@ -536,7 +562,8 @@ def reclassify_transactions(
                 "source": row.source,
             }
         )
-    rebuild(db, profile, ruleset)
+    start = min(r.tx_date.month for r in rows)
+    _stale_and_rebuild(db, profile, ruleset, from_month=start, end_month=12)
     db.commit()
     return {"reclassified_count": len(results), "results": results}
 
@@ -573,7 +600,8 @@ def audit_trail(db: Session, user: User, transaction_id: str) -> AuditTrailOut:
 def recalculate_snapshots(db: Session, user: User, tax_year: int, ruleset: Ruleset) -> dict:
     """POST /tax/snapshots/{tax_year}/recalculate (FR-23a / API §5.22).
 
-    Rebuilds versioned berlaku rows (prior berlaku → usang, version + 1).
+    Only months marked ``usang`` are recomputed. Matching ``input_hash`` is a
+    no-op (no version bump).
     """
     if tax_year != ruleset.tax_year:
         raise ApiError(422, "INVALID_DATE_RANGE", f"Tahun pajak harus {ruleset.tax_year}.")
@@ -584,8 +612,7 @@ def recalculate_snapshots(db: Session, user: User, tax_year: int, ruleset: Rules
             "PROFILE_NOT_FOUND",
             "Profil untuk tahun pajak yang dipilih belum dibuat.",
         )
-    # rebuild() marks prior berlaku → usang and inserts version+1 (D-11).
-    written = rebuild(db, profile, ruleset)
+    written = rebuild(db, profile, ruleset, only_usang=True)
     db.commit()
     return {
         "recalculated_tax_year": tax_year,

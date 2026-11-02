@@ -1,19 +1,22 @@
-"""M50 Tax lane: CRUD, override, audit trail, snapshot versioning, quotas.
+"""M50 Tax lane tests with catalog TC ids (asserted, not docstring-only)."""
 
-TC ids referenced: TC-4.3-41…52, TC-4.5-54…59, TC-4.6-24…32, API §5.17 VERSION_CONFLICT.
-"""
+from datetime import timedelta
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.db import SessionLocal
-from app.models import MonthSnapshot
+from app.models import ClassificationEvent, MonthSnapshot, Profile, QuotaCounter, User
+from app.security import now_utc
+from app.services.snapshot import DISCLAIMER
 
 AUTH = {
     "email": "taxlane@example.com",
     "username": "taxlaneuser",
     "password": "PasswordMinimal10",
 }
+
+EXACT_DISCLAIMER = "DOKUMEN KERJA (WORKPAPER) — BUKAN SPT RESMI DAN BUKAN PRODUK DJP/CORETAX."
 
 
 def _register(client, **overrides):
@@ -22,10 +25,13 @@ def _register(client, **overrides):
     return client.post("/api/v1/auth/register", json=payload)
 
 
-def _login(client):
+def _login(client, email=None, password=None):
     return client.post(
         "/api/v1/auth/login",
-        json={"identifier": AUTH["email"], "password": AUTH["password"]},
+        json={
+            "identifier": email or AUTH["email"],
+            "password": password or AUTH["password"],
+        },
     )
 
 
@@ -65,13 +71,29 @@ def _tx(client, **overrides):
     return client.post("/api/v1/transactions", json=payload)
 
 
+def _assert_one_berlaku_contiguous(db, profile_id: str, month_key: str) -> int:
+    rows = db.scalars(
+        select(MonthSnapshot)
+        .where(
+            MonthSnapshot.profile_id == profile_id,
+            MonthSnapshot.month_key == month_key,
+        )
+        .order_by(MonthSnapshot.version)
+    ).all()
+    assert rows, f"expected snapshots for {month_key}"
+    berlaku = [r for r in rows if r.status == "berlaku"]
+    assert len(berlaku) == 1, [(r.version, r.status) for r in rows]
+    versions = [r.version for r in rows]
+    assert versions == list(range(1, len(rows) + 1)), versions
+    assert berlaku[0].version == versions[-1]
+    return berlaku[0].version
+
+
 def test_tc_4_3_41_edit_amount_rebuilds_and_bumps_version(client):
-    """TC-4.3-41 FR-08 — edit amount; dashboard changes; version increments."""
+    """TC-4.3-41 FR-08 — edit amount; dashboard changes; prior month row usang."""
     _auth(client)
     assert _profile(client).status_code == 200
-    created = _tx(client)
-    assert created.status_code == 201
-    body = created.json()
+    body = _tx(client).json()
     assert body["version"] == 1
 
     edited = client.put(
@@ -95,9 +117,66 @@ def test_tc_4_3_41_edit_amount_rebuilds_and_bumps_version(client):
     assert dashboard["thresholds"]["pita_500_juta"]["ytd_usaha_omzet_idr"] == 20_000_000
     assert all(row["status"] == "berlaku" for row in dashboard["monthly_summaries"])
 
+    me = client.get("/api/v1/auth/me").json()
+    db = SessionLocal()
+    try:
+        profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
+        rows = db.scalars(
+            select(MonthSnapshot)
+            .where(
+                MonthSnapshot.profile_id == profile.id,
+                MonthSnapshot.month_key == "2026-10",
+            )
+            .order_by(MonthSnapshot.version)
+        ).all()
+        assert any(r.status == "usang" for r in rows)
+        assert rows[-1].status == "berlaku"
+    finally:
+        db.close()
+
+
+def test_tc_4_3_42_put_moves_month_rebuilds_earlier_through_december(client):
+    """TC-4.3-42 — move tx_date Oct→Mar rebuilds March through December."""
+    _auth(client)
+    assert _profile(client).status_code == 200
+    body = _tx(client).json()
+    me = client.get("/api/v1/auth/me").json()
+    db = SessionLocal()
+    try:
+        profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
+        before_march = _assert_one_berlaku_contiguous(db, profile.id, "2026-03")
+    finally:
+        db.close()
+
+    moved = client.put(
+        f"/api/v1/transactions/{body['id']}",
+        json={
+            "amount_idr": 12_500_000,
+            "tx_date": "2026-03-10",
+            "client_name": "PT Sumber Makmur",
+            "description": "Penjualan sembako",
+            "invoice_no": "INV-TAX-001",
+            "withheld_tax_amount_idr": 0,
+            "source_channel": "corporate_client",
+            "version": 1,
+        },
+    )
+    assert moved.status_code == 200, moved.text
+
+    db = SessionLocal()
+    try:
+        profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
+        after_march = _assert_one_berlaku_contiguous(db, profile.id, "2026-03")
+        assert after_march > before_march
+        # October was in the rebuild band (Mar–Dec) and must still be single berlaku.
+        _assert_one_berlaku_contiguous(db, profile.id, "2026-10")
+        _assert_one_berlaku_contiguous(db, profile.id, "2026-12")
+    finally:
+        db.close()
+
 
 def test_tc_4_3_43_put_stale_version_conflict(client):
-    """TC-4.3-43 / API §5.12 — stale version → 409 VERSION_CONFLICT."""
+    """TC-4.3-43 / API §5.12 — stale version → 409; no partial write."""
     _auth(client)
     assert _profile(client).status_code == 200
     body = _tx(client).json()
@@ -116,28 +195,159 @@ def test_tc_4_3_43_put_stale_version_conflict(client):
     )
     assert stale.status_code == 409
     assert stale.json()["error"]["code"] == "VERSION_CONFLICT"
+    got = client.get(f"/api/v1/transactions/{body['id']}").json()
+    assert got["amount_idr"] == 12_500_000
+    assert got["version"] == 1
 
 
-def test_api_5_17_clarification_version_conflict(client):
-    """API §5.17 — clarification with mismatched version → 409 VERSION_CONFLICT."""
+def test_tc_4_3_44_put_other_account_is_404(client):
+    """TC-4.3-44 — PUT another account's transaction → 404 TRANSACTION_NOT_FOUND."""
     _auth(client)
     assert _profile(client).status_code == 200
-    created = _tx(
-        client,
-        description="qqqq zzzz xxxx",
-        invoice_no="INV-CLAR-VER",
-        client_name="Dinas",
-    )
-    assert created.status_code == 201
-    tx_id = created.json()["id"]
-    assert created.json()["classification"]["requires_clarification"] is True
+    body = _tx(client).json()
 
-    conflict = client.post(
-        f"/api/v1/transactions/{tx_id}/clarification",
-        json={"category": "usaha", "version": 99},
+    other = TestClient(client.app)
+    assert (
+        other.post(
+            "/api/v1/auth/register",
+            json={
+                "email": "putidor@example.com",
+                "username": "putidor",
+                "password": "PasswordMinimal10",
+            },
+        ).status_code
+        == 201
     )
-    assert conflict.status_code == 409
-    assert conflict.json()["error"]["code"] == "VERSION_CONFLICT"
+    assert (
+        other.post(
+            "/api/v1/auth/login",
+            json={"identifier": "putidor@example.com", "password": "PasswordMinimal10"},
+        ).status_code
+        == 200
+    )
+    resp = other.put(
+        f"/api/v1/transactions/{body['id']}",
+        json={
+            "amount_idr": 1,
+            "tx_date": "2026-10-15",
+            "client_name": "X",
+            "description": "Y",
+            "invoice_no": "Z",
+            "withheld_tax_amount_idr": 0,
+            "source_channel": "other",
+            "version": 1,
+        },
+    )
+    assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "TRANSACTION_NOT_FOUND"
+
+
+def test_tc_4_3_45_description_only_keeps_classification(client):
+    """TC-4.3-45 — description-only edit stores text; classification not re-run."""
+    _auth(client)
+    assert _profile(client).status_code == 200
+    body = _tx(client).json()
+    assert body["category"] == "usaha"
+    edited = client.put(
+        f"/api/v1/transactions/{body['id']}",
+        json={
+            "amount_idr": body["amount_idr"],
+            "tx_date": "2026-10-15",
+            "client_name": body["client_name"],
+            "description": "Penjualan sembako — catatan tambahan",
+            "invoice_no": body["invoice_no"],
+            "withheld_tax_amount_idr": 0,
+            "source_channel": "corporate_client",
+            "version": 1,
+        },
+    )
+    assert edited.status_code == 200
+    assert edited.json()["category"] == "usaha"
+    assert edited.json()["source"] == "rule"
+    assert "catatan tambahan" in edited.json()["description"]
+
+
+def test_tc_4_3_46_rejects_non_positive_amount(client):
+    """TC-4.3-46 — amount ≤ 0 rejected by validation."""
+    _auth(client)
+    assert _profile(client).status_code == 200
+    body = _tx(client).json()
+    bad = client.put(
+        f"/api/v1/transactions/{body['id']}",
+        json={
+            "amount_idr": 0,
+            "tx_date": "2026-10-15",
+            "client_name": "PT Sumber Makmur",
+            "description": "Penjualan sembako",
+            "invoice_no": "INV-TAX-001",
+            "withheld_tax_amount_idr": 0,
+            "source_channel": "corporate_client",
+            "version": 1,
+        },
+    )
+    assert bad.status_code == 422
+
+
+def test_tc_4_3_47_failed_rebuild_after_edit_leaves_usang(client, monkeypatch):
+    """TC-4.3-47 — mark_usang then fault mid-rebuild leaves cuplikan usang (FR-23a)."""
+    from app.engine.ruleset import load_ruleset
+    from app.services import snapshots_store
+    from app.services.snapshots_store import mark_usang
+
+    _auth(client)
+    assert _profile(client).status_code == 200
+    assert _tx(client).status_code == 201
+    me = client.get("/api/v1/auth/me").json()
+
+    db = SessionLocal()
+    try:
+        profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
+        mark_usang(db, profile, ["2026-10"])
+        db.commit()
+    finally:
+        db.close()
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("injected engine fault")
+
+    monkeypatch.setattr(snapshots_store, "compute", boom)
+
+    db = SessionLocal()
+    try:
+        profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
+        try:
+            snapshots_store.rebuild(db, profile, load_ruleset(), only_usang=True)
+            db.commit()
+            raised = False
+        except RuntimeError:
+            db.rollback()
+            raised = True
+        assert raised
+    finally:
+        db.close()
+
+    db = SessionLocal()
+    try:
+        profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
+        assert (
+            db.scalars(
+                select(MonthSnapshot).where(
+                    MonthSnapshot.profile_id == profile.id,
+                    MonthSnapshot.month_key == "2026-10",
+                    MonthSnapshot.status == "berlaku",
+                )
+            ).all()
+            == []
+        )
+        assert db.scalars(
+            select(MonthSnapshot).where(
+                MonthSnapshot.profile_id == profile.id,
+                MonthSnapshot.month_key == "2026-10",
+                MonthSnapshot.status == "usang",
+            )
+        ).all()
+    finally:
+        db.close()
 
 
 def test_tc_4_3_48_delete_cascades_events_and_rebuilds(client):
@@ -183,6 +393,49 @@ def test_tc_4_3_49_delete_other_account_is_404(client):
     assert other.delete(f"/api/v1/transactions/{body['id']}").status_code == 404
 
 
+def test_tc_4_3_50_delete_sole_month_tx_zeroes_snapshot(client):
+    """TC-4.3-50 — deleting the only tx of a month leaves zero money fields."""
+    _auth(client)
+    assert _profile(client).status_code == 200
+    body = _tx(client).json()
+    assert client.delete(f"/api/v1/transactions/{body['id']}").status_code == 200
+    snap = client.get("/api/v1/tax/snapshots/2026/2026-10")
+    assert snap.status_code == 200
+    assert snap.json()["usaha_omzet_idr"] == 0
+    assert snap.json()["status"] == "berlaku"
+
+
+def test_tc_4_3_52_delete_without_session_is_401():
+    """TC-4.3-52 — unauthenticated DELETE → 401."""
+    from app.main import app
+
+    bare = TestClient(app)
+    resp = bare.delete("/api/v1/transactions/tx_does_not_exist")
+    assert resp.status_code == 401
+
+
+def test_api_5_17_clarification_version_conflict(client):
+    """API §5.17 — clarification with mismatched version → 409 VERSION_CONFLICT."""
+    _auth(client)
+    assert _profile(client).status_code == 200
+    created = _tx(
+        client,
+        description="qqqq zzzz xxxx",
+        invoice_no="INV-CLAR-VER",
+        client_name="Dinas",
+    )
+    assert created.status_code == 201
+    tx_id = created.json()["id"]
+    assert created.json()["classification"]["requires_clarification"] is True
+
+    conflict = client.post(
+        f"/api/v1/transactions/{tx_id}/clarification",
+        json={"category": "usaha", "version": 99},
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["error"]["code"] == "VERSION_CONFLICT"
+
+
 def test_override_and_audit_trail_fr16a(client):
     """FR-16a / API §5.18–5.19 — override records user_override on the jejak."""
     _auth(client)
@@ -208,14 +461,59 @@ def test_override_and_audit_trail_fr16a(client):
     assert "ruleset_id" in last
 
 
+def test_tc_pr4_aud_01_audit_trail_append_only(client):
+    """TC-PR4-AUD-01 — classification_events have no public update/delete; cascade only on tx delete."""
+    _auth(client)
+    assert _profile(client).status_code == 200
+    body = _tx(client).json()
+    client.post(
+        f"/api/v1/transactions/{body['id']}/override",
+        json={"new_category": "already_final", "note": "x"},
+    )
+    trail = client.get(f"/api/v1/transactions/{body['id']}/audit-trail").json()["events"]
+    assert len(trail) >= 2
+
+    # No API to mutate events.
+    assert client.put(f"/api/v1/transactions/{body['id']}/audit-trail").status_code in {
+        404,
+        405,
+        422,
+    }
+    assert client.delete(f"/api/v1/transactions/{body['id']}/audit-trail").status_code in {
+        404,
+        405,
+        422,
+    }
+
+    db = SessionLocal()
+    try:
+        events = db.scalars(
+            select(ClassificationEvent).where(ClassificationEvent.transaction_id == body["id"])
+        ).all()
+        assert len(events) >= 2
+        victim = events[0]
+        # Direct ORM delete of an event is not exposed; after tx delete they cascade.
+        event_id = victim.id
+    finally:
+        db.close()
+
+    assert client.delete(f"/api/v1/transactions/{body['id']}").status_code == 200
+    db = SessionLocal()
+    try:
+        left = db.scalars(
+            select(ClassificationEvent).where(ClassificationEvent.id == event_id)
+        ).all()
+        assert left == []
+    finally:
+        db.close()
+
+
 def test_reclassify_rules_layer(client):
     """API §5.9 — reclassify runs keyword pipeline atomically."""
     _auth(client)
     assert _profile(client).status_code == 200
     body = _tx(client, description="fee konsultasi", invoice_no="INV-RECLASS").json()
-    # description has fee → pekerjaan_bebas; create already classified
     assert body["category"] == "pekerjaan_bebas"
-    # override to usaha then reclassify back via rules
     client.post(
         f"/api/v1/transactions/{body['id']}/override",
         json={"new_category": "usaha"},
@@ -231,52 +529,453 @@ def test_reclassify_rules_layer(client):
     assert payload["results"][0]["source"] == "rule"
 
 
-def test_tc_4_5_54_58_recalculate_marks_usang_and_inserts_berlaku(client):
-    """TC-4.5-54 / TC-4.5-58 — prior berlaku → usang; new berlaku version+1."""
+def test_tc_4_5_54_58_mark_usang_then_recalculate(client):
+    """TC-4.5-54 / TC-4.5-58 — mark usang then POST recalculate → new berlaku version+1."""
+    from app.services.snapshots_store import mark_usang
+
     _auth(client)
     assert _profile(client).status_code == 200
     assert _tx(client).status_code == 201
+    me = client.get("/api/v1/auth/me").json()
 
     before = client.get("/api/v1/tax/snapshots/2026/2026-10")
-    assert before.status_code == 200, before.text
-    assert before.json()["status"] == "berlaku"
-    # Profile PUT wrote v1; create_transaction rebuild wrote the current berlaku.
+    assert before.status_code == 200
     before_version = before.json()["version"]
-    assert before_version >= 1
-    first_hash = before.json()["input_hash"]
+    before_hash = before.json()["input_hash"]
+
+    db = SessionLocal()
+    try:
+        profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
+        mark_usang(db, profile, ["2026-10"])
+        db.commit()
+    finally:
+        db.close()
+
+    # While usang, dashboard must not surface the stale row as the only truth
+    # with old numbers pretending to be berlaku — GET month is 404 until recalc.
+    assert client.get("/api/v1/tax/snapshots/2026/2026-10").status_code == 404
 
     recalc = client.post("/api/v1/tax/snapshots/2026/recalculate")
     assert recalc.status_code == 200, recalc.text
-    assert recalc.json()["status"] == "berlaku"
     assert recalc.json()["recalculated_months_count"] >= 1
+    assert recalc.json()["status"] == "berlaku"
 
     after = client.get("/api/v1/tax/snapshots/2026/2026-10")
     assert after.status_code == 200
     assert after.json()["status"] == "berlaku"
     assert after.json()["version"] == before_version + 1
-    assert after.json()["input_hash"] == first_hash  # same inputs → same hash
+    assert after.json()["input_hash"] == before_hash
 
-    # Prior version is retained as usang (not overwritten) — D-11 / HB-16.
     db = SessionLocal()
     try:
+        profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
         rows = db.scalars(
             select(MonthSnapshot)
-            .where(MonthSnapshot.month_key == "2026-10")
+            .where(
+                MonthSnapshot.profile_id == profile.id,
+                MonthSnapshot.month_key == "2026-10",
+            )
             .order_by(MonthSnapshot.version)
         ).all()
-        assert len(rows) >= 2
         assert any(r.status == "usang" and r.version == before_version for r in rows)
         assert rows[-1].status == "berlaku"
         assert rows[-1].version == before_version + 1
     finally:
         db.close()
 
-    # Dashboard only surfaces berlaku rows (D-11 read filter).
-    dashboard = client.get("/api/v1/tax/dashboard?tax_year=2026").json()
-    oct_rows = [r for r in dashboard["monthly_summaries"] if r["month"] == "2026-10"]
-    assert len(oct_rows) == 1
-    assert oct_rows[0]["status"] == "berlaku"
-    assert oct_rows[0]["version"] == before_version + 1
+
+def test_tc_4_5_55_triggers_mark_usang(client):
+    """TC-4.5-55 — override / reclassify / prior-year profile change mark months usang then rebuild."""
+    _auth(client)
+    assert _profile(client).status_code == 200
+    body = _tx(client).json()
+    me = client.get("/api/v1/auth/me").json()
+
+    def oct_version():
+        db = SessionLocal()
+        try:
+            profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
+            return _assert_one_berlaku_contiguous(db, profile.id, "2026-10")
+        finally:
+            db.close()
+
+    v0 = oct_version()
+    assert (
+        client.post(
+            f"/api/v1/transactions/{body['id']}/override",
+            json={"new_category": "pekerjaan_bebas"},
+        ).status_code
+        == 200
+    )
+    assert oct_version() > v0
+
+    # Profile prior-year change (snapshot-affecting) marks + rebuilds.
+    prof = client.get("/api/v1/profiles/2026").json()
+    v1 = oct_version()
+    put = client.put(
+        "/api/v1/profiles/2026",
+        json={
+            "version": prof["version"],
+            "name": prof["name"],
+            "entity_type": prof["entity_type"],
+            "nib_status": prof["nib_status"],
+            "nib_last_4": "4321",
+            "kbli_code": prof["kbli_code"],
+            "business_description": prof["business_description"],
+            "marital_status": prof["marital_status"],
+            "spouse_aggregation_active": prof["spouse_aggregation_active"],
+            "is_new_taxpayer_current_year": False,
+            "prior_user_usaha_idr": 1000,
+            "prior_user_pekerjaan_bebas_idr": 0,
+            "prior_user_already_final_idr": 0,
+            "spouse_current_usaha_idr": 0,
+            "spouse_current_pekerjaan_bebas_idr": 0,
+            "spouse_current_already_final_idr": 0,
+            "prior_spouse_usaha_idr": 0,
+            "prior_spouse_pekerjaan_bebas_idr": 0,
+            "prior_spouse_already_final_idr": 0,
+        },
+    )
+    assert put.status_code == 200, put.text
+    assert oct_version() > v1
+
+
+def test_tc_4_5_56_failed_recalc_leaves_usang(client, monkeypatch):
+    """TC-4.5-56 — exception mid-rebuild rolls back; month stays usang (not old berlaku)."""
+    from app.engine.ruleset import load_ruleset
+    from app.services import snapshots_store
+    from app.services.snapshots_store import mark_usang
+
+    _auth(client)
+    assert _profile(client).status_code == 200
+    assert _tx(client).status_code == 201
+    me = client.get("/api/v1/auth/me").json()
+
+    db = SessionLocal()
+    try:
+        profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
+        before_money = db.scalar(
+            select(MonthSnapshot).where(
+                MonthSnapshot.profile_id == profile.id,
+                MonthSnapshot.month_key == "2026-10",
+                MonthSnapshot.status == "berlaku",
+            )
+        )
+        assert before_money is not None
+        frozen_omzet = before_money.usaha_omzet_idr
+        mark_usang(db, profile, ["2026-10"])
+        db.commit()
+    finally:
+        db.close()
+
+    def boom_compute(*args, **kwargs):
+        raise RuntimeError("injected compute fault")
+
+    monkeypatch.setattr(snapshots_store, "compute", boom_compute)
+
+    db = SessionLocal()
+    try:
+        profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
+        try:
+            snapshots_store.rebuild(db, profile, load_ruleset(), only_usang=True)
+            db.commit()
+            raised = False
+        except RuntimeError:
+            db.rollback()
+            raised = True
+        assert raised
+    finally:
+        db.close()
+
+    db = SessionLocal()
+    try:
+        profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
+        berlaku = db.scalars(
+            select(MonthSnapshot).where(
+                MonthSnapshot.profile_id == profile.id,
+                MonthSnapshot.month_key == "2026-10",
+                MonthSnapshot.status == "berlaku",
+            )
+        ).all()
+        assert berlaku == []
+        usang = db.scalars(
+            select(MonthSnapshot).where(
+                MonthSnapshot.profile_id == profile.id,
+                MonthSnapshot.month_key == "2026-10",
+                MonthSnapshot.status == "usang",
+            )
+        ).all()
+        assert usang
+        assert usang[-1].usaha_omzet_idr == frozen_omzet
+    finally:
+        db.close()
+
+
+def test_tc_4_5_59_and_d11_usang_money_immutable(client):
+    """TC-4.5-59 + D-11 — after bump, prior usang money fields stay frozen."""
+    from app.services.snapshots_store import mark_usang
+
+    _auth(client)
+    assert _profile(client).status_code == 200
+    assert _tx(client).status_code == 201
+    me = client.get("/api/v1/auth/me").json()
+
+    db = SessionLocal()
+    try:
+        profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
+        v1 = db.scalar(
+            select(MonthSnapshot).where(
+                MonthSnapshot.profile_id == profile.id,
+                MonthSnapshot.month_key == "2026-10",
+                MonthSnapshot.status == "berlaku",
+            )
+        )
+        frozen = (
+            v1.usaha_omzet_idr,
+            v1.tax_0_5_pct_idr,
+            v1.sisa_bayar_idr,
+            v1.input_hash,
+            v1.version,
+        )
+        mark_usang(db, profile, ["2026-10"])
+        db.commit()
+    finally:
+        db.close()
+
+    assert client.post("/api/v1/tax/snapshots/2026/recalculate").status_code == 200
+
+    # Change inputs then mark+recalc again so a third version exists.
+    body = client.get("/api/v1/transactions?page=1&per_page=10").json()["items"][0]
+    client.put(
+        f"/api/v1/transactions/{body['id']}",
+        json={
+            "amount_idr": 30_000_000,
+            "tx_date": "2026-10-15",
+            "client_name": body["client_name"],
+            "description": body["description"],
+            "invoice_no": body["invoice_no"],
+            "withheld_tax_amount_idr": 0,
+            "source_channel": body["source_channel"],
+            "version": body["version"],
+        },
+    )
+
+    db = SessionLocal()
+    try:
+        profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
+        v1 = db.scalar(
+            select(MonthSnapshot).where(
+                MonthSnapshot.profile_id == profile.id,
+                MonthSnapshot.month_key == "2026-10",
+                MonthSnapshot.version == frozen[4],
+            )
+        )
+        assert v1.status == "usang"
+        assert v1.usaha_omzet_idr == frozen[0]
+        assert v1.tax_0_5_pct_idr == frozen[1]
+        assert v1.sisa_bayar_idr == frozen[2]
+        assert v1.input_hash == frozen[3]
+        _assert_one_berlaku_contiguous(db, profile.id, "2026-10")
+    finally:
+        db.close()
+
+
+def test_tc_4_5_noop_recalc_does_not_bump(client):
+    """No-op recalc (nothing usang / same hash) does not bump version."""
+    _auth(client)
+    assert _profile(client).status_code == 200
+    assert _tx(client).status_code == 201
+    before = client.get("/api/v1/tax/snapshots/2026/2026-10").json()["version"]
+    recalc = client.post("/api/v1/tax/snapshots/2026/recalculate")
+    assert recalc.status_code == 200
+    assert recalc.json()["recalculated_months_count"] == 0
+    after = client.get("/api/v1/tax/snapshots/2026/2026-10").json()["version"]
+    assert after == before
+
+
+def test_tc_4_5_60_exactly_one_berlaku_after_n_recalcs(client):
+    """TC-4.5-60 — N>=5 mark+recalc cycles leave exactly one berlaku; versions contiguous."""
+    from app.services.snapshots_store import mark_usang
+
+    _auth(client)
+    assert _profile(client).status_code == 200
+    assert _tx(client).status_code == 201
+    me = client.get("/api/v1/auth/me").json()
+    n = 5
+    for _ in range(n):
+        db = SessionLocal()
+        try:
+            profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
+            mark_usang(db, profile, ["2026-10"])
+            db.commit()
+        finally:
+            db.close()
+        assert client.post("/api/v1/tax/snapshots/2026/recalculate").status_code == 200
+
+    db = SessionLocal()
+    try:
+        profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
+        ver = _assert_one_berlaku_contiguous(db, profile.id, "2026-10")
+        assert ver >= n
+    finally:
+        db.close()
+
+
+def test_tc_4_5_61_concurrent_rebuilds_one_berlaku(client):
+    """TC-4.5-61 — two MySQL sessions rebuild same usang month → one berlaku."""
+    import threading
+
+    from app.engine.ruleset import load_ruleset
+    from app.services.snapshots_store import mark_usang, rebuild
+
+    _auth(client)
+    assert _profile(client).status_code == 200
+    assert _tx(client).status_code == 201
+    me = client.get("/api/v1/auth/me").json()
+
+    setup = SessionLocal()
+    try:
+        profile = setup.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
+        profile_id = profile.id
+        mark_usang(setup, profile, ["2026-10"])
+        setup.commit()
+    finally:
+        setup.close()
+
+    barriers = threading.Barrier(2)
+    errors: list[BaseException] = []
+
+    def worker() -> None:
+        barriers.wait(timeout=10)
+        db = SessionLocal()
+        try:
+            profile = db.scalar(select(Profile).where(Profile.id == profile_id))
+            rebuild(db, profile, load_ruleset(), only_usang=True)
+            db.commit()
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+            db.rollback()
+        finally:
+            db.close()
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+        assert not t.is_alive()
+    assert not errors, errors
+
+    db = SessionLocal()
+    try:
+        _assert_one_berlaku_contiguous(db, profile_id, "2026-10")
+    finally:
+        db.close()
+
+
+def test_tc_4_5_62_integrity_error_version_retry(client, monkeypatch):
+    """TC-4.5-62 — stale next-version UK hit retries and still lands one berlaku."""
+    from app.engine.ruleset import load_ruleset
+    from app.services import snapshots_store
+    from app.services.snapshots_store import mark_usang
+
+    _auth(client)
+    assert _profile(client).status_code == 200
+    assert _tx(client).status_code == 201
+    me = client.get("/api/v1/auth/me").json()
+
+    db = SessionLocal()
+    try:
+        profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
+        before = _assert_one_berlaku_contiguous(db, profile.id, "2026-10")
+        mark_usang(db, profile, ["2026-10"])
+        db.flush()
+
+        real_next = snapshots_store._next_version
+        state = {"stale_hits": 0}
+
+        def flaky_next(session, profile_id: str, month_key: str) -> int:
+            real = real_next(session, profile_id, month_key)
+            if month_key == "2026-10" and state["stale_hits"] == 0:
+                state["stale_hits"] += 1
+                return max(real - 1, 1)
+            return real
+
+        monkeypatch.setattr(snapshots_store, "_next_version", flaky_next)
+        snapshots_store.rebuild(db, profile, load_ruleset(), only_usang=True)
+        db.commit()
+        assert state["stale_hits"] == 1
+        after = _assert_one_berlaku_contiguous(db, profile.id, "2026-10")
+        assert after == before + 1
+    finally:
+        db.close()
+
+
+def test_tc_4_5_63_exhausted_retries_return_409(client, monkeypatch):
+    """TC-4.5-63 — exhausted UK retries → 409 VERSION_CONFLICT; no partial berlaku write."""
+    from app.api.errors import ApiError
+    from app.engine.ruleset import load_ruleset
+    from app.services import snapshots_store
+    from app.services.snapshots_store import mark_usang
+
+    _auth(client)
+    assert _profile(client).status_code == 200
+    assert _tx(client).status_code == 201
+    me = client.get("/api/v1/auth/me").json()
+
+    db = SessionLocal()
+    try:
+        profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
+        before = _assert_one_berlaku_contiguous(db, profile.id, "2026-10")
+        mark_usang(db, profile, ["2026-10"])
+        db.commit()
+    finally:
+        db.close()
+
+    def always_stale(session, profile_id: str, month_key: str) -> int:
+        # Always collide with an existing version number.
+        return 1
+
+    monkeypatch.setattr(snapshots_store, "_next_version", always_stale)
+
+    db = SessionLocal()
+    try:
+        profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
+        try:
+            snapshots_store.rebuild(db, profile, load_ruleset(), only_usang=True)
+            db.commit()
+            raised = None
+        except ApiError as exc:
+            raised = exc
+        assert raised is not None
+        assert raised.status == 409
+        assert raised.code == "VERSION_CONFLICT"
+    finally:
+        db.close()
+
+    db = SessionLocal()
+    try:
+        profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
+        berlaku = db.scalars(
+            select(MonthSnapshot).where(
+                MonthSnapshot.profile_id == profile.id,
+                MonthSnapshot.month_key == "2026-10",
+                MonthSnapshot.status == "berlaku",
+            )
+        ).all()
+        # Rolled back: still no berlaku (usang retained from before the failed rebuild).
+        assert berlaku == []
+        usang = db.scalars(
+            select(MonthSnapshot).where(
+                MonthSnapshot.profile_id == profile.id,
+                MonthSnapshot.month_key == "2026-10",
+                MonthSnapshot.status == "usang",
+                MonthSnapshot.version == before,
+            )
+        ).all()
+        assert len(usang) == 1
+    finally:
+        db.close()
 
 
 def test_tc_4_6_29_fr47_month_jejak(client):
@@ -290,8 +989,19 @@ def test_tc_4_6_29_fr47_month_jejak(client):
     assert body["status"] == "berlaku"
     assert body["ruleset_id"]
     assert body["input_hash"].startswith("v1:")
-    assert "WORKPAPER" in body["disclaimer"]
-    assert client.get("/api/v1/tax/snapshots/2026/2026-01").status_code == 200
+    assert body["disclaimer"] == DISCLAIMER
+
+
+def test_tc_hard_31_exact_workpaper_disclaimer(client):
+    """TC-HARD-31 — dashboard + month snapshot use the D-07/API §3.3 disclaimer exactly."""
+    _auth(client)
+    assert _profile(client).status_code == 200
+    assert _tx(client).status_code == 201
+    assert DISCLAIMER == EXACT_DISCLAIMER
+    dashboard = client.get("/api/v1/tax/dashboard?tax_year=2026").json()
+    assert dashboard["metadata"]["disclaimer"] == EXACT_DISCLAIMER
+    snap = client.get("/api/v1/tax/snapshots/2026/2026-10").json()
+    assert snap["disclaimer"] == EXACT_DISCLAIMER
 
 
 def test_tc_4_6_24_free_quota_counters(client):
@@ -308,11 +1018,6 @@ def test_tc_4_6_24_free_quota_counters(client):
 
 def test_tc_4_6_25_paid_quota_limits(client):
     """TC-4.6-25 — paid active → limit 200/200."""
-    from datetime import timedelta
-
-    from app.models import User
-    from app.security import now_utc
-
     _auth(client)
     me = client.get("/api/v1/auth/me").json()
     db = SessionLocal()
@@ -328,8 +1033,171 @@ def test_tc_4_6_25_paid_quota_limits(client):
     assert quotas["assistant_chat"]["limit"] == 200
 
 
+def test_tc_4_6_26_quota_boundaries_free_and_paid(client):
+    """TC-4.6-26 — used=limit-1 → active; used=limit → exhausted (free 10/15, paid 200)."""
+    _auth(client)
+    me = client.get("/api/v1/auth/me").json()
+    # Ensure counter row exists.
+    client.get("/api/v1/quotas")
+
+    def set_used(ai: int, chat: int):
+        db = SessionLocal()
+        try:
+            row = db.scalar(select(QuotaCounter).where(QuotaCounter.user_id == me["user_id"]))
+            assert row is not None
+            row.ai_classification_used = ai
+            row.assistant_chat_used = chat
+            db.commit()
+        finally:
+            db.close()
+
+    set_used(9, 14)
+    q = client.get("/api/v1/quotas").json()
+    assert q["ai_classification"]["limit"] == 10
+    assert q["ai_classification"]["status"] == "active"
+    assert q["assistant_chat"]["limit"] == 15
+    assert q["assistant_chat"]["status"] == "active"
+
+    set_used(10, 15)
+    q = client.get("/api/v1/quotas").json()
+    assert q["ai_classification"]["status"] == "exhausted"
+    assert q["assistant_chat"]["status"] == "exhausted"
+
+    db = SessionLocal()
+    try:
+        user = db.scalar(select(User).where(User.id == me["user_id"]))
+        user.paid_flag = True
+        user.valid_until_utc = now_utc() + timedelta(days=30)
+        db.commit()
+    finally:
+        db.close()
+
+    set_used(199, 199)
+    q = client.get("/api/v1/quotas").json()
+    assert q["ai_classification"]["limit"] == 200
+    assert q["ai_classification"]["status"] == "active"
+    assert q["assistant_chat"]["status"] == "active"
+
+    set_used(200, 200)
+    q = client.get("/api/v1/quotas").json()
+    assert q["ai_classification"]["status"] == "exhausted"
+    assert q["assistant_chat"]["status"] == "exhausted"
+
+
+def test_tc_4_6_27_quotas_are_session_scoped(client):
+    """TC-4.6-27 — another account sees its own counters, not ours."""
+    _auth(client)
+    me = client.get("/api/v1/auth/me").json()
+    client.get("/api/v1/quotas")
+    db = SessionLocal()
+    try:
+        row = db.scalar(select(QuotaCounter).where(QuotaCounter.user_id == me["user_id"]))
+        row.ai_classification_used = 7
+        db.commit()
+    finally:
+        db.close()
+
+    other = TestClient(client.app)
+    assert (
+        other.post(
+            "/api/v1/auth/register",
+            json={
+                "email": "quotaother@example.com",
+                "username": "quotaother",
+                "password": "PasswordMinimal10",
+            },
+        ).status_code
+        == 201
+    )
+    assert (
+        other.post(
+            "/api/v1/auth/login",
+            json={
+                "identifier": "quotaother@example.com",
+                "password": "PasswordMinimal10",
+            },
+        ).status_code
+        == 200
+    )
+    theirs = other.get("/api/v1/quotas").json()
+    assert theirs["ai_classification"]["used"] == 0
+    mine = client.get("/api/v1/quotas").json()
+    assert mine["ai_classification"]["used"] == 7
+
+
+def test_tc_4_6_28_month_key_follows_asia_jakarta(client):
+    """TC-4.6-28 — month_key matches Asia/Jakarta calendar month."""
+    from zoneinfo import ZoneInfo
+
+    _auth(client)
+    quotas = client.get("/api/v1/quotas").json()
+    jakarta = now_utc().replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo("Asia/Jakarta"))
+    assert quotas["month_key"] == jakarta.strftime("%Y-%m")
+    assert quotas["timezone"] == "Asia/Jakarta"
+
+
+def test_tc_4_6_30_missing_month_snapshot_is_404(client):
+    """TC-4.6-30 — month without a cuplikan → 404 SNAPSHOT_NOT_FOUND."""
+    from app.services.snapshots_store import mark_usang
+
+    _auth(client)
+    assert _profile(client).status_code == 200
+    me = client.get("/api/v1/auth/me").json()
+    db = SessionLocal()
+    try:
+        profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
+        # Remove November if present so GET is empty.
+        for row in db.scalars(
+            select(MonthSnapshot).where(
+                MonthSnapshot.profile_id == profile.id,
+                MonthSnapshot.month_key == "2026-11",
+            )
+        ).all():
+            db.delete(row)
+        db.commit()
+    finally:
+        db.close()
+    # If today is before Nov in a frozen clock this may still 200 from seed —
+    # force usang+delete berlaku via mark then delete all Nov rows.
+    db = SessionLocal()
+    try:
+        profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
+        mark_usang(db, profile, ["2026-11"])
+        for row in db.scalars(
+            select(MonthSnapshot).where(
+                MonthSnapshot.profile_id == profile.id,
+                MonthSnapshot.month_key == "2026-11",
+            )
+        ).all():
+            db.delete(row)
+        db.commit()
+    finally:
+        db.close()
+    resp = client.get("/api/v1/tax/snapshots/2026/2026-11")
+    assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "SNAPSHOT_NOT_FOUND"
+
+
+def test_tc_4_6_31_snapshot_requires_session(client):
+    """TC-4.6-31 — unauthenticated month jejak → 401."""
+    from app.main import app
+
+    bare = TestClient(app)
+    assert bare.get("/api/v1/tax/snapshots/2026/2026-10").status_code == 401
+
+
+def test_tc_4_6_32_input_hash_is_v1_prefixed(client):
+    """TC-4.6-32 — month input_hash is the v1: digests used by NFR-02 goldens."""
+    _auth(client)
+    assert _profile(client).status_code == 200
+    assert _tx(client).status_code == 201
+    body = client.get("/api/v1/tax/snapshots/2026/2026-10").json()
+    assert body["input_hash"].startswith("v1:")
+    assert len(body["input_hash"]) > 10
+
+
 def test_hb12_cap_eq_stays_eligible_dashboard(client):
-    """HB-12 residual — prior_combined == 4_800_000_000 stays scheme_eligible."""
+    """HB-12 / TC-4.5-27 — prior_combined == 4_800_000_000 stays scheme_eligible."""
     _auth(client)
     assert (
         _profile(
@@ -348,155 +1216,21 @@ def test_hb12_cap_eq_stays_eligible_dashboard(client):
     assert prior["status"] == "scheme_eligible"
 
 
-def _assert_one_berlaku_contiguous(db, profile_id: str, month_key: str) -> int:
-    """Exactly one berlaku; usang versions are a contiguous prefix below it."""
-    rows = db.scalars(
-        select(MonthSnapshot)
-        .where(
-            MonthSnapshot.profile_id == profile_id,
-            MonthSnapshot.month_key == month_key,
-        )
-        .order_by(MonthSnapshot.version)
-    ).all()
-    assert rows, f"expected snapshots for {month_key}"
-    berlaku = [r for r in rows if r.status == "berlaku"]
-    assert len(berlaku) == 1, f"expected 1 berlaku, got {[(r.version, r.status) for r in rows]}"
-    versions = [r.version for r in rows]
-    assert versions == list(range(1, len(rows) + 1)), versions
-    assert berlaku[0].version == versions[-1]
-    return berlaku[0].version
-
-
-def test_tc_4_5_60_exactly_one_berlaku_after_n_recalcs(client):
-    """TC-4.5-60 — N>=5 recalcs leave exactly one berlaku; versions 1..N contiguous."""
+def test_tc_4_5_28_hb12_plus_one_ineligible(client):
+    """TC-4.5-28 / HB-12 +1 — prior_combined 4_800_000_001 → scheme_ineligible."""
     _auth(client)
-    assert _profile(client).status_code == 200
+    assert (
+        _profile(
+            client,
+            is_new_taxpayer_current_year=False,
+            prior_user_usaha_idr=4_800_000_001,
+            prior_user_pekerjaan_bebas_idr=0,
+            prior_user_already_final_idr=0,
+        ).status_code
+        == 200
+    )
     assert _tx(client).status_code == 201
-
-    me = client.get("/api/v1/auth/me").json()
-    n = 5
-    for _ in range(n):
-        assert client.post("/api/v1/tax/snapshots/2026/recalculate").status_code == 200
-
-    db = SessionLocal()
-    try:
-        from app.models import Profile
-
-        profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
-        assert profile is not None
-        # create_transaction already rebuilt once after profile PUT's v1, so
-        # total versions >= n + 2; invariant is one berlaku + contiguous ints.
-        ver = _assert_one_berlaku_contiguous(db, profile.id, "2026-10")
-        assert ver >= n
-        # Every other month through Jakarta "today" also has a single berlaku.
-        months = db.scalars(
-            select(MonthSnapshot.month_key).where(MonthSnapshot.profile_id == profile.id).distinct()
-        ).all()
-        for month_key in months:
-            _assert_one_berlaku_contiguous(db, profile.id, month_key)
-    finally:
-        db.close()
-
     dashboard = client.get("/api/v1/tax/dashboard?tax_year=2026").json()
-    oct_rows = [r for r in dashboard["monthly_summaries"] if r["month"] == "2026-10"]
-    assert len(oct_rows) == 1
-    assert oct_rows[0]["status"] == "berlaku"
-
-
-def test_tc_4_5_61_concurrent_rebuilds_one_berlaku(client):
-    """TC-4.5-61 — two MySQL sessions rebuild same profile → one berlaku, contiguous."""
-    import threading
-
-    from app.engine.ruleset import load_ruleset
-    from app.models import Profile
-    from app.services.snapshots_store import rebuild
-
-    _auth(client)
-    assert _profile(client).status_code == 200
-    assert _tx(client).status_code == 201
-    me = client.get("/api/v1/auth/me").json()
-
-    setup = SessionLocal()
-    try:
-        profile_id = setup.scalar(select(Profile.id).where(Profile.user_id == me["user_id"]))
-        assert profile_id
-    finally:
-        setup.close()
-
-    barriers = threading.Barrier(2)
-    errors: list[BaseException] = []
-
-    def worker() -> None:
-        # Open the transaction only after the barrier so MySQL RR does not pin
-        # a pre-lock snapshot before we wait on SELECT … FOR UPDATE.
-        barriers.wait(timeout=10)
-        db = SessionLocal()
-        try:
-            profile = db.scalar(select(Profile).where(Profile.id == profile_id))
-            assert profile is not None
-            rebuild(db, profile, load_ruleset())
-            db.commit()
-        except BaseException as exc:  # noqa: BLE001 — collect for main thread
-            errors.append(exc)
-            db.rollback()
-        finally:
-            db.close()
-
-    threads = [threading.Thread(target=worker) for _ in range(2)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join(timeout=30)
-        assert not t.is_alive()
-
-    assert not errors, errors
-
-    db = SessionLocal()
-    try:
-        _assert_one_berlaku_contiguous(db, profile_id, "2026-10")
-        months = db.scalars(
-            select(MonthSnapshot.month_key).where(MonthSnapshot.profile_id == profile_id).distinct()
-        ).all()
-        for month_key in months:
-            _assert_one_berlaku_contiguous(db, profile_id, month_key)
-    finally:
-        db.close()
-
-
-def test_tc_4_5_62_integrity_error_version_retry(client, monkeypatch):
-    """TC-4.5-62 — stale next-version that hits the UK retries and still lands one berlaku."""
-    from app.engine.ruleset import load_ruleset
-    from app.models import Profile
-    from app.services import snapshots_store
-
-    _auth(client)
-    assert _profile(client).status_code == 200
-    assert _tx(client).status_code == 201
-    me = client.get("/api/v1/auth/me").json()
-
-    db = SessionLocal()
-    try:
-        profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
-        assert profile is not None
-        before = _assert_one_berlaku_contiguous(db, profile.id, "2026-10")
-
-        real_next = snapshots_store._next_version
-        state = {"stale_hits": 0}
-
-        def flaky_next(session, profile_id: str, month_key: str) -> int:
-            real = real_next(session, profile_id, month_key)
-            # First attempt for October returns an already-used version → IntegrityError.
-            if month_key == "2026-10" and state["stale_hits"] == 0:
-                state["stale_hits"] += 1
-                return max(real - 1, 1)
-            return real
-
-        monkeypatch.setattr(snapshots_store, "_next_version", flaky_next)
-        rebuild_written = snapshots_store.rebuild(db, profile, load_ruleset())
-        db.commit()
-        assert state["stale_hits"] == 1
-        assert any(row.month_key == "2026-10" for row in rebuild_written)
-        after = _assert_one_berlaku_contiguous(db, profile.id, "2026-10")
-        assert after == before + 1
-    finally:
-        db.close()
+    prior = dashboard["thresholds"]["eligibility_prior_year_cap_4_8m"]
+    assert prior["combined_prior_year_gross_idr"] == 4_800_000_001
+    assert prior["status"] == "scheme_ineligible"

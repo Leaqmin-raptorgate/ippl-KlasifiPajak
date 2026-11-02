@@ -70,7 +70,7 @@ def _jakarta_month_key(now: datetime | None = None) -> tuple[str, datetime]:
     return local.strftime("%Y-%m"), reset
 
 
-def _ensure_counter(db: Session, user: User, month_key: str) -> QuotaCounter:
+def _ensure_counter(db: Session, user: User, month_key: str) -> tuple[QuotaCounter, bool]:
     row = db.scalar(
         select(QuotaCounter).where(
             QuotaCounter.user_id == user.id,
@@ -87,19 +87,23 @@ def _ensure_counter(db: Session, user: User, month_key: str) -> QuotaCounter:
         )
         db.add(row)
         db.flush()
-    return row
+        return row, True
+    return row, False
 
 
 def quotas(db: Session, user: User, ruleset: Ruleset) -> dict:
     """FR-34, FR-39: calendar-month counters in Asia/Jakarta."""
     month_key, reset = _jakarta_month_key()
-    row = _ensure_counter(db, user, month_key)
+    row, created = _ensure_counter(db, user, month_key)
     paid = _is_paid_active(user)
     ai_limit = ruleset.quota_ai_classification if paid else FREE_AI_LIMIT
     chat_limit = ruleset.quota_assistant_chat if paid else FREE_ASSISTANT_LIMIT
     ai_used = int(row.ai_classification_used)
     chat_used = int(row.assistant_chat_used)
-    db.commit()
+    # Persist a newly created zero-row so later reads see it; never commit on a
+    # pure read of an existing counter (API §5.26 / review finding #9).
+    if created:
+        db.commit()
     return {
         "month_key": month_key,
         "timezone": "Asia/Jakarta",
