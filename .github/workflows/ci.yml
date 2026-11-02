@@ -55,8 +55,9 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+      # Pin pip-audit (latest stable) and cvss for CVSS:4.0 vector fallback.
       - name: Install pip-audit
-        run: pip install pip-audit
+        run: pip install pip-audit==2.10.1 cvss==3.6
       # pip-audit has no native severity filter. Emit JSON, then resolve each
       # vuln id via OSV and fail only on HIGH/CRITICAL (TC-HARD-04 / HB-23).
       # See scripts/ci/fail_on_high_critical.py for the mapping rules.
@@ -79,8 +80,13 @@ jobs:
         env:
           GITLEAKS_VERSION: "8.21.2"
         run: |
-          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
-            | tar -xz -C /usr/local/bin gitleaks
+          set -euo pipefail
+          BASE="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          ARCHIVE="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfL "${BASE}/${ARCHIVE}" -o "${ARCHIVE}"
+          curl -sSfL "${BASE}/gitleaks_${GITLEAKS_VERSION}_checksums.txt" -o checksums.txt
+          grep -F " ${ARCHIVE}" checksums.txt | sha256sum -c -
+          tar -xz -f "${ARCHIVE}" -C /usr/local/bin gitleaks
           gitleaks version
       - name: Scan for secrets
         run: gitleaks detect --source . --verbose --redact --config .gitleaks.toml

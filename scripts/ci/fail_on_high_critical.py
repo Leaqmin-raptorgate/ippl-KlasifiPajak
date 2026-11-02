@@ -9,17 +9,30 @@ pip-audit has no native severity filter. Its JSON lists vulnerability ids
 3. Resolves severity from, in order:
    - ``database_specific.severity`` (GitHub Advisory: CRITICAL/HIGH/MEDIUM/LOW)
    - numeric CVSS base score in ``severity[]`` when present
-     (CRITICAL >= 9.0, HIGH >= 7.0)
+   - CVSS vector strings in ``severity[].score`` (CVSS:3.0 / 3.1 self-contained;
+     CVSS:4.0 via the pinned ``cvss`` package when installed)
+     (CRITICAL >= 9.0, HIGH >= 7.0, MEDIUM >= 4.0, else LOW)
 4. Exits 1 if any HIGH/CRITICAL finding remains; otherwise exits 0.
+
+Fail-closed policy (default):
+  - Network / HTTP errors other than 404 while looking up OSV → UNKNOWN → fail
+  - Missing or unresolvable severity → UNKNOWN → fail
+  - Invalid / missing pip-audit JSON → exit 1
+  - Pass ``--allow-unknown`` to soften UNKNOWN (not used in CI)
 
 Network is required only when vulnerabilities are present. Zero vulns → no
 OSV calls. Used by the ``pip-audit`` CI job (TC-HARD-04 / HB-23).
+
+CVSS:4.0 justification: the official macrovector tables are large; we optionally
+use the pure-Python ``cvss==3.6`` wheel (~31 KB) when installed in CI. CVSS 3.x
+scoring stays self-contained with no extra dependency.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 import urllib.error
 import urllib.request
@@ -28,6 +41,95 @@ from typing import Any
 OSV_VULN_URL = "https://api.osv.dev/v1/vulns/{id}"
 FAIL_LEVELS = frozenset({"HIGH", "CRITICAL"})
 
+# CVSS v3.x metric weights (FIRST.org CVSS 3.1 §7.4).
+_AV = {"N": 0.85, "A": 0.62, "L": 0.55, "P": 0.2}
+_AC = {"L": 0.77, "H": 0.44}
+_PR_U = {"N": 0.85, "L": 0.62, "H": 0.27}
+_PR_C = {"N": 0.85, "L": 0.68, "H": 0.5}
+_UI = {"N": 0.85, "R": 0.62}
+_CIA = {"N": 0.0, "L": 0.22, "H": 0.56}
+
+
+def _roundup(value: float) -> float:
+    """CVSS 3.1 Roundup (FIRST.org Appendix A) — float-safe to 1 decimal."""
+    int_input = int(round(value * 100_000))
+    if int_input % 10_000 == 0:
+        return int_input / 100_000.0
+    return (math.floor(int_input / 10_000) + 1) / 10.0
+
+
+def _parse_vector_metrics(vector: str) -> dict[str, str] | None:
+    """Parse ``CVSS:x.y/AV:N/...`` into a metric map; None if malformed."""
+    if not vector.startswith("CVSS:"):
+        return None
+    parts = vector.split("/")
+    if len(parts) < 2:
+        return None
+    metrics: dict[str, str] = {}
+    for part in parts[1:]:
+        if ":" not in part:
+            return None
+        key, value = part.split(":", 1)
+        if not key or not value or key in metrics:
+            return None
+        metrics[key] = value
+    return metrics
+
+
+def score_cvss3_vector(vector: str) -> float | None:
+    """Return CVSS 3.0/3.1 base score for a vector string, or None."""
+    if not (vector.startswith("CVSS:3.0/") or vector.startswith("CVSS:3.1/")):
+        return None
+    m = _parse_vector_metrics(vector)
+    if m is None:
+        return None
+    required = ("AV", "AC", "PR", "UI", "S", "C", "I", "A")
+    if any(k not in m for k in required):
+        return None
+    try:
+        scope = m["S"]
+        if scope not in ("U", "C"):
+            return None
+        av, ac, ui = _AV[m["AV"]], _AC[m["AC"]], _UI[m["UI"]]
+        pr = (_PR_C if scope == "C" else _PR_U)[m["PR"]]
+        c, i, a = _CIA[m["C"]], _CIA[m["I"]], _CIA[m["A"]]
+    except KeyError:
+        return None
+
+    iss = 1.0 - ((1.0 - c) * (1.0 - i) * (1.0 - a))
+    if scope == "U":
+        impact = 6.42 * iss
+    else:
+        impact = 7.52 * (iss - 0.029) - 3.25 * (iss - 0.02) ** 15
+    exploitability = 8.22 * av * ac * pr * ui
+    if impact <= 0:
+        return 0.0
+    if scope == "U":
+        return _roundup(min(impact + exploitability, 10.0))
+    return _roundup(min(1.08 * (impact + exploitability), 10.0))
+
+
+def score_cvss4_vector(vector: str) -> float | None:
+    """Return CVSS 4.0 base score when the optional ``cvss`` package is present."""
+    if not vector.startswith("CVSS:4.0/"):
+        return None
+    try:
+        from cvss import CVSS4  # type: ignore[import-untyped]
+    except ImportError:
+        return None
+    try:
+        return float(CVSS4(vector).scores()[0])
+    except Exception:  # noqa: BLE001 — malformed vector → treat as unparsed
+        return None
+
+
+def score_cvss_vector(vector: str) -> float | None:
+    """Dispatch CVSS:3.x (self-contained) and CVSS:4.0 (optional dep)."""
+    score = score_cvss3_vector(vector)
+    if score is not None:
+        return score
+    return score_cvss4_vector(vector)
+
 
 def _score_from_severity_entry(entry: dict[str, Any]) -> float | None:
     """Extract a numeric CVSS base score from an OSV severity entry."""
@@ -35,12 +137,12 @@ def _score_from_severity_entry(entry: dict[str, Any]) -> float | None:
     if isinstance(score, (int, float)):
         return float(score)
     if isinstance(score, str):
-        # Plain number as string.
+        stripped = score.strip()
         try:
-            return float(score)
+            return float(stripped)
         except ValueError:
             pass
-        # Vector strings (CVSS:3.1/...) do not embed the base score.
+        return score_cvss_vector(stripped)
     return None
 
 
@@ -109,8 +211,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    raw = open(args.input, encoding="utf-8").read() if args.input else sys.stdin.read()
-    audit = json.loads(raw or "{}")
+    try:
+        raw = open(args.input, encoding="utf-8").read() if args.input else sys.stdin.read()
+        audit = json.loads(raw or "{}")
+        if not isinstance(audit, dict):
+            print("FAIL: pip-audit JSON root must be an object", file=sys.stderr)
+            return 1
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"FAIL: cannot read pip-audit JSON ({exc})", file=sys.stderr)
+        return 1
 
     findings = iter_findings(audit)
     if not findings:
