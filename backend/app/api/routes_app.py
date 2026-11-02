@@ -325,13 +325,8 @@ def subscription_override(
         return Response(status_code=404)
     from datetime import datetime
 
-    from sqlalchemy import select
-
-    from app.models import User
-
     user_id = payload.get("user_id")
-    user = db.scalar(select(User).where(User.id == user_id)) if user_id else None
-    if user is None:
+    if not user_id:
         raise ApiError(404, "USER_NOT_FOUND", "Pengguna tidak ditemukan.")
     raw = payload.get("valid_until")
     valid_until = None
@@ -339,7 +334,7 @@ def subscription_override(
         valid_until = datetime.fromisoformat(str(raw).replace("Z", "+00:00")).replace(tzinfo=None)
     return subscription_service.set_subscription_override(
         db,
-        user,
+        user_id=str(user_id),
         paid_flag=bool(payload.get("paid_flag")),
         valid_until=valid_until,
     )

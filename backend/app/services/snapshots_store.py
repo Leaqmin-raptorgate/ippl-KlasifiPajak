@@ -19,6 +19,8 @@ retries surface as ``409 VERSION_CONFLICT``.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import date
 from zoneinfo import ZoneInfo
 
@@ -48,8 +50,51 @@ _VERSION_INSERT_RETRIES = 3
 VERSION_CONFLICT_MESSAGE = "Data ini sudah diubah di perangkat lain. Muat ulang, lalu simpan lagi."
 
 
+_TODAY_JAKARTA_OVERRIDE: ContextVar[date | None] = ContextVar(
+    "today_jakarta_override", default=None
+)
+
+
 def today_jakarta() -> date:
+    """Calendar date in Asia/Jakarta (API §2.4). Overridable in tests."""
+    override = _TODAY_JAKARTA_OVERRIDE.get()
+    if override is not None:
+        return override
     return now_utc().replace(tzinfo=ZoneInfo("UTC")).astimezone(JAKARTA).date()
+
+
+@contextmanager
+def freeze_today_jakarta(frozen: date):
+    """Pin ``today_jakarta()`` for the current context (tests)."""
+    token = _TODAY_JAKARTA_OVERRIDE.set(frozen)
+    try:
+        yield
+    finally:
+        _TODAY_JAKARTA_OVERRIDE.reset(token)
+
+
+def as_of_for_tax_year(tax_year: int, today: date | None = None) -> date | None:
+    """Bagian B cutoff (API §2.4 / §5.11).
+
+    Current year → today (Jakarta); past year → 31 Dec of that year; future →
+    None (no snapshots).
+    """
+    day = today or today_jakarta()
+    if tax_year > day.year:
+        return None
+    if tax_year < day.year:
+        return date(tax_year, 12, 31)
+    return day
+
+
+def snapshot_end_month(tax_year: int, today: date | None = None) -> int:
+    """Last month_key month to materialise (0 = none for a future tax year)."""
+    day = today or today_jakarta()
+    if tax_year > day.year:
+        return 0
+    if tax_year < day.year:
+        return 12
+    return day.month
 
 
 def profile_to_engine(profile: ProfileRow) -> EngineProfile:
@@ -272,6 +317,12 @@ def _rebuild_locked(
     month_keys: list[str] | None,
     only_usang: bool,
 ) -> list[MonthSnapshot]:
+    today = today_jakarta()
+    as_of = as_of_for_tax_year(ruleset.tax_year, today)
+    default_end = snapshot_end_month(ruleset.tax_year, today)
+
+    # Load every stored row for the tax year (including future-dated); the
+    # engine and category totals below only see tx_date <= as_of (§2.4/§5.11).
     rows = db.scalars(
         select(TransactionRow).where(
             TransactionRow.user_id == profile.user_id,
@@ -279,10 +330,27 @@ def _rebuild_locked(
             TransactionRow.tx_date <= date(ruleset.tax_year, 12, 31),
         )
     ).all()
-    engine_rows = [transaction_to_engine(row) for row in rows]
+
+    if as_of is None or default_end == 0:
+        # Future tax year: no months. Drop any stray berlaku placeholders.
+        future_berlaku = db.scalars(
+            select(MonthSnapshot)
+            .where(
+                MonthSnapshot.profile_id == profile.id,
+                MonthSnapshot.status == "berlaku",
+            )
+            .with_for_update()
+        ).all()
+        if future_berlaku:
+            db.execute(
+                delete(MonthSnapshot).where(MonthSnapshot.id.in_([r.id for r in future_berlaku]))
+            )
+        db.flush()
+        return []
+
+    included = [row for row in rows if row.tx_date <= as_of]
+    engine_rows = [transaction_to_engine(row) for row in included]
     engine_profile = profile_to_engine(profile)
-    # Through December so §5.12 PUT range (earliest month → Dec) is computable.
-    as_of = date(ruleset.tax_year, 12, 31)
     snapshot = compute(engine_rows, engine_profile, ruleset, as_of)
 
     if snapshot.prior_year_resolution_source == "unverifiable":
@@ -296,13 +364,14 @@ def _rebuild_locked(
         annotation = ""
 
     engine_months = {month.month: month for month in snapshot.months}
-    today = today_jakarta()
-    default_end = 12 if today.year != ruleset.tax_year else max(today.month, 1)
+    end_key = f"{ruleset.tax_year}-{default_end:02d}"
 
     if month_keys is None:
         candidate_keys = month_keys_through(ruleset.tax_year, 1, end_month=default_end)
     else:
-        candidate_keys = list(month_keys)
+        # §5.12 "through December" is the ordered band, still capped by as_of
+        # (API §2.4): never materialise months past the current Jakarta month.
+        candidate_keys = [key for key in month_keys if key <= end_key]
 
     if only_usang:
         # §5.22: only months currently without a berlaku row (stale after
@@ -325,7 +394,7 @@ def _rebuild_locked(
                 )
             ).all()
         }
-        target_keys = sorted(usang_keys - berlaku_keys)
+        target_keys = sorted(key for key in (usang_keys - berlaku_keys) if key <= end_key)
     else:
         # Create/update path: rebuild the candidate band; leave matching-hash
         # berlaku untouched (hash no-op).
@@ -334,7 +403,11 @@ def _rebuild_locked(
     written: list[MonthSnapshot] = []
     for month_key in target_keys:
         engine_month = engine_months.get(month_key)
-        month_rows = [row for row in rows if row.tx_date.strftime("%Y-%m") == month_key]
+        month_rows = [
+            row
+            for row in included
+            if row.tx_date.strftime("%Y-%m") == month_key
+        ]
         categories = {"pekerjaan_bebas": 0, "already_final": 0, "non_object": 0}
         for row in month_rows:
             if row.category in categories:
@@ -382,22 +455,20 @@ def _rebuild_locked(
         )
         written.append(snapshot_row)
 
-    # Drop future berlaku placeholders beyond "today" only on the default seed
-    # path. Explicit month_keys (e.g. §5.12 earliest→Dec) must keep Dec.
-    if month_keys is None:
-        future_berlaku = db.scalars(
-            select(MonthSnapshot)
-            .where(
-                MonthSnapshot.profile_id == profile.id,
-                MonthSnapshot.status == "berlaku",
-                MonthSnapshot.month_key > f"{ruleset.tax_year}-{default_end:02d}",
-            )
-            .with_for_update()
-        ).all()
-        if future_berlaku:
-            db.execute(
-                delete(MonthSnapshot).where(MonthSnapshot.id.in_([r.id for r in future_berlaku]))
-            )
+    # Always drop berlaku placeholders past the Jakarta as_of month (§2.4).
+    future_berlaku = db.scalars(
+        select(MonthSnapshot)
+        .where(
+            MonthSnapshot.profile_id == profile.id,
+            MonthSnapshot.status == "berlaku",
+            MonthSnapshot.month_key > end_key,
+        )
+        .with_for_update()
+    ).all()
+    if future_berlaku:
+        db.execute(
+            delete(MonthSnapshot).where(MonthSnapshot.id.in_([r.id for r in future_berlaku]))
+        )
     db.flush()
     return written
 

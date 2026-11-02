@@ -34,9 +34,10 @@ from app.services.snapshot import DISCLAIMER
 from app.services.snapshots_store import (
     get_berlaku,
     lock_profile,
-    mark_usang,
     month_keys_through,
     rebuild,
+    snapshot_end_month,
+    today_jakarta,
 )
 
 VERSION_CONFLICT_MESSAGE = "Data ini sudah diubah di perangkat lain. Muat ulang, lalu simpan lagi."
@@ -74,16 +75,27 @@ def _stale_and_rebuild(
     ruleset: Ruleset,
     *,
     from_month: int,
-    end_month: int = 12,
+    end_month: int | None = None,
 ) -> list:
-    """Mark affected months usang then recompute them (FR-23a / API §5.12/§5.22).
+    """Recompute affected months (FR-23a / API §5.12/§5.22).
 
-    Lock order: profile FOR UPDATE first, then snapshot rows inside
-    ``mark_usang`` / ``rebuild`` (never snapshots-before-profile).
+    Does **not** blanket-mark usang first: ``rebuild`` compares each month's
+    recomputed ``input_hash`` to the current berlaku row and no-ops (no version
+    bump) when inputs are unchanged — e.g. a description-only PUT. When the hash
+    differs, ``_insert_berlaku_month`` marks the prior berlaku usang and inserts
+    ``version + 1``.
+
+    End of band is the Jakarta as_of month for the current tax year (API §2.4);
+    past years run through December. Lock order: profile FOR UPDATE first, then
+    snapshot rows inside ``rebuild``.
     """
+    if end_month is None:
+        end_month = snapshot_end_month(ruleset.tax_year)
+    if end_month < from_month or end_month == 0:
+        lock_profile(db, profile)
+        return rebuild(db, profile, ruleset, month_keys=[], only_usang=False)
     keys = month_keys_through(ruleset.tax_year, from_month, end_month=end_month)
     lock_profile(db, profile)
-    mark_usang(db, profile, keys)
     return rebuild(db, profile, ruleset, month_keys=keys, only_usang=False)
 
 
@@ -299,7 +311,9 @@ def create_transaction(
     db.add(row)
     db.flush()
 
-    before = _usaha_total(db, user.id, exclude_id=row.id)
+    before = _usaha_total(
+        db, user.id, tax_year=ruleset.tax_year, as_of=today_jakarta(), exclude_id=row.id
+    )
     after = before + payload.amount_idr if category == "usaha" else before
     db.add(
         ClassificationEvent(
@@ -418,13 +432,17 @@ def answer_clarification(
     else:
         row.version += 1
 
-    before = _usaha_total(db, user.id, exclude_id=row.id)
     old_category = row.category
+    before = _usaha_total(db, user.id, tax_year=ruleset.tax_year, as_of=today_jakarta())
     row.category = payload.category
     row.source = "user_clarification"
     row.requires_clarification = False
     row.confidence = 1.0
-    after = before + row.amount_idr if payload.category == "usaha" else before
+    after = before
+    if old_category == "usaha" and row.tx_date <= today_jakarta():
+        after -= row.amount_idr
+    if payload.category == "usaha" and row.tx_date <= today_jakarta():
+        after += row.amount_idr
 
     db.add(
         ClassificationEvent(
@@ -458,7 +476,7 @@ def update_transaction(
     """PUT /transactions/{id} — optimistic concurrency via ``version`` (FR-08).
 
     Classification is not re-run on a field edit (UC-05a A1). Snapshots from the
-    earlier of the old and new month through December are rebuilt (API §5.12).
+    earlier of the old and new month through the Jakarta as_of month are rebuilt (API §2.4/§5.12).
 
     Lock order: profile → transaction (FOR UPDATE + conditional version claim)
     → snapshots. Parallel PUTs with the same expected version yield exactly one
@@ -514,7 +532,7 @@ def update_transaction(
     row.version = payload.version + 1
     db.flush()
     start = min(old_month, payload.tx_date.month)
-    _stale_and_rebuild(db, profile, ruleset, from_month=start, end_month=12)
+    _stale_and_rebuild(db, profile, ruleset, from_month=start)
     db.commit()
     return row_out(row)
 
@@ -537,7 +555,7 @@ def delete_transaction(db: Session, user: User, transaction_id: str, ruleset: Ru
     deleted_month = row.tx_date.month
     db.delete(row)
     db.flush()
-    _stale_and_rebuild(db, profile, ruleset, from_month=deleted_month, end_month=12)
+    _stale_and_rebuild(db, profile, ruleset, from_month=deleted_month)
     db.commit()
     return {"deleted": True, "id": transaction_id}
 
@@ -560,14 +578,18 @@ def override_category(
     lock_profile(db, profile)
     row = get_transaction_for_update(db, user, transaction_id)
 
-    before = _usaha_total(db, user.id, exclude_id=row.id)
     old_category = row.category
+    before = _usaha_total(db, user.id, tax_year=ruleset.tax_year, as_of=today_jakarta())
     row.category = payload.new_category
     row.source = "user_override"
     row.requires_clarification = False
     row.confidence = 1.0
     row.version += 1
-    after = before + row.amount_idr if payload.new_category == "usaha" else before
+    after = before
+    if old_category == "usaha" and row.tx_date <= today_jakarta():
+        after -= row.amount_idr
+    if payload.new_category == "usaha" and row.tx_date <= today_jakarta():
+        after += row.amount_idr
     db.add(
         ClassificationEvent(
             id=new_id("evt_"),
@@ -585,7 +607,7 @@ def override_category(
             effective_date=date.fromisoformat(ruleset.effective_date),
         )
     )
-    _stale_and_rebuild(db, profile, ruleset, from_month=row.tx_date.month, end_month=12)
+    _stale_and_rebuild(db, profile, ruleset, from_month=row.tx_date.month)
     db.commit()
     return row_out(row)
 
@@ -634,14 +656,19 @@ def reclassify_transactions(
         category, rule_id, confidence, requires_clarification, citation = classify(
             f"{row.description} {row.client_name}"
         )
-        before = _usaha_total(db, user.id, exclude_id=row.id)
+        old_was = old_category
+        before = _usaha_total(db, user.id, tax_year=ruleset.tax_year, as_of=today_jakarta())
         row.category = category
         row.source = "rule"
         row.rule_id = rule_id
         row.confidence = confidence
         row.requires_clarification = requires_clarification
         row.version += 1
-        after = before + row.amount_idr if category == "usaha" else before
+        after = before
+        if old_was == "usaha" and row.tx_date <= today_jakarta():
+            after -= row.amount_idr
+        if category == "usaha" and row.tx_date <= today_jakarta():
+            after += row.amount_idr
         db.add(
             ClassificationEvent(
                 id=new_id("evt_"),
@@ -668,7 +695,7 @@ def reclassify_transactions(
             }
         )
     start = min(r.tx_date.month for r in rows)
-    _stale_and_rebuild(db, profile, ruleset, from_month=start, end_month=12)
+    _stale_and_rebuild(db, profile, ruleset, from_month=start)
     db.commit()
     return {"reclassified_count": len(results), "results": results}
 
@@ -726,10 +753,37 @@ def recalculate_snapshots(db: Session, user: User, tax_year: int, ruleset: Rules
     }
 
 
+def _parse_month_key(tax_year: int, month: str) -> str:
+    """Validate path ``month`` (``MM`` or ``YYYY-MM``) → ``YYYY-MM`` (API §5.21)."""
+    raw = (month or "").strip()
+    if raw.isdigit():
+        month_num = int(raw)
+        if month_num < 1 or month_num > 12:
+            raise ApiError(422, "INVALID_DATE_RANGE", "Bulan harus antara 1 dan 12.")
+        return f"{tax_year}-{month_num:02d}"
+    if len(raw) == 7 and raw[4] == "-":
+        year_part, month_part = raw.split("-", 1)
+        if not (year_part.isdigit() and month_part.isdigit()):
+            raise ApiError(422, "INVALID_DATE_RANGE", "Format bulan tidak valid.")
+        year_num = int(year_part)
+        month_num = int(month_part)
+        if year_num != tax_year:
+            raise ApiError(
+                422,
+                "INVALID_DATE_RANGE",
+                f"Bulan harus berada di tahun pajak {tax_year}.",
+            )
+        if month_num < 1 or month_num > 12:
+            raise ApiError(422, "INVALID_DATE_RANGE", "Bulan harus antara 1 dan 12.")
+        return f"{tax_year}-{month_num:02d}"
+    raise ApiError(422, "INVALID_DATE_RANGE", "Format bulan tidak valid.")
+
+
 def month_snapshot(db: Session, user: User, tax_year: int, month: str, ruleset: Ruleset) -> dict:
     """GET /tax/snapshots/{tax_year}/{month} — FR-47 jejak cuplikan bulan."""
     if tax_year != ruleset.tax_year:
         raise ApiError(422, "INVALID_DATE_RANGE", f"Tahun pajak harus {ruleset.tax_year}.")
+    month_key = _parse_month_key(tax_year, month)
     profile = find_profile(db, user, tax_year)
     if profile is None:
         raise ApiError(
@@ -737,7 +791,6 @@ def month_snapshot(db: Session, user: User, tax_year: int, month: str, ruleset: 
             "PROFILE_NOT_FOUND",
             "Profil untuk tahun pajak yang dipilih belum dibuat.",
         )
-    month_key = month if len(month) == 7 else f"{tax_year}-{int(month):02d}"
     row = get_berlaku(db, profile, month_key)
     if row is None:
         raise ApiError(404, "SNAPSHOT_NOT_FOUND", "Cuplikan bulan yang diminta tidak ada.")
@@ -768,13 +821,30 @@ def month_snapshot(db: Session, user: User, tax_year: int, month: str, ruleset: 
     }
 
 
-def _usaha_total(db: Session, user_id: str, *, exclude_id: str) -> int:
+def _usaha_total(
+    db: Session,
+    user_id: str,
+    *,
+    tax_year: int,
+    as_of: date,
+    exclude_id: str | None = None,
+) -> int:
+    """Usaha YTD through ``as_of`` for FR-16a (tax_year + tx_date <= as_of).
+
+    ``exclude_id`` is for create only (row already flushed). Existing-row
+    override/reclassify/clarification omit it so before includes the row's
+    prior usaha amount (API §5.19).
+    """
+    conditions = [
+        TransactionRow.user_id == user_id,
+        TransactionRow.category == "usaha",
+        TransactionRow.tx_date >= date(tax_year, 1, 1),
+        TransactionRow.tx_date <= as_of,
+    ]
+    if exclude_id is not None:
+        conditions.append(TransactionRow.id != exclude_id)
     total = db.scalar(
-        select(func.coalesce(func.sum(TransactionRow.amount_idr), 0)).where(
-            TransactionRow.user_id == user_id,
-            TransactionRow.category == "usaha",
-            TransactionRow.id != exclude_id,
-        )
+        select(func.coalesce(func.sum(TransactionRow.amount_idr), 0)).where(*conditions)
     )
     return int(total or 0)
 

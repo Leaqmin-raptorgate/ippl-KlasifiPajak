@@ -1,6 +1,6 @@
 """M50 Tax lane tests with catalog TC ids (asserted, not docstring-only)."""
 
-from datetime import timedelta
+from datetime import date, timedelta
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -9,6 +9,7 @@ from app.db import SessionLocal
 from app.models import ClassificationEvent, MonthSnapshot, Profile, QuotaCounter, User
 from app.security import now_utc
 from app.services.snapshot import DISCLAIMER
+from app.services.snapshots_store import freeze_today_jakarta, today_jakarta
 
 AUTH = {
     "email": "taxlane@example.com",
@@ -136,43 +137,56 @@ def test_tc_4_3_41_edit_amount_rebuilds_and_bumps_version(client):
 
 
 def test_tc_4_3_42_put_moves_month_rebuilds_earlier_through_december(client):
-    """TC-4.3-42 — move tx_date Oct→Mar rebuilds March through December."""
-    _auth(client)
-    assert _profile(client).status_code == 200
-    body = _tx(client).json()
-    me = client.get("/api/v1/auth/me").json()
-    db = SessionLocal()
-    try:
-        profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
-        before_march = _assert_one_berlaku_contiguous(db, profile.id, "2026-03")
-    finally:
-        db.close()
+    """TC-4.3-42 — move tx_date Oct→Mar rebuilds March through Jakarta as_of month.
 
-    moved = client.put(
-        f"/api/v1/transactions/{body['id']}",
-        json={
-            "amount_idr": 12_500_000,
-            "tx_date": "2026-03-10",
-            "client_name": "PT Sumber Makmur",
-            "description": "Penjualan sembako",
-            "invoice_no": "INV-TAX-001",
-            "withheld_tax_amount_idr": 0,
-            "source_channel": "corporate_client",
-            "version": 1,
-        },
-    )
-    assert moved.status_code == 200, moved.text
+    API §5.12 names "through December" as the ordered free-band band; API §2.4
+    caps materialised months at today's Jakarta month for the current year.
+    """
+    with freeze_today_jakarta(date(2026, 11, 2)):
+        _auth(client)
+        assert _profile(client).status_code == 200
+        body = _tx(client).json()
+        me = client.get("/api/v1/auth/me").json()
+        db = SessionLocal()
+        try:
+            profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
+            before_march = _assert_one_berlaku_contiguous(db, profile.id, "2026-03")
+        finally:
+            db.close()
 
-    db = SessionLocal()
-    try:
-        profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
-        after_march = _assert_one_berlaku_contiguous(db, profile.id, "2026-03")
-        assert after_march > before_march
-        # October was in the rebuild band (Mar–Dec) and must still be single berlaku.
-        _assert_one_berlaku_contiguous(db, profile.id, "2026-10")
-        _assert_one_berlaku_contiguous(db, profile.id, "2026-12")
-    finally:
-        db.close()
+        moved = client.put(
+            f"/api/v1/transactions/{body['id']}",
+            json={
+                "amount_idr": 12_500_000,
+                "tx_date": "2026-03-10",
+                "client_name": "PT Sumber Makmur",
+                "description": "Penjualan sembako",
+                "invoice_no": "INV-TAX-001",
+                "withheld_tax_amount_idr": 0,
+                "source_channel": "corporate_client",
+                "version": 1,
+            },
+        )
+        assert moved.status_code == 200, moved.text
+
+        db = SessionLocal()
+        try:
+            profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
+            after_march = _assert_one_berlaku_contiguous(db, profile.id, "2026-03")
+            assert after_march > before_march
+            # October and November (as_of month) stay single berlaku; December must
+            # not exist while today is still November (§2.4).
+            _assert_one_berlaku_contiguous(db, profile.id, "2026-10")
+            _assert_one_berlaku_contiguous(db, profile.id, "2026-11")
+            dec = db.scalars(
+                select(MonthSnapshot).where(
+                    MonthSnapshot.profile_id == profile.id,
+                    MonthSnapshot.month_key == "2026-12",
+                )
+            ).all()
+            assert dec == []
+        finally:
+            db.close()
 
 
 def test_tc_4_3_43_put_stale_version_conflict(client):
@@ -243,11 +257,27 @@ def test_tc_4_3_44_put_other_account_is_404(client):
 
 
 def test_tc_4_3_45_description_only_keeps_classification(client):
-    """TC-4.3-45 — description-only edit stores text; classification not re-run."""
+    """TC-4.3-45 — description-only edit stores text; classification not re-run;
+    snapshot version is not bumped (hash no-op / Argon finding 4)."""
     _auth(client)
     assert _profile(client).status_code == 200
     body = _tx(client).json()
     assert body["category"] == "usaha"
+    me = client.get("/api/v1/auth/me").json()
+    db = SessionLocal()
+    try:
+        profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
+        before_version = _assert_one_berlaku_contiguous(db, profile.id, "2026-10")
+        before_hash = db.scalar(
+            select(MonthSnapshot.input_hash).where(
+                MonthSnapshot.profile_id == profile.id,
+                MonthSnapshot.month_key == "2026-10",
+                MonthSnapshot.status == "berlaku",
+            )
+        )
+    finally:
+        db.close()
+
     edited = client.put(
         f"/api/v1/transactions/{body['id']}",
         json={
@@ -265,6 +295,35 @@ def test_tc_4_3_45_description_only_keeps_classification(client):
     assert edited.json()["category"] == "usaha"
     assert edited.json()["source"] == "rule"
     assert "catatan tambahan" in edited.json()["description"]
+
+    db = SessionLocal()
+    try:
+        profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
+        after_version = _assert_one_berlaku_contiguous(db, profile.id, "2026-10")
+        assert after_version == before_version
+        after_hash = db.scalar(
+            select(MonthSnapshot.input_hash).where(
+                MonthSnapshot.profile_id == profile.id,
+                MonthSnapshot.month_key == "2026-10",
+                MonthSnapshot.status == "berlaku",
+            )
+        )
+        assert after_hash == before_hash
+        # Create already left an usang sibling (seed v1 → create v2). Description-only
+        # must not add another version / usang row.
+        usang_versions = [
+            r.version
+            for r in db.scalars(
+                select(MonthSnapshot).where(
+                    MonthSnapshot.profile_id == profile.id,
+                    MonthSnapshot.month_key == "2026-10",
+                    MonthSnapshot.status == "usang",
+                )
+            ).all()
+        ]
+        assert max(usang_versions, default=0) < after_version
+    finally:
+        db.close()
 
 
 def test_tc_4_3_46_rejects_non_positive_amount(client):
@@ -437,10 +496,20 @@ def test_api_5_17_clarification_version_conflict(client):
 
 
 def test_override_and_audit_trail_fr16a(client):
-    """FR-16a / API §5.18–5.19 — override records user_override on the jejak."""
+    """FR-16a / API §5.18–5.19 — override records user_override on the jejak.
+
+    Spec create example amount is Rp12.500.000 (§5.11). Override of the sole
+    usaha row to pekerjaan_bebas: before includes the row (12_500_000), after=0.
+    """
     _auth(client)
     assert _profile(client).status_code == 200
     body = _tx(client).json()
+    assert body["amount_idr"] == 12_500_000
+    assert body["category"] == "usaha"
+    create_evt = client.get(f"/api/v1/transactions/{body['id']}/audit-trail").json()["events"][0]
+    assert create_evt["ytd_usaha_omzet_before_idr"] == 0
+    assert create_evt["ytd_usaha_omzet_after_idr"] == 12_500_000
+
     overridden = client.post(
         f"/api/v1/transactions/{body['id']}/override",
         json={"new_category": "pekerjaan_bebas", "note": "Honor narasumber"},
@@ -457,6 +526,7 @@ def test_override_and_audit_trail_fr16a(client):
     last = events[-1]
     assert last["source"] == "user_override"
     assert last["new_category"] == "pekerjaan_bebas"
+    assert last["ytd_usaha_omzet_before_idr"] == 12_500_000
     assert last["ytd_usaha_omzet_after_idr"] == 0
     assert "ruleset_id" in last
 
@@ -509,15 +579,24 @@ def test_tc_pr4_aud_01_audit_trail_append_only(client):
 
 
 def test_reclassify_rules_layer(client):
-    """API §5.9 — reclassify runs keyword pipeline atomically."""
+    """API §5.9 — reclassify runs keyword pipeline atomically.
+
+    After override to usaha, FR-16a before includes Rp12.500.000; reclassify back
+    to pekerjaan_bebas records before=12_500_000, after=0 (§5.19 / Argon #3).
+    """
     _auth(client)
     assert _profile(client).status_code == 200
     body = _tx(client, description="fee konsultasi", invoice_no="INV-RECLASS").json()
     assert body["category"] == "pekerjaan_bebas"
+    assert body["amount_idr"] == 12_500_000
     client.post(
         f"/api/v1/transactions/{body['id']}/override",
         json={"new_category": "usaha"},
     )
+    override_evt = client.get(f"/api/v1/transactions/{body['id']}/audit-trail").json()["events"][-1]
+    assert override_evt["ytd_usaha_omzet_before_idr"] == 0
+    assert override_evt["ytd_usaha_omzet_after_idr"] == 12_500_000
+
     result = client.post(
         "/api/v1/transactions/reclassify",
         json={"transaction_ids": [body["id"]]},
@@ -526,6 +605,11 @@ def test_reclassify_rules_layer(client):
     payload = result.json()
     assert payload["reclassified_count"] == 1
     assert payload["results"][0]["new_category"] == "pekerjaan_bebas"
+    reclass_evt = client.get(f"/api/v1/transactions/{body['id']}/audit-trail").json()["events"][-1]
+    assert reclass_evt["source"] == "rule"
+    assert reclass_evt["ytd_usaha_omzet_before_idr"] == 12_500_000
+    assert reclass_evt["ytd_usaha_omzet_after_idr"] == 0
+
     assert payload["results"][0]["source"] == "rule"
 
 
@@ -1446,5 +1530,148 @@ def test_tc_4_5_64_concurrent_put_and_recalculate_no_deadlock(client):
     db = SessionLocal()
     try:
         _assert_one_berlaku_contiguous(db, profile_id, "2026-10")
+    finally:
+        db.close()
+
+
+def test_tc_argon_asof_future_tx_excluded_from_snapshots_and_dashboard(client):
+    """Argon #2 / API §2.4 §5.11 — future-dated usaha is stored but excluded.
+
+    With today frozen to 2026-11-02, a 2026-12-15 usaha tx must not change
+    usaha_ytd, remaining_free_band_idr, or monthly_summaries; no month rows
+    past November exist.
+    """
+    with freeze_today_jakarta(date(2026, 11, 2)):
+        _auth(client)
+        assert _profile(client).status_code == 200
+        assert _tx(client).status_code == 201  # 2026-10-15 usaha 12.5M
+
+        before = client.get("/api/v1/tax/dashboard?tax_year=2026").json()
+        assert before["thresholds"]["pita_500_juta"]["ytd_usaha_omzet_idr"] == 12_500_000
+        remaining_before = before["thresholds"]["pita_500_juta"]["remaining_free_band_idr"]
+        months_before = [m["month"] for m in before["monthly_summaries"]]
+        assert "2026-11" in months_before
+        assert "2026-12" not in months_before
+
+        future = _tx(
+            client,
+            tx_date="2026-12-15",
+            invoice_no="INV-FUTURE-001",
+            amount_idr=50_000_000,
+            description="Penjualan sembako desember",
+        )
+        assert future.status_code == 201, future.text
+        assert future.json()["category"] == "usaha"
+
+        after = client.get("/api/v1/tax/dashboard?tax_year=2026").json()
+        assert after["thresholds"]["pita_500_juta"]["ytd_usaha_omzet_idr"] == 12_500_000
+        assert after["thresholds"]["pita_500_juta"]["remaining_free_band_idr"] == remaining_before
+        months_after = [m["month"] for m in after["monthly_summaries"]]
+        assert months_after == months_before
+        assert "2026-12" not in months_after
+
+        me = client.get("/api/v1/auth/me").json()
+        db = SessionLocal()
+        try:
+            profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
+            past_nov = db.scalars(
+                select(MonthSnapshot).where(
+                    MonthSnapshot.profile_id == profile.id,
+                    MonthSnapshot.month_key > "2026-11",
+                )
+            ).all()
+            assert past_nov == []
+        finally:
+            db.close()
+
+
+def test_tc_argon_month_path_foo_is_422(client):
+    """Argon #5 / API §5.21 — non-numeric month path is 422 INVALID_DATE_RANGE."""
+    _auth(client)
+    assert _profile(client).status_code == 200
+    resp = client.get("/api/v1/tax/snapshots/2026/foo")
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["error"]["code"] == "INVALID_DATE_RANGE"
+
+    resp13 = client.get("/api/v1/tax/snapshots/2026/13")
+    assert resp13.status_code == 422
+    assert resp13.json()["error"]["code"] == "INVALID_DATE_RANGE"
+
+    resp_year = client.get("/api/v1/tax/snapshots/2025/2025-10")
+    assert resp_year.status_code == 422
+    assert resp_year.json()["error"]["code"] == "INVALID_DATE_RANGE"
+
+
+def test_tc_argon_quota_ensure_counter_race(client):
+    """Argon #6 — concurrent first GET /quotas of a month: one insert, no error."""
+    import threading
+    from collections import Counter
+
+    _auth(client)
+    me = client.get("/api/v1/auth/me").json()
+    user_id = me["user_id"]
+
+    # Ensure no counter row yet for the current Jakarta month.
+    month_key = today_jakarta().strftime("%Y-%m")
+    db = SessionLocal()
+    try:
+        existing = db.scalars(
+            select(QuotaCounter).where(
+                QuotaCounter.user_id == user_id,
+                QuotaCounter.month_key == month_key,
+            )
+        ).all()
+        for row in existing:
+            db.delete(row)
+        db.commit()
+    finally:
+        db.close()
+
+    barrier = threading.Barrier(8)
+    outcomes: Counter = Counter()
+    lock = threading.Lock()
+
+    def worker() -> None:
+        barrier.wait(timeout=30)
+        # Each thread uses its own TestClient session cookie via login.
+        from app.main import app
+
+        local = TestClient(app)
+        assert (
+            local.post(
+                "/api/v1/auth/login",
+                json={"identifier": AUTH["email"], "password": AUTH["password"]},
+            ).status_code
+            == 200
+        )
+        try:
+            resp = local.get("/api/v1/quotas")
+            with lock:
+                outcomes[f"status:{resp.status_code}"] += 1
+                if resp.status_code == 200:
+                    outcomes["ok"] += 1
+        except Exception as exc:  # noqa: BLE001
+            with lock:
+                outcomes[f"exc:{type(exc).__name__}"] += 1
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=60)
+        assert not t.is_alive()
+
+    assert outcomes.get("ok", 0) == 8, dict(outcomes)
+    assert not any(k.startswith("exc:") for k in outcomes), dict(outcomes)
+
+    db = SessionLocal()
+    try:
+        rows = db.scalars(
+            select(QuotaCounter).where(
+                QuotaCounter.user_id == user_id,
+                QuotaCounter.month_key == month_key,
+            )
+        ).all()
+        assert len(rows) == 1
     finally:
         db.close()

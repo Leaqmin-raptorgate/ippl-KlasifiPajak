@@ -11,8 +11,10 @@ from datetime import date, datetime, time, timezone
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.api.errors import ApiError
 from app.engine import Ruleset
 from app.models import QuotaCounter, User
 from app.security import iso_utc, new_id, now_utc
@@ -71,23 +73,59 @@ def _jakarta_month_key(now: datetime | None = None) -> tuple[str, datetime]:
 
 
 def _ensure_counter(db: Session, user: User, month_key: str) -> tuple[QuotaCounter, bool]:
+    """Load or insert the month counter; race-safe on the (user_id, month_key) UK.
+
+    Uses a savepoint so a concurrent first-GET loses the insert cleanly. After
+    ``IntegrityError``, a locking re-select (current read) sees the winner under
+    MySQL REPEATABLE READ. Caller still commits only when ``created`` is True
+    (GET /quotas stays non-committing on an existing counter).
+    """
+    for _attempt in range(5):
+        row = db.scalar(
+            select(QuotaCounter).where(
+                QuotaCounter.user_id == user.id,
+                QuotaCounter.month_key == month_key,
+            )
+        )
+        if row is not None:
+            return row, False
+        try:
+            with db.begin_nested():
+                row = QuotaCounter(
+                    id=new_id("qc_"),
+                    user_id=user.id,
+                    month_key=month_key,
+                    ai_classification_used=0,
+                    assistant_chat_used=0,
+                )
+                db.add(row)
+                db.flush()
+            return row, True
+        except IntegrityError:
+            # Locking read bypasses the RR snapshot so we observe the committed
+            # winner instead of retrying inserts forever.
+            row = db.scalar(
+                select(QuotaCounter)
+                .where(
+                    QuotaCounter.user_id == user.id,
+                    QuotaCounter.month_key == month_key,
+                )
+                .with_for_update()
+            )
+            if row is not None:
+                return row, False
+            db.expire_all()
+            continue
     row = db.scalar(
-        select(QuotaCounter).where(
+        select(QuotaCounter)
+        .where(
             QuotaCounter.user_id == user.id,
             QuotaCounter.month_key == month_key,
         )
+        .with_for_update()
     )
     if row is None:
-        row = QuotaCounter(
-            id=new_id("qc_"),
-            user_id=user.id,
-            month_key=month_key,
-            ai_classification_used=0,
-            assistant_chat_used=0,
-        )
-        db.add(row)
-        db.flush()
-        return row, True
+        raise RuntimeError("quota counter insert raced without a surviving row")
     return row, False
 
 
@@ -122,9 +160,20 @@ def quotas(db: Session, user: User, ruleset: Ruleset) -> dict:
 
 
 def set_subscription_override(
-    db: Session, user: User, *, paid_flag: bool, valid_until: datetime | None
+    db: Session,
+    *,
+    user_id: str,
+    paid_flag: bool,
+    valid_until: datetime | None,
 ) -> dict:
-    """Test-support paid_flag adapter (API §5.31 / HB-29). Caller gates env."""
+    """Test-support paid_flag adapter (API §5.31 / HB-29). Caller gates env.
+
+    Looks up the user inside the service (AGENTS.md / REVIEW.md layering:
+    routes must not run ORM queries).
+    """
+    user = db.scalar(select(User).where(User.id == user_id))
+    if user is None:
+        raise ApiError(404, "USER_NOT_FOUND", "Pengguna tidak ditemukan.")
     user.paid_flag = paid_flag
     user.valid_until_utc = valid_until
     db.commit()
