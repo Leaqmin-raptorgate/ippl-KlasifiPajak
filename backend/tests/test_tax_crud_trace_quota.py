@@ -1234,3 +1234,217 @@ def test_tc_4_5_28_hb12_plus_one_ineligible(client):
     prior = dashboard["thresholds"]["eligibility_prior_year_cap_4_8m"]
     assert prior["combined_prior_year_gross_idr"] == 4_800_000_001
     assert prior["status"] == "scheme_ineligible"
+
+
+def test_tc_4_3_64_parallel_puts_same_version_one_winner(client):
+    """TC-4.3-64 — N≥8 parallel PUTs at the same version: exactly one 2xx.
+
+    Adapted from review-pr4-scratch/pr4_concurrency_stress.py (direct service
+    path). Losers must be 409 VERSION_CONFLICT; final row.version == start+1.
+    """
+    import threading
+    from collections import Counter
+
+    from app.api.errors import ApiError
+    from app.engine.ruleset import load_ruleset
+    from app.models import Transaction as TransactionRow
+    from app.schemas.transaction import TransactionUpdate
+    from app.services import transactions as tx_svc
+
+    _auth(client)
+    assert _profile(client).status_code == 200
+    body = _tx(client).json()
+    tx_id = body["id"]
+    start_version = body["version"]
+    assert start_version == 1
+    me = client.get("/api/v1/auth/me").json()
+    user_id = me["user_id"]
+
+    n = 8
+    barrier = threading.Barrier(n)
+    outcomes: Counter = Counter()
+    lock = threading.Lock()
+    ruleset = load_ruleset()
+
+    def worker(i: int) -> None:
+        barrier.wait(timeout=30)
+        db = SessionLocal()
+        try:
+            user = db.scalar(select(User).where(User.id == user_id))
+            payload = TransactionUpdate(
+                amount_idr=12_500_000 + (i + 1) * 1000,
+                tx_date=__import__("datetime").date(2026, 10, 15),
+                client_name="PT Sumber Makmur",
+                description="Penjualan sembako",
+                invoice_no="INV-TAX-001",
+                withheld_tax_amount_idr=0,
+                source_channel="corporate_client",
+                version=start_version,
+            )
+            tx_svc.update_transaction(db, user, tx_id, payload, ruleset)
+            with lock:
+                outcomes["2xx"] += 1
+        except ApiError as exc:
+            db.rollback()
+            with lock:
+                if exc.status == 409 and exc.code == "VERSION_CONFLICT":
+                    outcomes["409_VERSION_CONFLICT"] += 1
+                else:
+                    outcomes[f"api:{exc.status}:{exc.code}"] += 1
+        except Exception as exc:  # noqa: BLE001
+            db.rollback()
+            with lock:
+                outcomes[f"OTHER:{type(exc).__name__}"] += 1
+        finally:
+            db.close()
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=90)
+        assert not t.is_alive()
+
+    assert outcomes["2xx"] == 1, dict(outcomes)
+    assert outcomes["409_VERSION_CONFLICT"] == n - 1, dict(outcomes)
+    assert sum(outcomes.values()) == n
+
+    db = SessionLocal()
+    try:
+        row = db.scalar(select(TransactionRow).where(TransactionRow.id == tx_id))
+        assert row is not None
+        assert row.version == start_version + 1
+        profile = db.scalar(select(Profile).where(Profile.user_id == user_id))
+        _assert_one_berlaku_contiguous(db, profile.id, "2026-10")
+    finally:
+        db.close()
+
+
+def test_tc_4_5_64_concurrent_put_and_recalculate_no_deadlock(client):
+    """TC-4.5-64 — concurrent PUT + recalculate on same profile: no deadlock.
+
+    One thread marks usang + recalculates; peers issue PUTs. Outcomes must be
+    2xx or 409 only (no OperationalError 1213 / 5xx-class). Snapshots keep
+    exactly one berlaku per month.
+    """
+    import threading
+    from collections import Counter
+    from datetime import date
+
+    from sqlalchemy.exc import OperationalError
+
+    from app.api.errors import ApiError
+    from app.engine.ruleset import load_ruleset
+    from app.models import Transaction as TransactionRow
+    from app.schemas.transaction import TransactionUpdate
+    from app.services import transactions as tx_svc
+    from app.services.snapshots_store import mark_usang, rebuild
+
+    _auth(client)
+    assert _profile(client).status_code == 200
+    body = _tx(client).json()
+    tx_id = body["id"]
+    me = client.get("/api/v1/auth/me").json()
+    user_id = me["user_id"]
+    ruleset = load_ruleset()
+
+    # Leave October usang so recalculate has work to do.
+    db = SessionLocal()
+    try:
+        profile = db.scalar(select(Profile).where(Profile.user_id == user_id))
+        profile_id = profile.id
+        mark_usang(db, profile, ["2026-10"])
+        db.commit()
+    finally:
+        db.close()
+
+    n_put = 4
+    barrier = threading.Barrier(n_put + 1)
+    outcomes: Counter = Counter()
+    lock = threading.Lock()
+
+    def put_worker(i: int) -> None:
+        barrier.wait(timeout=30)
+        db = SessionLocal()
+        try:
+            user = db.scalar(select(User).where(User.id == user_id))
+            row = db.scalar(select(TransactionRow).where(TransactionRow.id == tx_id))
+            ver = row.version
+            payload = TransactionUpdate(
+                amount_idr=12_500_000 + (i + 1) * 500,
+                tx_date=date(2026, 10, 15),
+                client_name="PT Sumber Makmur",
+                description="Penjualan sembako",
+                invoice_no="INV-TAX-001",
+                withheld_tax_amount_idr=0,
+                source_channel="corporate_client",
+                version=ver,
+            )
+            tx_svc.update_transaction(db, user, tx_id, payload, ruleset)
+            with lock:
+                outcomes["put_2xx"] += 1
+        except ApiError as exc:
+            db.rollback()
+            with lock:
+                if exc.status == 409 and exc.code == "VERSION_CONFLICT":
+                    outcomes["put_409"] += 1
+                else:
+                    outcomes[f"put_api:{exc.status}:{exc.code}"] += 1
+        except OperationalError as exc:
+            db.rollback()
+            with lock:
+                outcomes[f"put_deadlock:{exc.orig.args[0] if exc.orig else exc}"] += 1
+        except Exception as exc:  # noqa: BLE001
+            db.rollback()
+            with lock:
+                outcomes[f"put_OTHER:{type(exc).__name__}"] += 1
+        finally:
+            db.close()
+
+    def recalc_worker() -> None:
+        barrier.wait(timeout=30)
+        db = SessionLocal()
+        try:
+            profile = db.scalar(select(Profile).where(Profile.id == profile_id))
+            rebuild(db, profile, ruleset, only_usang=True)
+            db.commit()
+            with lock:
+                outcomes["recalc_ok"] += 1
+        except ApiError as exc:
+            db.rollback()
+            with lock:
+                if exc.status == 409 and exc.code == "VERSION_CONFLICT":
+                    outcomes["recalc_409"] += 1
+                else:
+                    outcomes[f"recalc_api:{exc.status}:{exc.code}"] += 1
+        except OperationalError as exc:
+            db.rollback()
+            with lock:
+                outcomes[f"recalc_deadlock:{exc.orig.args[0] if exc.orig else exc}"] += 1
+        except Exception as exc:  # noqa: BLE001
+            db.rollback()
+            with lock:
+                outcomes[f"recalc_OTHER:{type(exc).__name__}"] += 1
+        finally:
+            db.close()
+
+    threads = [threading.Thread(target=put_worker, args=(i,)) for i in range(n_put)]
+    threads.append(threading.Thread(target=recalc_worker))
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=90)
+        assert not t.is_alive()
+
+    assert not any("deadlock" in k for k in outcomes), dict(outcomes)
+    assert not any(k.startswith("put_OTHER") or k.startswith("recalc_OTHER") for k in outcomes), (
+        dict(outcomes)
+    )
+    assert outcomes.get("recalc_ok", 0) + outcomes.get("recalc_409", 0) == 1, dict(outcomes)
+    assert outcomes.get("put_2xx", 0) + outcomes.get("put_409", 0) == n_put, dict(outcomes)
+
+    db = SessionLocal()
+    try:
+        _assert_one_berlaku_contiguous(db, profile_id, "2026-10")
+    finally:
+        db.close()

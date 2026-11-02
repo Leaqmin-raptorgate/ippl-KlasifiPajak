@@ -11,7 +11,7 @@ from app.models import Profile as ProfileRow
 from app.models import ProfileChange, User
 from app.schemas.account import AuditEntry, ProfileOut, ProfileUpdate
 from app.security import new_id, now_utc
-from app.services.snapshots_store import mark_usang, rebuild
+from app.services.snapshots_store import lock_profile, mark_usang, rebuild
 
 _NIB = re.compile(r"^\d{4}$")
 _BUSINESS_FIELDS = (
@@ -139,8 +139,11 @@ def update_profile(
         )
         if has_snap is None:
             # Initial profile: seed the year band (no prior berlaku to mark).
+            # rebuild() takes the profile lock first.
             rebuild(db, profile, ruleset, only_usang=False)
         elif snapshot_touch:
+            # Lock order: profile → snapshots (never mark_usang before profile).
+            lock_profile(db, profile)
             mark_usang(db, profile, None)
             rebuild(db, profile, ruleset, only_usang=True)
     db.commit()

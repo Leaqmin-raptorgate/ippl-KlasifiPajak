@@ -108,8 +108,10 @@ def mark_usang(db: Session, profile: ProfileRow, month_keys: list[str] | None = 
     return len(rows)
 
 
-def _lock_profile(db: Session, profile: ProfileRow) -> None:
-    """First statement of a rebuild: exclusive lock on the profile row."""
+def lock_profile(db: Session, profile: ProfileRow) -> None:
+    """Exclusive lock on the profile row — must be acquired BEFORE any
+    snapshot or transaction mutation lock (profile → tx → snapshots).
+    """
     db.execute(
         text("SELECT id FROM profiles WHERE id = :id FOR UPDATE"),
         {"id": profile.id},
@@ -234,9 +236,9 @@ def rebuild(
         When true (POST recalculate / API §5.22), only months whose current
         status is ``usang`` are recomputed. Untouched ``berlaku`` rows stay.
     """
-    # BLOCKER 1: profile FOR UPDATE is the first statement — before any
-    # snapshot or max(version) read.
-    _lock_profile(db, profile)
+    # Profile FOR UPDATE is the first statement — before any snapshot or
+    # max(version) read (lock order: profile → tx → snapshots).
+    lock_profile(db, profile)
     _lock_snapshots(db, profile.id)
 
     last_error: IntegrityError | None = None

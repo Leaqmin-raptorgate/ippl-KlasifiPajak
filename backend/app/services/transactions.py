@@ -33,10 +33,13 @@ from app.services.profile import find_profile
 from app.services.snapshot import DISCLAIMER
 from app.services.snapshots_store import (
     get_berlaku,
+    lock_profile,
     mark_usang,
     month_keys_through,
     rebuild,
 )
+
+VERSION_CONFLICT_MESSAGE = "Data ini sudah diubah di perangkat lain. Muat ulang, lalu simpan lagi."
 
 _SOURCE_CHANNELS = frozenset({"marketplace", "corporate_client", "retail", "other"})
 
@@ -73,10 +76,92 @@ def _stale_and_rebuild(
     from_month: int,
     end_month: int = 12,
 ) -> list:
-    """Mark affected months usang then recompute them (FR-23a / API §5.12/§5.22)."""
+    """Mark affected months usang then recompute them (FR-23a / API §5.12/§5.22).
+
+    Lock order: profile FOR UPDATE first, then snapshot rows inside
+    ``mark_usang`` / ``rebuild`` (never snapshots-before-profile).
+    """
     keys = month_keys_through(ruleset.tax_year, from_month, end_month=end_month)
+    lock_profile(db, profile)
     mark_usang(db, profile, keys)
     return rebuild(db, profile, ruleset, month_keys=keys, only_usang=False)
+
+
+def _require_profile(db: Session, user: User, tax_year: int):
+    profile = find_profile(db, user, tax_year)
+    if profile is None:
+        raise ApiError(
+            404,
+            "PROFILE_NOT_FOUND",
+            "Profil untuk tahun pajak berjalan belum dibuat.",
+        )
+    return profile
+
+
+def get_transaction_for_update(db: Session, user: User, transaction_id: str) -> TransactionRow:
+    """Load one owned row under ``SELECT … FOR UPDATE`` (API §5.12 TOCTOU guard)."""
+    row = db.scalar(
+        select(TransactionRow)
+        .where(
+            TransactionRow.id == transaction_id,
+            TransactionRow.user_id == user.id,
+        )
+        .with_for_update()
+    )
+    if row is None:
+        raise ApiError(404, "TRANSACTION_NOT_FOUND", "Transaksi tidak ditemukan.")
+    return row
+
+
+def _owned_transaction_exists(db: Session, user: User, transaction_id: str) -> bool:
+    """Unlocked ownership probe so IDOR stays ``TRANSACTION_NOT_FOUND`` (not profile 404)."""
+    return (
+        db.scalar(
+            select(TransactionRow.id).where(
+                TransactionRow.id == transaction_id,
+                TransactionRow.user_id == user.id,
+            )
+        )
+        is not None
+    )
+
+
+def _assert_expected_version(row: TransactionRow, expected: int | None) -> None:
+    """Raise 409 VERSION_CONFLICT when the client-supplied version does not match."""
+    if expected is None:
+        return
+    if expected != row.version:
+        raise ApiError(409, "VERSION_CONFLICT", VERSION_CONFLICT_MESSAGE)
+
+
+def _claim_transaction_version(db: Session, user: User, transaction_id: str, expected: int) -> int:
+    """Conditional version bump: ``UPDATE … WHERE version=:expected``.
+
+    Returns the new version on success. ``rowcount==0`` → 409 (or 404 if gone).
+    Call only after ``lock_profile`` so lock order stays profile → tx.
+    """
+    from sqlalchemy import update
+
+    result = db.execute(
+        update(TransactionRow)
+        .where(
+            TransactionRow.id == transaction_id,
+            TransactionRow.user_id == user.id,
+            TransactionRow.version == expected,
+        )
+        .values(version=expected + 1)
+    )
+    if result.rowcount == 1:
+        return expected + 1
+    exists = db.scalar(
+        select(TransactionRow.id).where(
+            TransactionRow.id == transaction_id,
+            TransactionRow.user_id == user.id,
+        )
+    )
+    if exists is None:
+        raise ApiError(404, "TRANSACTION_NOT_FOUND", "Transaksi tidak ditemukan.")
+    raise ApiError(409, "VERSION_CONFLICT", VERSION_CONFLICT_MESSAGE)
 
 
 def _out(row: TransactionRow, classification: ClassificationOut | None = None) -> TransactionOut:
@@ -310,27 +395,28 @@ def answer_clarification(
     provisional category moves out of the exemption band if it was sitting
     there, because the band only ever holds classified ``usaha`` turnover.
     """
-    row = get_transaction(db, user, transaction_id)
-    if payload.version is not None and payload.version != row.version:
-        raise ApiError(
-            409,
-            "VERSION_CONFLICT",
-            "Baris sudah berubah di tempat lain. Muat ulang sebelum menjawab.",
-        )
+    if not _owned_transaction_exists(db, user, transaction_id):
+        raise ApiError(404, "TRANSACTION_NOT_FOUND", "Transaksi tidak ditemukan.")
+    profile = _require_profile(db, user, ruleset.tax_year)
+    lock_profile(db, profile)
+    row = get_transaction_for_update(db, user, transaction_id)
     if not row.requires_clarification:
         raise ApiError(
             409,
             "CLARIFICATION_NOT_REQUIRED",
             "Baris ini sudah terklasifikasi, jadi tidak ada pertanyaan yang menunggu.",
         )
-
-    profile = find_profile(db, user, ruleset.tax_year)
-    if profile is None:
-        raise ApiError(
-            404,
-            "PROFILE_NOT_FOUND",
-            "Profil untuk tahun pajak berjalan belum dibuat.",
-        )
+    if payload.version is not None:
+        if payload.version != row.version:
+            raise ApiError(
+                409,
+                "VERSION_CONFLICT",
+                "Baris sudah berubah di tempat lain. Muat ulang sebelum menjawab.",
+            )
+        _claim_transaction_version(db, user, transaction_id, payload.version)
+        row.version = payload.version + 1
+    else:
+        row.version += 1
 
     before = _usaha_total(db, user.id, exclude_id=row.id)
     old_category = row.category
@@ -338,7 +424,6 @@ def answer_clarification(
     row.source = "user_clarification"
     row.requires_clarification = False
     row.confidence = 1.0
-    row.version += 1
     after = before + row.amount_idr if payload.category == "usaha" else before
 
     db.add(
@@ -374,14 +459,11 @@ def update_transaction(
 
     Classification is not re-run on a field edit (UC-05a A1). Snapshots from the
     earlier of the old and new month through December are rebuilt (API §5.12).
+
+    Lock order: profile → transaction (FOR UPDATE + conditional version claim)
+    → snapshots. Parallel PUTs with the same expected version yield exactly one
+    2xx; the rest are 409 VERSION_CONFLICT.
     """
-    row = get_transaction(db, user, transaction_id)
-    if payload.version != row.version:
-        raise ApiError(
-            409,
-            "VERSION_CONFLICT",
-            "Data ini sudah diubah di perangkat lain. Muat ulang, lalu simpan lagi.",
-        )
     if payload.source_channel not in _SOURCE_CHANNELS:
         raise ApiError(422, "INVALID_SOURCE_CHANNEL", "Saluran sumber tidak dikenal.")
     if payload.tx_date.year != ruleset.tax_year:
@@ -390,9 +472,12 @@ def update_transaction(
             "INVALID_DATE_RANGE",
             f"Tanggal transaksi di luar tahun pajak {ruleset.tax_year}.",
         )
-    profile = find_profile(db, user, ruleset.tax_year)
-    if profile is None:
-        raise ApiError(404, "PROFILE_NOT_FOUND", "Profil untuk tahun pajak berjalan belum dibuat.")
+    if not _owned_transaction_exists(db, user, transaction_id):
+        raise ApiError(404, "TRANSACTION_NOT_FOUND", "Transaksi tidak ditemukan.")
+    profile = _require_profile(db, user, ruleset.tax_year)
+    lock_profile(db, profile)
+    row = get_transaction_for_update(db, user, transaction_id)
+    _assert_expected_version(row, payload.version)
 
     client_norm = normalize_text(payload.client_name)
     invoice_norm = normalize_text(payload.invoice_no) if payload.invoice_no else None
@@ -415,6 +500,8 @@ def update_transaction(
             )
 
     old_month = row.tx_date.month
+    # Conditional UPDATE claims the version slot; rowcount==0 → 409.
+    _claim_transaction_version(db, user, transaction_id, payload.version)
     row.tx_date = payload.tx_date
     row.amount_idr = payload.amount_idr
     row.withheld_tax_amount_idr = payload.withheld_tax_amount_idr
@@ -424,7 +511,8 @@ def update_transaction(
     row.invoice_no = payload.invoice_no or None
     row.invoice_no_norm = invoice_norm
     row.source_channel = payload.source_channel
-    row.version += 1
+    row.version = payload.version + 1
+    db.flush()
     start = min(old_month, payload.tx_date.month)
     _stale_and_rebuild(db, profile, ruleset, from_month=start, end_month=12)
     db.commit()
@@ -432,11 +520,15 @@ def update_transaction(
 
 
 def delete_transaction(db: Session, user: User, transaction_id: str, ruleset: Ruleset) -> dict:
-    """DELETE /transactions/{id} — cascade classification events, rebuild (FR-09)."""
-    row = get_transaction(db, user, transaction_id)
-    profile = find_profile(db, user, ruleset.tax_year)
-    if profile is None:
-        raise ApiError(404, "PROFILE_NOT_FOUND", "Profil untuk tahun pajak berjalan belum dibuat.")
+    """DELETE /transactions/{id} — cascade classification events, rebuild (FR-09).
+
+    Lock order: profile → transaction FOR UPDATE → snapshots.
+    """
+    if not _owned_transaction_exists(db, user, transaction_id):
+        raise ApiError(404, "TRANSACTION_NOT_FOUND", "Transaksi tidak ditemukan.")
+    profile = _require_profile(db, user, ruleset.tax_year)
+    lock_profile(db, profile)
+    row = get_transaction_for_update(db, user, transaction_id)
 
     for event in db.scalars(
         select(ClassificationEvent).where(ClassificationEvent.transaction_id == row.id)
@@ -457,11 +549,16 @@ def override_category(
     payload: OverrideIn,
     ruleset: Ruleset,
 ) -> TransactionOut:
-    """POST /transactions/{id}/override — no model call (FR-16 / API §5.18)."""
-    row = get_transaction(db, user, transaction_id)
-    profile = find_profile(db, user, ruleset.tax_year)
-    if profile is None:
-        raise ApiError(404, "PROFILE_NOT_FOUND", "Profil untuk tahun pajak berjalan belum dibuat.")
+    """POST /transactions/{id}/override — no model call (FR-16 / API §5.18).
+
+    Lock order: profile → transaction FOR UPDATE → snapshots. Serializes concurrent
+    overrides on the same row even though the body carries no ``version``.
+    """
+    if not _owned_transaction_exists(db, user, transaction_id):
+        raise ApiError(404, "TRANSACTION_NOT_FOUND", "Transaksi tidak ditemukan.")
+    profile = _require_profile(db, user, ruleset.tax_year)
+    lock_profile(db, profile)
+    row = get_transaction_for_update(db, user, transaction_id)
 
     before = _usaha_total(db, user.id, exclude_id=row.id)
     old_category = row.category
@@ -502,19 +599,27 @@ def reclassify_transactions(
     reservation. Each id runs the same keyword pipeline as create. One unknown
     id fails the whole request with no writes.
     """
-    profile = find_profile(db, user, ruleset.tax_year)
-    if profile is None:
-        raise ApiError(404, "PROFILE_NOT_FOUND", "Profil untuk tahun pajak berjalan belum dibuat.")
+    profile = _require_profile(db, user, ruleset.tax_year)
+    # Lock order: profile first, then each transaction FOR UPDATE in sorted id
+    # order (avoids lock-order inversion across concurrent reclassify calls).
+    lock_profile(db, profile)
 
     ids = list(payload.transaction_ids)
+    locked: dict[str, TransactionRow] = {}
+    for tx_id in sorted(set(ids)):
+        try:
+            locked[tx_id] = get_transaction_for_update(db, user, tx_id)
+        except ApiError as exc:
+            if exc.code == "TRANSACTION_NOT_FOUND":
+                raise ApiError(
+                    404,
+                    "TRANSACTION_NOT_FOUND",
+                    "Satu atau lebih transaksi tidak ditemukan pada akun Anda.",
+                ) from exc
+            raise
     rows = []
     for tx_id in ids:
-        row = db.scalar(
-            select(TransactionRow).where(
-                TransactionRow.id == tx_id,
-                TransactionRow.user_id == user.id,
-            )
-        )
+        row = locked.get(tx_id)
         if row is None:
             raise ApiError(
                 404,
