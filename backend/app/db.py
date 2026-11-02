@@ -2,7 +2,7 @@
 
 MySQL 8 is the only supported store (ERD r3). Instants are UTC
 ``DATETIME(6)`` values written by the application. Schema changes go through
-Alembic; ``create_all`` is fail-closed to an explicit APP_ENV allowlist.
+Alembic only — ``create_all`` is never invoked at API boot (HB-18 / B-11).
 """
 
 from collections.abc import Iterator
@@ -11,9 +11,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config.settings import Settings
-
-# create_all only for local/dev and the test suite — never staging/prod/empty.
-_CREATE_ALL_ENVS = frozenset({"development", "test"})
 
 
 class Base(DeclarativeBase):
@@ -35,14 +32,11 @@ def get_db() -> Iterator[Session]:
 
 
 def init_db() -> None:
-    """Create tables only when ``APP_ENV`` is development or test (fail-closed).
+    """Register mappers; do not create tables.
 
-    Production and any other/unknown env must use Alembic
-    (``alembic upgrade head``). Tests also call ``Base.metadata.create_all``
-    directly in conftest.
+    Schema is applied by ``alembic upgrade head`` (compose migrate service /
+    ops). Tests call ``Base.metadata.create_all`` in conftest only. Fail-closed
+    when ``APP_ENV`` is unset or any non-test runtime: never ``create_all`` here
+    (B-11), so a DML-only app user cannot hit MySQL 1142 on boot.
     """
     import app.models  # noqa: F401  (registers the mappers)
-
-    if _settings.app_env.casefold() not in _CREATE_ALL_ENVS:
-        return
-    Base.metadata.create_all(engine)

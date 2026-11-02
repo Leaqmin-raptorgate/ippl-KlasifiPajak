@@ -1,8 +1,8 @@
 """initial_erd_r3_d11 — ERD r3 baseline + D-11 snapshot versioning.
 
-Revision ID: 1320d317fad2
+Revision ID: 76fcdbc4af30
 Revises:
-Create Date: 2026-11-02 13:11:57.425460
+Create Date: 2026-11-02 15:01:17.859239
 
 """
 
@@ -14,7 +14,7 @@ from sqlalchemy.dialects import mysql
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "1320d317fad2"
+revision: str = "76fcdbc4af30"
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -151,7 +151,15 @@ def upgrade() -> None:
         sa.Column("plan_id", sa.String(length=32), nullable=False),
         sa.Column("amount_idr", sa.BigInteger(), nullable=False),
         sa.Column("status", sa.String(length=16), nullable=False),
-        sa.Column("pending_slot", sa.String(length=96), nullable=True),
+        sa.Column(
+            "pending_slot",
+            sa.String(length=96),
+            sa.Computed(
+                "CASE WHEN status = 'pending' AND user_id IS NOT NULL THEN CONCAT(user_id, ':', plan_id) ELSE NULL END",
+                persisted=True,
+            ),
+            nullable=True,
+        ),
         sa.Column("payment_url", sa.String(length=512), nullable=False),
         sa.Column("expires_at_utc", mysql.DATETIME(fsp=6), nullable=False),
         sa.Column("created_at", mysql.DATETIME(fsp=6), nullable=False),

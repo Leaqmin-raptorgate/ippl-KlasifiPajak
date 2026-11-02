@@ -4,6 +4,9 @@ TC ids: TC-HARD-12, TC-HARD-23, TC-HARD-24, TC-HARD-25, TC-HARD-26.
 
 Static checks that read repo-root infra files (Dockerfile, docker/mysql-init.sql)
 skip when those paths are absent — the runtime image only COPYs ``backend/``.
+
+Migration wipe/upgrade always targets a database whose name ends in ``_test``
+(default ``klasifipajak_migrate_test``), never the application schema.
 """
 
 from __future__ import annotations
@@ -11,12 +14,13 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
+from urllib.parse import urlparse, urlunparse
 
 import pymysql
 import pytest
 from alembic.config import Config
 from sqlalchemy import create_engine, text
-from sqlalchemy.exc import OperationalError, ProgrammingError
+from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
 
 from alembic import command
 
@@ -26,13 +30,8 @@ ALEMBIC_INI = BACKEND_ROOT / "alembic.ini"
 DOCKERFILE = REPO_ROOT / "Dockerfile"
 MYSQL_INIT = REPO_ROOT / "docker" / "mysql-init.sql"
 
-MIGRATE_URL = os.environ.get(
-    "MIGRATE_DATABASE_URL",
-    os.environ.get(
-        "DATABASE_URL",
-        "mysql+pymysql://klasifipajak_migrate:klasifipajak_migrate@127.0.0.1:3306/klasifipajak",
-    ),
-)
+# Dedicated schema for alembic wipe/upgrade (never the app DB).
+_DEFAULT_MIGRATE_TEST_DB = "klasifipajak_migrate_test"
 
 
 def _mysql_host() -> str:
@@ -41,6 +40,45 @@ def _mysql_host() -> str:
 
 def _mysql_port() -> int:
     return int(os.environ.get("MYSQL_PORT", "3306"))
+
+
+def _database_name(url: str) -> str:
+    path = urlparse(url).path.lstrip("/")
+    return path.split("?")[0]
+
+
+def _with_database(url: str, database: str) -> str:
+    parsed = urlparse(url)
+    return urlunparse(parsed._replace(path=f"/{database}"))
+
+
+def require_test_schema(url: str) -> str:
+    """Refuse URLs whose schema name does not end in ``_test``.
+
+    Hard guard for wipe/upgrade helpers so a mis-set ``MIGRATE_DATABASE_URL``
+    cannot drop the application schema (conftest promise).
+    """
+    name = _database_name(url)
+    if not name.endswith("_test"):
+        raise ValueError(
+            f"refusing to operate on non-test schema {name!r}; "
+            "migration tests require a database name ending in '_test'"
+        )
+    return name
+
+
+def _migrate_test_url() -> str:
+    """DSN for alembic wipe/upgrade: migrate credentials, ``*_test`` schema."""
+    test_db = os.environ.get("MYSQL_MIGRATE_TEST_DATABASE", _DEFAULT_MIGRATE_TEST_DB)
+    raw = os.environ.get("MIGRATE_DATABASE_URL") or os.environ.get("DATABASE_URL")
+    if raw:
+        name = _database_name(raw)
+        if name.endswith("_test"):
+            return raw
+        return _with_database(raw, test_db)
+    user = os.environ.get("MYSQL_MIGRATE_USER", "klasifipajak_migrate")
+    password = os.environ.get("MYSQL_MIGRATE_PASSWORD", "klasifipajak_migrate")
+    return f"mysql+pymysql://{user}:{password}@{_mysql_host()}:{_mysql_port()}/{test_db}"
 
 
 def _app_dsn() -> str:
@@ -54,8 +92,16 @@ def _app_dsn() -> str:
 
 
 def _migrate_dsn() -> str:
-    """DDL migration user DSN (matches docker/mysql-init.sql + compose)."""
+    """DDL migration user DSN for the runtime grant probe (may be app schema)."""
     if url := os.environ.get("MIGRATE_DATABASE_URL"):
+        # Grant probe may use migrate_test; rewrite to app schema if needed.
+        # Prefer explicit APP migrate path via MYSQL_MIGRATE_* + klasifipajak.
+        pass
+    if url := os.environ.get("MIGRATE_DATABASE_URL"):
+        # If pointed at *_test, still OK for DDL probe; also allow app schema URL
+        # via MYSQL_MIGRATE_APP_DATABASE_URL.
+        if app_url := os.environ.get("MIGRATE_APP_DATABASE_URL"):
+            return app_url
         return url
     user = os.environ.get("MYSQL_MIGRATE_USER", "klasifipajak_migrate")
     password = os.environ.get("MYSQL_MIGRATE_PASSWORD", "klasifipajak_migrate")
@@ -69,13 +115,14 @@ def fresh_database():
     yield
 
 
-def _alembic_config(url: str) -> Config:
+def _alembic_config(url: str, monkeypatch: pytest.MonkeyPatch) -> Config:
     cfg = Config(str(ALEMBIC_INI))
-    os.environ["MIGRATE_DATABASE_URL"] = url
+    monkeypatch.setenv("MIGRATE_DATABASE_URL", url)
     return cfg
 
 
 def _wipe_schema(url: str) -> None:
+    require_test_schema(url)
     engine = create_engine(url, pool_pre_ping=True)
     with engine.begin() as conn:
         conn.execute(text("SET FOREIGN_KEY_CHECKS=0"))
@@ -97,12 +144,37 @@ def _mysql_reachable(url: str) -> bool:
         return False
 
 
-def test_tc_hard_12_alembic_upgrade_empty_to_head_and_downgrade():
+def test_wipe_schema_refuses_non_test_database():
+    """Hard guard: wiping klasifipajak (no _test suffix) raises."""
+    with pytest.raises(ValueError, match="non-test schema"):
+        require_test_schema("mysql+pymysql://klasifipajak_migrate:x@127.0.0.1:3306/klasifipajak")
+    with pytest.raises(ValueError, match="non-test schema"):
+        _wipe_schema("mysql+pymysql://klasifipajak_migrate:x@127.0.0.1:3306/klasifipajak")
+    assert (
+        require_test_schema("mysql+pymysql://u:p@127.0.0.1:3306/klasifipajak_migrate_test")
+        == "klasifipajak_migrate_test"
+    )
+
+
+def test_migrate_test_url_rewrites_app_schema(monkeypatch):
+    """MIGRATE_DATABASE_URL on /klasifipajak is rewritten to *_test."""
+    monkeypatch.setenv(
+        "MIGRATE_DATABASE_URL",
+        "mysql+pymysql://klasifipajak_migrate:klasifipajak_migrate@127.0.0.1:3306/klasifipajak",
+    )
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    url = _migrate_test_url()
+    assert _database_name(url) == "klasifipajak_migrate_test"
+    assert "klasifipajak_migrate" in url
+
+
+def test_tc_hard_12_alembic_upgrade_empty_to_head_and_downgrade(monkeypatch):
     """TC-HARD-12: alembic upgrade empty→head (and downgrade back to base)."""
-    if not _mysql_reachable(MIGRATE_URL):
-        pytest.skip(f"MySQL not reachable for MIGRATE_URL={MIGRATE_URL}")
-    _wipe_schema(MIGRATE_URL)
-    cfg = _alembic_config(MIGRATE_URL)
+    migrate_url = _migrate_test_url()
+    if not _mysql_reachable(migrate_url):
+        pytest.skip(f"MySQL not reachable for migrate test URL={migrate_url}")
+    _wipe_schema(migrate_url)
+    cfg = _alembic_config(migrate_url, monkeypatch)
     old = os.getcwd()
     try:
         os.chdir(BACKEND_ROOT)
@@ -112,10 +184,10 @@ def test_tc_hard_12_alembic_upgrade_empty_to_head_and_downgrade():
     finally:
         os.chdir(old)
 
-    engine = create_engine(MIGRATE_URL, pool_pre_ping=True)
+    engine = create_engine(migrate_url, pool_pre_ping=True)
     with engine.connect() as conn:
         version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
-        assert version == "1320d317fad2"
+        assert version == "76fcdbc4af30"
         tables = {row[0] for row in conn.execute(text("SHOW TABLES")).fetchall()}
     engine.dispose()
     for required in (
@@ -146,6 +218,7 @@ def test_tc_hard_23_app_vs_migrate_mysql_grants_in_init_sql():
     sql = MYSQL_INIT.read_text(encoding="utf-8")
     assert "klasifipajak_app" in sql
     assert "klasifipajak_migrate" in sql
+    assert "klasifipajak_migrate_test" in sql
     assert re.search(
         r"GRANT\s+SELECT\s*,\s*INSERT\s*,\s*UPDATE\s*,\s*DELETE\s+ON\s+klasifipajak\.\*\s+TO\s+'klasifipajak_app'",
         sql,
@@ -171,6 +244,7 @@ def test_tc_hard_23_runtime_app_denied_migrate_allowed_ddl():
     ``MYSQL_MIGRATE_*``). Skips when MySQL or those users are unreachable.
     """
     app_url = _app_dsn()
+    # Prefer migrate credentials against a schema they can DDL (test or app).
     migrate_url = _migrate_dsn()
     if not _mysql_reachable(app_url):
         pytest.skip(f"app MySQL user not reachable ({app_url.split('@')[-1]})")
@@ -183,7 +257,6 @@ def test_tc_hard_23_runtime_app_denied_migrate_allowed_ddl():
         with pytest.raises((OperationalError, ProgrammingError, pymysql.err.Error)) as raised:
             conn.execute(text(f"CREATE TABLE `{probe}` (id INT PRIMARY KEY)"))
             conn.commit()
-        # MySQL 1142 = ER_TABLEACCESS_DENIED_ERROR
         err = str(raised.value)
         assert "1142" in err or "denied" in err.lower() or "CREATE" in err
     app_engine.dispose()
@@ -196,12 +269,13 @@ def test_tc_hard_23_runtime_app_denied_migrate_allowed_ddl():
     migrate_engine.dispose()
 
 
-def test_tc_hard_24_uk_fk_indexes_present_after_upgrade():
+def test_tc_hard_24_uk_fk_indexes_present_after_upgrade(monkeypatch):
     """TC-HARD-24: UK/FK/indexes from ERD r3 + D-11 present after upgrade."""
-    if not _mysql_reachable(MIGRATE_URL):
-        pytest.skip(f"MySQL not reachable for MIGRATE_URL={MIGRATE_URL}")
-    _wipe_schema(MIGRATE_URL)
-    cfg = _alembic_config(MIGRATE_URL)
+    migrate_url = _migrate_test_url()
+    if not _mysql_reachable(migrate_url):
+        pytest.skip(f"MySQL not reachable for migrate test URL={migrate_url}")
+    _wipe_schema(migrate_url)
+    cfg = _alembic_config(migrate_url, monkeypatch)
     old = os.getcwd()
     try:
         os.chdir(BACKEND_ROOT)
@@ -209,7 +283,7 @@ def test_tc_hard_24_uk_fk_indexes_present_after_upgrade():
     finally:
         os.chdir(old)
 
-    engine = create_engine(MIGRATE_URL, pool_pre_ping=True)
+    engine = create_engine(migrate_url, pool_pre_ping=True)
     with engine.connect() as conn:
         uk = conn.execute(
             text(
@@ -323,6 +397,37 @@ def test_tc_hard_24_uk_fk_indexes_present_after_upgrade():
         ]
         assert uk_tx_cols == ["duplicate_key"]
 
+        # ERD r3: pending_slot STORED generated + unique index
+        slot = conn.execute(
+            text(
+                """
+                SELECT EXTRA, GENERATION_EXPRESSION
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = 'subscription_orders'
+                  AND COLUMN_NAME = 'pending_slot'
+                """
+            )
+        ).one()
+        slot_extra, slot_expr = slot
+        assert "GENERATED" in slot_extra.upper() and "STORED" in slot_extra.upper()
+        assert slot_expr is not None and "pending" in slot_expr.lower()
+        assert "plan_id" in slot_expr
+        uk_so = {
+            row[0]
+            for row in conn.execute(
+                text(
+                    """
+                    SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS
+                    WHERE TABLE_SCHEMA = DATABASE()
+                      AND TABLE_NAME = 'subscription_orders'
+                      AND CONSTRAINT_TYPE = 'UNIQUE'
+                    """
+                )
+            ).fetchall()
+        }
+        assert "uq_subscription_orders_pending_slot" in uk_so
+
         # ERD r3: norm columns use utf8mb4_bin (not 0900_ai_ci)
         coll_rows = conn.execute(
             text(
@@ -347,7 +452,6 @@ def test_tc_hard_24_uk_fk_indexes_present_after_upgrade():
         ):
             assert got.get(key) == "utf8mb4_bin", f"{key} collation={got.get(key)}"
 
-        # ERD r3: instants are DATETIME(6)
         dt_type = conn.execute(
             text(
                 """
@@ -358,6 +462,126 @@ def test_tc_hard_24_uk_fk_indexes_present_after_upgrade():
             )
         ).scalar()
         assert dt_type == "datetime(6)"
+    engine.dispose()
+
+
+def test_pending_slot_generated_behaviour(monkeypatch):
+    """ERD pending_slot: UK rejects duplicate pending; null user_id / non-pending → NULL."""
+    migrate_url = _migrate_test_url()
+    if not _mysql_reachable(migrate_url):
+        pytest.skip(f"MySQL not reachable for migrate test URL={migrate_url}")
+    _wipe_schema(migrate_url)
+    cfg = _alembic_config(migrate_url, monkeypatch)
+    old = os.getcwd()
+    try:
+        os.chdir(BACKEND_ROOT)
+        command.upgrade(cfg, "head")
+    finally:
+        os.chdir(old)
+
+    engine = create_engine(migrate_url, pool_pre_ping=True)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO users
+                  (id, email, email_norm, username, username_norm, password_hash,
+                   paid_flag, created_at)
+                VALUES
+                  ('u-slot', 's@ex.com', 's@ex.com', 'slot', 'slot', 'x', 0, UTC_TIMESTAMP(6))
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO subscription_orders
+                  (id, user_id, plan_id, amount_idr, status, payment_url,
+                   expires_at_utc, created_at)
+                VALUES
+                  ('o1', 'u-slot', 'monthly_25k', 25000, 'pending', '',
+                   UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+                """
+            )
+        )
+        slot = conn.execute(
+            text("SELECT pending_slot FROM subscription_orders WHERE id = 'o1'")
+        ).scalar()
+        assert slot == "u-slot:monthly_25k"
+
+    # Duplicate pending must hit uq_subscription_orders_pending_slot (own txn).
+    with engine.connect() as conn:
+        trans = conn.begin()
+        with pytest.raises(IntegrityError):
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO subscription_orders
+                      (id, user_id, plan_id, amount_idr, status, payment_url,
+                       expires_at_utc, created_at)
+                    VALUES
+                      ('o2', 'u-slot', 'monthly_25k', 25000, 'pending', '',
+                       UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+                    """
+                )
+            )
+            trans.commit()
+        trans.rollback()
+
+    with engine.begin() as conn:
+        # Non-pending → NULL slot (allows another row with same user/plan after expire)
+        conn.execute(text("UPDATE subscription_orders SET status = 'expire' WHERE id = 'o1'"))
+        assert (
+            conn.execute(
+                text("SELECT pending_slot FROM subscription_orders WHERE id = 'o1'")
+            ).scalar()
+            is None
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO subscription_orders
+                  (id, user_id, plan_id, amount_idr, status, payment_url,
+                   expires_at_utc, created_at)
+                VALUES
+                  ('o3', 'u-slot', 'monthly_25k', 25000, 'settlement', '',
+                   UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+                """
+            )
+        )
+        assert (
+            conn.execute(
+                text("SELECT pending_slot FROM subscription_orders WHERE id = 'o3'")
+            ).scalar()
+            is None
+        )
+
+        # Nulling user_id clears the slot (account delete behavior)
+        conn.execute(
+            text(
+                """
+                INSERT INTO subscription_orders
+                  (id, user_id, plan_id, amount_idr, status, payment_url,
+                   expires_at_utc, created_at)
+                VALUES
+                  ('o4', 'u-slot', 'monthly_25k', 25000, 'pending', '',
+                   UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+                """
+            )
+        )
+        assert (
+            conn.execute(
+                text("SELECT pending_slot FROM subscription_orders WHERE id = 'o4'")
+            ).scalar()
+            == "u-slot:monthly_25k"
+        )
+        conn.execute(text("UPDATE subscription_orders SET user_id = NULL WHERE id = 'o4'"))
+        assert (
+            conn.execute(
+                text("SELECT pending_slot FROM subscription_orders WHERE id = 'o4'")
+            ).scalar()
+            is None
+        )
     engine.dispose()
 
 
@@ -391,8 +615,8 @@ def test_tc_hard_26_dockerfile_healthcheck():
     assert "/health" in text
 
 
-def test_init_db_create_all_fail_closed_allowlist(monkeypatch):
-    """create_all runs only when APP_ENV casefolded is development or test."""
+def test_init_db_never_calls_create_all(monkeypatch):
+    """B-11 / HB-18: init_db must not create_all for any APP_ENV (including unset)."""
     import app.db as db_mod
 
     calls: list[object] = []
@@ -402,19 +626,24 @@ def test_init_db_create_all_fail_closed_allowlist(monkeypatch):
 
     monkeypatch.setattr(db_mod.Base.metadata, "create_all", fake_create_all)
 
-    for env, expect_call in (
-        ("development", True),
-        ("Development", True),
-        ("test", True),
-        ("TEST", True),
-        ("production", False),
-        ("staging", False),
-        ("", False),
-        ("prod", False),
-    ):
+    for env in ("development", "test", "production", "staging", "", "prod"):
         calls.clear()
-        monkeypatch.setenv("APP_ENV", env)
-        # Settings() reads env at property access time for app_env
+        if env == "":
+            monkeypatch.delenv("APP_ENV", raising=False)
+        else:
+            monkeypatch.setenv("APP_ENV", env)
         monkeypatch.setattr(db_mod, "_settings", db_mod.Settings())
         db_mod.init_db()
-        assert bool(calls) is expect_call, f"APP_ENV={env!r} calls={calls}"
+        assert calls == [], f"APP_ENV={env!r} unexpectedly called create_all"
+
+
+def test_compose_migrate_before_api():
+    """Compose runs alembic as migrate user before api (HB-18 fresh volume)."""
+    compose = REPO_ROOT / "docker-compose.yml"
+    if not compose.is_file():
+        pytest.skip("docker-compose.yml absent (runtime image copies backend/ only)")
+    text = compose.read_text(encoding="utf-8")
+    assert re.search(r"(?m)^\s*migrate:\s*$", text)
+    assert "alembic" in text and "upgrade" in text
+    assert "service_completed_successfully" in text
+    assert "klasifipajak_migrate" in text

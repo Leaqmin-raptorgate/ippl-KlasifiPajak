@@ -40,6 +40,12 @@ _TX_DUP_SQL = (
     ") END"
 )
 
+# ERD Keys subscription_orders: at most one pending per (user_id, plan_id).
+_PENDING_SLOT_SQL = (
+    "CASE WHEN status = 'pending' AND user_id IS NOT NULL "
+    "THEN CONCAT(user_id, ':', plan_id) ELSE NULL END"
+)
+
 
 class User(Base):
     __tablename__ = "users"
@@ -256,7 +262,7 @@ class QuotaCounter(Base):
 
 
 class SubscriptionOrder(Base):
-    """ERD ``subscription_orders`` (stub until Midtrans; pending_slot deferred)."""
+    """ERD ``subscription_orders`` (stub until Midtrans; pending_slot generated)."""
 
     __tablename__ = "subscription_orders"
     __table_args__ = (UniqueConstraint("pending_slot", name="uq_subscription_orders_pending_slot"),)
@@ -266,7 +272,12 @@ class SubscriptionOrder(Base):
     plan_id: Mapped[str] = mapped_column(String(32), nullable=False)
     amount_idr: Mapped[int] = mapped_column(BigInteger, nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False)
-    pending_slot: Mapped[str | None] = mapped_column(String(96), nullable=True)
+    # STORED generated; NULL unless status='pending' and user_id set (ERD Keys).
+    pending_slot: Mapped[str | None] = mapped_column(
+        String(96),
+        Computed(_PENDING_SLOT_SQL, persisted=True),
+        nullable=True,
+    )
     payment_url: Mapped[str] = mapped_column(String(512), default="", nullable=False)
     expires_at_utc: Mapped[datetime] = mapped_column(_DT6, nullable=False)
     created_at: Mapped[datetime] = mapped_column(_DT6, nullable=False)

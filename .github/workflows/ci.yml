@@ -60,7 +60,7 @@ jobs:
       MYSQL_MIGRATE_USER: klasifipajak_migrate
       MYSQL_MIGRATE_PASSWORD: klasifipajak_migrate
       APP_DATABASE_URL: mysql+pymysql://klasifipajak_app:klasifipajak_app@127.0.0.1:3306/klasifipajak
-      MIGRATE_DATABASE_URL: mysql+pymysql://klasifipajak_migrate:klasifipajak_migrate@127.0.0.1:3306/klasifipajak
+      MIGRATE_DATABASE_URL: mysql+pymysql://klasifipajak_migrate:klasifipajak_migrate@127.0.0.1:3306/klasifipajak_migrate_test
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -90,10 +90,11 @@ jobs:
               raise SystemExit("MySQL not ready")
 
           cur = conn.cursor()
-          cur.execute(
-              "CREATE DATABASE IF NOT EXISTS klasifipajak "
-              "CHARACTER SET utf8mb4 COLLATE utf8mb4_bin"
-          )
+          for db in ("klasifipajak", "klasifipajak_migrate_test"):
+              cur.execute(
+                  f"CREATE DATABASE IF NOT EXISTS {db} "
+                  "CHARACTER SET utf8mb4 COLLATE utf8mb4_bin"
+              )
           # Hosts are fixed literals matching docker/mysql-init.sql.
           stmts = [
               "CREATE USER IF NOT EXISTS 'klasifipajak_app'@'%' IDENTIFIED BY 'klasifipajak_app'",
@@ -108,10 +109,14 @@ jobs:
               "GRANT SELECT, INSERT, UPDATE, DELETE ON klasifipajak.* TO 'klasifipajak_app'@'localhost'",
               "GRANT SELECT, INSERT, UPDATE, DELETE ON klasifipajak_test.* TO 'klasifipajak_app'@'%'",
               "GRANT SELECT, INSERT, UPDATE, DELETE ON klasifipajak_test.* TO 'klasifipajak_app'@'localhost'",
+              "GRANT SELECT, INSERT, UPDATE, DELETE ON klasifipajak_migrate_test.* TO 'klasifipajak_app'@'%'",
+              "GRANT SELECT, INSERT, UPDATE, DELETE ON klasifipajak_migrate_test.* TO 'klasifipajak_app'@'localhost'",
               "GRANT ALL PRIVILEGES ON klasifipajak.* TO 'klasifipajak_migrate'@'%'",
               "GRANT ALL PRIVILEGES ON klasifipajak.* TO 'klasifipajak_migrate'@'localhost'",
               "GRANT ALL PRIVILEGES ON klasifipajak_test.* TO 'klasifipajak_migrate'@'%'",
               "GRANT ALL PRIVILEGES ON klasifipajak_test.* TO 'klasifipajak_migrate'@'localhost'",
+              "GRANT ALL PRIVILEGES ON klasifipajak_migrate_test.* TO 'klasifipajak_migrate'@'%'",
+              "GRANT ALL PRIVILEGES ON klasifipajak_migrate_test.* TO 'klasifipajak_migrate'@'localhost'",
               "FLUSH PRIVILEGES",
           ]
           for stmt in stmts:
