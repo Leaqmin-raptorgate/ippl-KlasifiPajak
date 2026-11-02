@@ -64,8 +64,20 @@ jobs:
       - name: Audit requirements (fail on high/critical)
         run: |
           set -euo pipefail
-          # pip-audit exits 1 when any vuln exists; capture JSON regardless.
-          pip-audit -r requirements.txt -f json -o pip-audit.json || true
+          # pip-audit exits 0 (clean) or 1 (vulns found). Any other rc is a tool failure.
+          # Do not swallow with || true — empty/missing JSON would fail-open the gate.
+          set +e
+          pip-audit -r requirements.txt -f json -o pip-audit.json
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ] && [ "$rc" -ne 1 ]; then
+            echo "FAIL: pip-audit exited with unexpected code $rc"
+            exit "$rc"
+          fi
+          if [ ! -s pip-audit.json ]; then
+            echo "FAIL: pip-audit.json missing or empty"
+            exit 1
+          fi
           python scripts/ci/fail_on_high_critical.py --input pip-audit.json
 
   gitleaks:

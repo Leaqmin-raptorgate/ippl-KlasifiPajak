@@ -7,17 +7,20 @@ pip-audit has no native severity filter. Its JSON lists vulnerability ids
 1. Reads pip-audit ``-f json`` output (stdin or --input).
 2. For each vuln id, fetches OSV (``GET https://api.osv.dev/v1/vulns/{id}``).
 3. Resolves severity from, in order:
-   - ``database_specific.severity`` (GitHub Advisory: CRITICAL/HIGH/MEDIUM/LOW)
-   - numeric CVSS base score in ``severity[]`` when present
+   - ``database_specific.severity`` — allowlist only:
+     HIGH/CRITICAL fail; MODERATE/MEDIUM/LOW pass (GHSA uses MODERATE);
+     any other label → UNKNOWN → fail
+   - numeric CVSS base score in ``severity[]`` when present (MAX across entries)
    - CVSS vector strings in ``severity[].score`` (CVSS:3.0 / 3.1 self-contained;
      CVSS:4.0 via the pinned ``cvss`` package when installed)
      (CRITICAL >= 9.0, HIGH >= 7.0, MEDIUM >= 4.0, else LOW)
-4. Exits 1 if any HIGH/CRITICAL finding remains; otherwise exits 0.
+4. Exits 1 if any HIGH/CRITICAL/UNKNOWN finding remains; otherwise exits 0.
 
 Fail-closed policy (default):
   - Network / HTTP errors other than 404 while looking up OSV → UNKNOWN → fail
   - Missing or unresolvable severity → UNKNOWN → fail
-  - Invalid / missing pip-audit JSON → exit 1
+  - Missing/empty input, malformed JSON, non-object root, or ``dependencies``
+    missing / not a list → exit 1
   - Pass ``--allow-unknown`` to soften UNKNOWN (not used in CI)
 
 Network is required only when vulnerabilities are present. Zero vulns → no
@@ -40,6 +43,8 @@ from typing import Any
 
 OSV_VULN_URL = "https://api.osv.dev/v1/vulns/{id}"
 FAIL_LEVELS = frozenset({"HIGH", "CRITICAL"})
+# GHSA uses MODERATE; only these non-failing database_specific labels pass.
+PASS_LABELS = frozenset({"MODERATE", "MEDIUM", "LOW"})
 
 # CVSS v3.x metric weights (FIRST.org CVSS 3.1 §7.4).
 _AV = {"N": 0.85, "A": 0.62, "L": 0.55, "P": 0.2}
@@ -157,18 +162,29 @@ def _level_from_cvss(score: float) -> str:
 
 
 def resolve_severity(osv: dict[str, Any]) -> str:
-    """Return CRITICAL/HIGH/MEDIUM/LOW/UNKNOWN for one OSV document."""
+    """Return CRITICAL/HIGH/MEDIUM/LOW/MODERATE/UNKNOWN for one OSV document.
+
+    ``database_specific.severity`` is allowlisted: HIGH/CRITICAL fail,
+    MODERATE/MEDIUM/LOW pass, anything else becomes UNKNOWN. When falling
+    back to ``severity[]``, take the MAX parseable CVSS score.
+    """
     db = osv.get("database_specific") or {}
     label = db.get("severity")
     if isinstance(label, str) and label.strip():
-        return label.strip().upper()
+        normalized = label.strip().upper()
+        if normalized in FAIL_LEVELS or normalized in PASS_LABELS:
+            return normalized
+        return "UNKNOWN"
 
+    max_score: float | None = None
     for entry in osv.get("severity") or []:
         if not isinstance(entry, dict):
             continue
         numeric = _score_from_severity_entry(entry)
         if numeric is not None:
-            return _level_from_cvss(numeric)
+            max_score = numeric if max_score is None else max(max_score, numeric)
+    if max_score is not None:
+        return _level_from_cvss(max_score)
 
     return "UNKNOWN"
 
@@ -212,13 +228,32 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        raw = open(args.input, encoding="utf-8").read() if args.input else sys.stdin.read()
-        audit = json.loads(raw or "{}")
-        if not isinstance(audit, dict):
-            print("FAIL: pip-audit JSON root must be an object", file=sys.stderr)
-            return 1
-    except (OSError, json.JSONDecodeError) as exc:
+        if args.input:
+            path = args.input
+            with open(path, encoding="utf-8") as fh:
+                raw = fh.read()
+        else:
+            raw = sys.stdin.read()
+    except OSError as exc:
         print(f"FAIL: cannot read pip-audit JSON ({exc})", file=sys.stderr)
+        return 1
+
+    if not raw or not raw.strip():
+        print("FAIL: pip-audit JSON is missing or empty", file=sys.stderr)
+        return 1
+
+    try:
+        audit = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        print(f"FAIL: cannot parse pip-audit JSON ({exc})", file=sys.stderr)
+        return 1
+
+    if not isinstance(audit, dict):
+        print("FAIL: pip-audit JSON root must be an object", file=sys.stderr)
+        return 1
+
+    if "dependencies" not in audit or not isinstance(audit["dependencies"], list):
+        print("FAIL: pip-audit JSON must include a dependencies list", file=sys.stderr)
         return 1
 
     findings = iter_findings(audit)

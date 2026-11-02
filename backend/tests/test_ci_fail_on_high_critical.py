@@ -130,3 +130,96 @@ def test_main_no_vulnerabilities_ok(tmp_path: Path):
     audit_path = tmp_path / "audit.json"
     audit_path.write_text(json.dumps({"dependencies": []}), encoding="utf-8")
     assert gate.main(["--input", str(audit_path)]) == 0
+
+
+def test_main_missing_file_fails(tmp_path: Path):
+    missing = tmp_path / "no-such-audit.json"
+    assert gate.main(["--input", str(missing)]) == 1
+
+
+def test_main_empty_file_fails(tmp_path: Path):
+    empty = tmp_path / "empty.json"
+    empty.write_text("", encoding="utf-8")
+    assert gate.main(["--input", str(empty)]) == 1
+    whitespace = tmp_path / "ws.json"
+    whitespace.write_text("   \n\t  ", encoding="utf-8")
+    assert gate.main(["--input", str(whitespace)]) == 1
+
+
+def test_main_root_list_fails(tmp_path: Path):
+    path = tmp_path / "list.json"
+    path.write_text("[]", encoding="utf-8")
+    assert gate.main(["--input", str(path)]) == 1
+
+
+def test_main_dependencies_missing_fails(tmp_path: Path):
+    path = tmp_path / "no-deps.json"
+    path.write_text(json.dumps({"meta": {}}), encoding="utf-8")
+    assert gate.main(["--input", str(path)]) == 1
+
+
+def test_main_dependencies_not_list_fails(tmp_path: Path):
+    path = tmp_path / "bad-deps.json"
+    path.write_text(json.dumps({"dependencies": {"name": "x"}}), encoding="utf-8")
+    assert gate.main(["--input", str(path)]) == 1
+
+
+@pytest.mark.parametrize(
+    "label,expected",
+    [
+        ("UNSPECIFIED", "UNKNOWN"),
+        ("NONE", "UNKNOWN"),
+        ("WEIRD_LABEL", "UNKNOWN"),
+        ("MODERATE", "MODERATE"),
+        ("medium", "MEDIUM"),
+        ("LOW", "LOW"),
+        ("HIGH", "HIGH"),
+        ("CRITICAL", "CRITICAL"),
+        (" critical ", "CRITICAL"),
+    ],
+)
+def test_resolve_severity_database_specific_allowlist(label: str, expected: str):
+    osv = {"database_specific": {"severity": label}}
+    assert gate.resolve_severity(osv) == expected
+
+
+def test_resolve_severity_max_across_cvss_entries():
+    """First entry low, later entry high → MAX wins (HIGH), not first parseable."""
+    osv = {
+        "severity": [
+            {"type": "CVSS_V3", "score": VECTOR_LOW},
+            {"type": "CVSS_V3", "score": VECTOR_HIGH},
+        ]
+    }
+    assert gate.resolve_severity(osv) == "HIGH"
+
+
+def test_main_clean_dependencies_exits_zero(tmp_path: Path):
+    """Valid clean pip-audit JSON with empty deps → exit 0."""
+    audit_path = tmp_path / "clean.json"
+    audit_path.write_text(json.dumps({"dependencies": []}), encoding="utf-8")
+    assert gate.main(["--input", str(audit_path)]) == 0
+
+
+def test_main_unspecified_label_fail_closed(tmp_path: Path):
+    audit_path = tmp_path / "audit.json"
+    audit_path.write_text(json.dumps(_audit("VULN-UNSPEC")), encoding="utf-8")
+
+    with patch.object(
+        gate,
+        "fetch_osv",
+        return_value={"database_specific": {"severity": "UNSPECIFIED"}},
+    ):
+        assert gate.main(["--input", str(audit_path)]) == 1
+
+
+def test_main_moderate_label_passes(tmp_path: Path):
+    audit_path = tmp_path / "audit.json"
+    audit_path.write_text(json.dumps(_audit("VULN-MOD")), encoding="utf-8")
+
+    with patch.object(
+        gate,
+        "fetch_osv",
+        return_value={"database_specific": {"severity": "MODERATE"}},
+    ):
+        assert gate.main(["--input", str(audit_path)]) == 0
