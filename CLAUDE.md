@@ -7,8 +7,8 @@ This file exists only as a pointer, so the two cannot drift apart.
 Quick reference:
 
 - Requirements come from `SPEC/`, which lives beside this repository. The SRS of
-  record is **v2.6** (18 Okt 2026), with ERD v1.2.2 and API v1.2.2 on disk. See
-  `AGENTS.md` for provenance.
+  record is **v2.7**, with ERD **r3** and API **v1.3.1** (API mirrored under
+  `docs/api/`). See `AGENTS.md` for provenance.
 - Never invent a requirement, threshold, tax figure, or expected test value.
   Leave a `TODO` instead.
 - The tax engine is pure Python and never calls a language model.

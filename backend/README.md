@@ -21,11 +21,9 @@ so a figure and the data that produced it are read together.
 
 ## `app/classify/`
 
-Rules layer, in-memory BM25 over `regulation_chunks`, and the model client
-interface with a fake implementation for tests.
-
-The pipeline order is fixed: rules first, then model fallback, then one
-clarifying question to the user.
+Rules/keyword path is live on transaction create. BM25 and the OpenAI-compatible
+model client (D-09 / 9router) are **not built yet**. Pipeline order when AI
+lands: rules first, then model fallback, then one clarifying question.
 
 ## `app/services/`
 
@@ -38,38 +36,47 @@ query, add a service function rather than reaching into the ORM from the route.
 ## `app/api/`
 
 Thin routes. Validate input, call one service, return. No queries, no
-calculations, no business rules.
+calculations, no business rules. Auth hardening (PR #3) and tax CRUD (PR #4)
+live in `routes_app.py`; §5.32 test-support mounts only when `APP_ENV=test`.
 
 ## `app/models/` and `app/schemas/`
 
-`models` is SQLAlchemy 2.0 table definitions and migrations source of truth.
-`schemas` is Pydantic request and response shapes.
+`models` is SQLAlchemy 2.0 table definitions aligned with **ERD r3** (including
+`month_snapshots.version` and auth tables). `schemas` is Pydantic request and
+response shapes.
 
 Every query is scoped by `user_id`. Account isolation is a requirement, not a
 convention.
 
+Schema changes go through **Alembic** (`backend/alembic/`), applied by the
+compose `migrate` service as `klasifipajak_migrate`. The API process uses the
+DML-only `klasifipajak_app` user and must not call `create_all` for schema.
+
 ## `app/payments/`
 
-Gateway adapter interface plus the implementations. Services depend on the
-interface, never on a concrete gateway.
+Gateway adapter interface plus implementations. **Not built yet** (D-10
+placeholders in `.env.example` only). Services must depend on the interface,
+never on a concrete gateway, when this lands.
 
 ## `app/config/`
 
-Environment-derived settings. Thresholds and quotas live here because they are
-configurable; tax rates and bands do not, because they belong to the ruleset.
+Environment-derived settings (`APP_ENV`, `DATABASE_URL`, `MIGRATE_DATABASE_URL`,
+`JWT_SECRET`, AI/Midtrans placeholders, …). Thresholds and quotas that are
+product-configurable live here; tax rates and bands do not.
 
-## Not yet built
+## Status vs empty placeholders
 
-These directories are placeholders with a stated purpose, not empty ceremony.
-Nothing in them is required for the engine to work.
+| Directory                                                  | Status on main (2026-11-03)                               |
+| ---------------------------------------------------------- | --------------------------------------------------------- |
+| `app/engine/`, `app/engine/ruleset/`                       | Done                                                      |
+| `app/models/`, `app/schemas/`, `app/services/`, `app/api/` | Done (M50)                                                |
+| `app/config/`                                              | Done                                                      |
+| `backend/alembic/`                                         | Done — initial head = ERD r3 / D-11                       |
+| `app/classify/`                                            | Rules/keywords only; AI client **not built**              |
+| `app/payments/`                                            | **Not built**                                             |
+| OCR / receipt bytes / PDF export                           | **Not built** (table stub / D-01 design only)             |
+| `frontend/`                                                | Vue 3 app present; treat OCR/AI/PDF screens as incomplete |
 
-| Directory                     | Lands when                                         |
-| ----------------------------- | -------------------------------------------------- |
-| `app/classify/`               | Sprint 2, keyword table and accuracy report        |
-| `app/models/`, `app/schemas/` | Sprint 3, storage                                  |
-| `app/services/`, `app/api/`   | Sprint 3, first real endpoint                      |
-| `app/payments/`               | Payment work, once the gateway interface is agreed |
-| `app/config/`                 | Sprint 2, threshold and quota settings             |
-| `backend/alembic/`            | Sprint 3, first migration                          |
-| `backend/tests/data/`         | Sprint 2, labeled classification set               |
-| `frontend/`                   | After the backend serves real numbers              |
+Workpaper disclaimer (D-07), exact string:
+
+`DOKUMEN KERJA (WORKPAPER) — BUKAN SPT RESMI DAN BUKAN PRODUK DJP/CORETAX.`

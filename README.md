@@ -4,7 +4,22 @@ Indonesian UMKM / freelancer tax calculator. Each transaction is classified
 first. A deterministic engine then computes Final PPh. A language model never
 produces a tax amount.
 
+Workpaper disclaimer (locked by D-07; matches `backend/app/services/snapshot.py`
+and API §3.3):
+
+`DOKUMEN KERJA (WORKPAPER) — BUKAN SPT RESMI DAN BUKAN PRODUK DJP/CORETAX.`
+
 Not a filed return. Not authorized DJP software.
+
+## Spec versions (source of truth)
+
+| Artefact | Version                                 | Where                                                                                                  |
+| -------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| SRS      | **v2.7**                                | Outside this repository (`SPEC/`); course SRS is never pushed here                                     |
+| API      | **v1.3.1**                              | Mirrored at [`docs/api/KlasifiPajak_API_Specification.md`](docs/api/KlasifiPajak_API_Specification.md) |
+| ERD      | **r3** (D-11 `month_snapshots.version`) | Outside this repository (`SPEC/`); Alembic `76fcdbc4af30` matches r3                                   |
+
+Prior API text in this repo was v1.2.2; treat the mirror above as normative.
 
 ## Setup
 
@@ -12,6 +27,7 @@ Python 3.12+ and Node.js 20+. Node is development tooling only (commitlint,
 Husky hooks, Prettier) — never runtime.
 
 ```bash
+cp .env.example .env   # then set JWT_SECRET and DB passwords
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements-dev.txt
@@ -19,44 +35,86 @@ pip install -r requirements-dev.txt
 npm ci   # ALWAYS npm ci, never npm install (lockfile-locked)
 ```
 
-Run the tests:
+### Environment that matters
+
+| Variable               | Role                                                                                                                          |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `APP_ENV`              | `development` / `test` / `production`. Controls Bagian A mount, test-support mount, and JWT secret fail-closed in production. |
+| `DATABASE_URL`         | Runtime **DML** user (`klasifipajak_app`). Used by the API process.                                                           |
+| `MIGRATE_DATABASE_URL` | **DDL** user (`klasifipajak_migrate`). Used only by Alembic / the compose `migrate` service.                                  |
+| `JWT_SECRET`           | Session signing secret (≥ 32 bytes in production).                                                                            |
+| `TRUSTED_PROXY_IPS`    | Comma-separated peer IPs/CIDRs allowed to supply `X-Forwarded-For`. Empty = trust none.                                       |
+| `TRUSTED_PROXY_COUNT`  | How many rightmost XFF hops to peel when the peer is trusted (default `0`).                                                   |
+| `AI_*` / `MIDTRANS_*`  | Placeholders for later rubric work (D-09 / D-10). Leave empty until those features are built.                                 |
+
+### Docker Compose (MySQL + migrate + API)
+
+Compose boots MySQL, runs a **one-shot `migrate` service** (`alembic upgrade head`
+as `klasifipajak_migrate`), then starts the API as `klasifipajak_app`. The API
+depends on migrate completing successfully. Schema is **not** created via
+`create_all` at runtime.
 
 ```bash
-npm run test
+docker compose up mysql migrate api   # migrate is one-shot; api on http://127.0.0.1:8000
+# or simply:
+docker compose up api                 # pulls mysql + migrate via depends_on
 ```
 
-Docker runs the same tests:
+Against a virtualenv (MySQL already migrated):
 
 ```bash
-docker compose run --rm test
+PYTHONPATH=backend .venv/bin/python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-## API
+### Tests
+
+```bash
+npm run test                          # host pytest
+npm run test:coverage                 # 80% branch gate on backend/app/engine (NFR-14)
+docker compose run --rm test          # same suite inside the Docker test image
+```
+
+## API surface (what exists on main today)
 
 FastAPI over the deterministic engine, plus an authenticated application
-surface backed by MySQL 8. The engine endpoints are unauthenticated and bound to
-loopback. See the [API specification](docs/api/KlasifiPajak_API_Specification.md).
+surface backed by MySQL 8. Engine endpoints are unauthenticated and bound to
+loopback. See the [API specification](docs/api/KlasifiPajak_API_Specification.md)
+(v1.3.1).
 
-```bash
-docker compose up api          # http://localhost:8000
-# or, against the virtualenv:
-PYTHONPATH=backend .venv/bin/python -m uvicorn app.main:app --reload
-```
-
-| Endpoint                           | Purpose                                       |
-| ---------------------------------- | --------------------------------------------- |
-| `GET /health`                      | liveness                                      |
-| `GET /ruleset`                     | rates and ceilings, so no client inlines them |
-| `POST /snapshot`                   | compute one snapshot from a transaction set   |
-| `POST /api/v1/auth/register`       | create an account                             |
-| `POST /api/v1/auth/login`          | open a cookie session                         |
-| `GET/PUT /api/v1/profiles/{year}`  | read or version the business profile          |
-| `GET/POST /api/v1/transactions`    | list or record a classified transaction       |
-| `GET /api/v1/tax/dashboard`        | thresholds and monthly summaries              |
-| `GET /api/v1/quotas`               | monthly quota limits                          |
-| `GET /api/v1/subscriptions/status` | plan state from `paid_flag`                   |
+| Endpoint                                                   | Purpose                                                 |
+| ---------------------------------------------------------- | ------------------------------------------------------- |
+| `GET /health`                                              | liveness                                                |
+| `GET /ruleset`                                             | rates and ceilings                                      |
+| `POST /snapshot`                                           | compute one snapshot from a transaction set             |
+| `POST /api/v1/auth/register`                               | create an account (argon2id)                            |
+| `POST /api/v1/auth/login`                                  | open a cookie session                                   |
+| `POST /api/v1/auth/logout`                                 | revoke this session                                     |
+| `GET /api/v1/auth/me`                                      | current user                                            |
+| `POST /api/v1/auth/password-reset/request`                 | request reset (generic response)                        |
+| `POST /api/v1/auth/password-reset/confirm`                 | confirm reset with token                                |
+| `GET /api/v1/auth/sessions`                                | list sessions                                           |
+| `DELETE /api/v1/auth/sessions/{id}`                        | revoke one session                                      |
+| `DELETE /api/v1/auth/sessions`                             | revoke other sessions                                   |
+| `DELETE /api/v1/account`                                   | delete account                                          |
+| `GET/PUT /api/v1/profiles/{year}`                          | read or version the business profile                    |
+| `GET/POST /api/v1/transactions`                            | list or record a classified transaction                 |
+| `GET/PUT/DELETE /api/v1/transactions/{id}`                 | read, edit, delete                                      |
+| `POST .../override`, `.../clarification`, `.../reclassify` | category flows (rules-only today)                       |
+| `GET /api/v1/tax/dashboard`                                | thresholds and monthly summaries (`as_of` = today WIB)  |
+| `GET/POST /api/v1/tax/snapshots/...`                       | month snapshot read / year recalculate (versioned rows) |
+| `GET /api/v1/quotas`                                       | monthly quota counters                                  |
+| `GET /api/v1/subscriptions/status`                         | plan state from `paid_flag`                             |
 
 Money crosses the wire as integer rupiah and is rejected as a string or float.
+
+### Not yet implemented (rubric / later)
+
+Do not treat these as done just because env placeholders or DB stubs exist:
+
+- **OCR receipt upload** (FR-06 / FR-06a / FR-06b) — `receipt_images` table only
+- **Real Midtrans payment** (FR-PAY-01…05) — adapter / Snap not built
+- **AI classifier or assistant** (FR-12/13 or FR-27…30) — rules/keyword path only
+- **Annual recap PDF** (FR-31…33) — not built (`fpdf2` locked by D-11 when it lands)
 
 ## Available Scripts
 
@@ -78,13 +136,14 @@ are validated by commitlint. See [CONTRIBUTING.md](CONTRIBUTING.md).
 Every push and pull request targeting `main` runs the
 [CI workflow](.github/workflows/ci.yml) via GitHub Actions:
 
-- **Lint & format**: ruff (`npm run lint`) and ruff format + Prettier
-  (`npm run format:check`).
-- **Tests**: the pytest suite with the 80% branch coverage gate on the engine
-  (NFR-14), and the same suite inside the Docker test image.
+- **Lint & format**: ruff and ruff format + Prettier.
+- **Frontend typecheck & build**: `npm --prefix frontend ci && npm --prefix frontend run build` (includes `vue-tsc`, D-11).
+- **pip-audit (high/critical)**: fail-closed gate over `requirements.txt`.
+- **gitleaks**: secret scan with `.gitleaks.toml`.
+- **pytest coverage gate**: 80% branch coverage on `backend/app/engine` (NFR-14), with app/migrate MySQL users bootstrapped.
+- **Docker test image**: `docker compose run --rm --build test`.
 
-The test jobs only run once the lint job passes. The workflow does not publish
-or deploy anything.
+The workflow does not publish or deploy anything.
 
 ## Layout
 
@@ -93,14 +152,16 @@ or deploy anything.
 - `backend/app/api/` — HTTP routes (thin, no SQL)
 - `backend/app/schemas/` — Pydantic request and response shapes
 - `backend/app/services/` — one function per use case
-- `backend/app/classify/` — rules, BM25, model client interface (planned)
-- `backend/app/payments/` — gateway adapter (planned)
+- `backend/app/models/` — SQLAlchemy tables (ERD r3)
+- `backend/app/classify/` — keyword/rules path today; model client later
+- `backend/app/payments/` — gateway adapter (**not built**)
+- `backend/alembic/` — migrations (initial head = ERD r3 / D-11)
 - `backend/tests/` — engine tests, API tests, and `TC-GOLDEN-*`
-- `backend/alembic/` — migrations (planned)
 - `frontend/` — Vue 3 + Vite
-- `docs/api/` — API specification (unratified)
+- `docs/api/` — API specification mirror (v1.3.1)
+- `docs/agile/` — backlog, roadmap, open decisions
 
-Layering rules and what lands when: [backend/README.md](backend/README.md).
+Layering rules: [backend/README.md](backend/README.md).
 
 ## Docs
 
@@ -108,11 +169,10 @@ Layering rules and what lands when: [backend/README.md](backend/README.md).
 - [CONTRIBUTING.md](CONTRIBUTING.md) — workflow, commit conventions, quality gates
 - [SECURITY.md](SECURITY.md) — private vulnerability reporting
 - [docs/STYLE.md](docs/STYLE.md) — style authority
-- [docs/agile/backlog.md](docs/agile/backlog.md) — sprint status
+- [docs/agile/backlog.md](docs/agile/backlog.md) — sprint / M50 status
 - [docs/agile/roadmap.md](docs/agile/roadmap.md) — sequence, risks, open decisions
-- [docs/agile/open-decisions.md](docs/agile/open-decisions.md) — questions that are not ours to answer
-- [docs/api/KlasifiPajak_API_Specification.md](docs/api/KlasifiPajak_API_Specification.md) — API contract, unratified
+- [docs/agile/open-decisions.md](docs/agile/open-decisions.md) — OD-* and D-01…D-11
+- [docs/api/KlasifiPajak_API_Specification.md](docs/api/KlasifiPajak_API_Specification.md) — API contract **v1.3.1**
 
 The course SRS stays outside this repository and is never pushed. The SRS of
-record is **v2.6** (18 Okt 2026), which is not yet committed to a file — see
-the provenance warning in `AGENTS.md`.
+record is **v2.7** (aligned with API v1.3.1 and ERD r3).

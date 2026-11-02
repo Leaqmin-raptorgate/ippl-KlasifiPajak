@@ -46,20 +46,22 @@ by `backend/tests/test_engine.py`.
 `SPEC/` is the requirement source and lives **outside this repository**. Do not
 commit anything from `SPEC/`, including lecturer briefs and course material.
 
-The newest SRS is **version 2.6**, dated 18 Okt 2026, prepared by 11241050 -
-Muhammad Aditya Putra. It supersedes v1.0 and v2.5. Its ids include `FR-01`
-through `FR-47`, `FR-23a`, `FR-PAY-01` through `FR-PAY-09`, `NFR-01`
-through `NFR-14`, and `UC-01` through `UC-26`.
+The newest SRS is **version 2.7**, prepared by 11241050 - Muhammad Aditya
+Putra. It supersedes v1.0, v2.5 and v2.6. Its ids include `FR-01` through
+`FR-47`, `FR-23a`, `FR-PAY-01` through `FR-PAY-09`, `NFR-01` through at least
+`NFR-14` (see SRS for the full NFR set), and `UC-01` through `UC-26`.
 
-> **Provenance.** SRS v2.6 now lives on disk at
-> `SPEC/KlasifiPajak/KlasifiPajak_SRS.md`. The HTTP contract is
-> `SPEC/KlasifiPajak/KlasifiPajak_API_Specification.md` v1.2.2 and the schema is
-> `SPEC/KlasifiPajak/KlasifiPajak_ERD.md` v1.2.2, both dated 18 Okt 2026. Do not
-> add `TODO(SRS-COMMIT)` markers any more; every id cited here has a source of
-> record.
+> **Provenance.** SRS **v2.7** lives on disk outside this repository at
+> `SPEC/KlasifiPajak/` (course SRS is never committed here). The HTTP contract
+> of record is API **v1.3.1**, mirrored at
+> `docs/api/KlasifiPajak_API_Specification.md`. The schema of record is ERD
+> **r3** (D-11 `month_snapshots.version`); Alembic head `76fcdbc4af30` matches
+> r3. Do not add `TODO(SRS-COMMIT)` markers; every id cited here has a source
+> of record. Disclaimer lock (D-07):
+> `DOKUMEN KERJA (WORKPAPER) — BUKAN SPT RESMI DAN BUKAN PRODUK DJP/CORETAX.`
 
 Ids such as `FR-17`, `FR-23a`, `UC-19a`, `UC-20`, `NFR-12` and `NFR-13` are
-defined in v2.6. Do not treat them as invented.
+defined in the SRS. Do not treat them as invented.
 
 `effective_date` and `as_of_date` are both real and distinct. **`effective_date`**
 is the ruleset's promulgation stamp (`Ruleset.effective_date`, served by
@@ -78,7 +80,7 @@ not read use cases, actors, or ids from it.
 Do not invent a requirement, threshold, tax figure, or expected test value.
 
 - Golden test values come only from the developer, sourced from the PP 20/2026
-  elucidation or PMK 164/2023 Lampiran B. **SRS v2.6 §4.5 supplies explicit
+  elucidation or PMK 164/2023 Lampiran B. **SRS v2.7 §4.5 supplies explicit
   inputs and expectations for every `TC-GOLDEN-*` case**, so those figures are
   sourced, not invented. Anything outside that table still needs a
   `TODO(ELUCIDATION)` rather than a guessed number.
@@ -404,7 +406,7 @@ image.
 - `docs/SPEC.md` is the requirement source. It is the only place requirements
   live; agents MUST read the relevant section before planning any feature.
   This repo has no `docs/SPEC.md` — the SRS is `SPEC/KlasifiPajak/` outside the
-  repository, currently v2.6 (see [Source of truth](#source-of-truth)).
+  repository, currently v2.7 (see [Source of truth](#source-of-truth)).
 - `docs/ARCHITECTURE.md` describes how the backend is built. This repo has no
   `docs/ARCHITECTURE.md`; the layering is in `backend/README.md` and summarised
   in [Layering](#layering) above.
@@ -496,12 +498,14 @@ and the contract.
 
 ## Open decisions
 
-Do not resolve these yourself. They are recorded in `docs/agile/roadmap.md`.
+Do not resolve these yourself. Full table: `docs/agile/open-decisions.md`
+(D-01…D-11 statuses + OD-*). Summary of what is still open:
 
-- Entity-type field for PP 20/2026 eligibility. Verify against Pasal 56 and 57.
-- Snapshot storage: overwrite, or versioned rows with an `is_current` flag.
-- Paid-tier quota caps. SRS v1.0 says unlimited; planning says plafon 200.
-- Quota reset period. SRS v1.0 says calendar month; a weekly reset was raised.
-- Free trial period. Not in SRS v1.0.
-- Whether to adopt a typed decision model behind the classifier interface.
-- Test coverage target.
+- Entity-type field for PP 20/2026 eligibility beyond `orang_pribadi` (OD-5).
+- Live KAP/KJS value (OD-3); academic placeholder remains.
+- Whether to adopt a typed decision model behind the classifier interface (OD-10).
+- Coverage calibration beyond NFR-14's engine-only 80% gate (OD-11 residual).
+
+Closed recently: OD-6 snapshot versioning via **D-11**; OD-7/8/9 quota defaults
+and no-trial; provenance OD-1/2/12. Rubric features OCR / Midtrans / AI / PDF
+are approved in scope (D-08) but **not implemented** yet.
