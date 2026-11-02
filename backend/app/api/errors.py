@@ -8,6 +8,10 @@ message as written.
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from app.config.settings import Settings
+
+_SESSION_COOKIE_CLEAR_CODES = frozenset({"session_expired", "session_revoked"})
+
 
 class ApiError(Exception):
     """A contract error with a stable code and an Indonesian message."""
@@ -22,7 +26,18 @@ class ApiError(Exception):
 def install_error_handler(app: FastAPI) -> None:
     @app.exception_handler(ApiError)
     async def _handle(_: Request, exc: ApiError) -> JSONResponse:
-        return JSONResponse(
+        response = JSONResponse(
             status_code=exc.status,
             content={"error": {"code": exc.code, "message": exc.message}},
         )
+        # API §2.6 / B5: session death must clear kp_session with the same flags.
+        if exc.code in _SESSION_COOKIE_CLEAR_CODES:
+            settings = Settings()
+            response.delete_cookie(
+                "kp_session",
+                path="/",
+                httponly=True,
+                samesite="lax",
+                secure=settings.is_production,
+            )
+        return response

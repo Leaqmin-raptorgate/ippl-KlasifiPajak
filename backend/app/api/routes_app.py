@@ -3,6 +3,9 @@
 Thin by rule: validate, call one service, return. No route builds a query.
 """
 
+import ipaddress
+import os
+
 from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.orm import Session
 
@@ -10,15 +13,23 @@ from app.api.deps import AuthContext, current_session, get_settings
 from app.api.errors import ApiError
 from app.config.settings import Settings
 from app.db import get_db
+from app.logging_redaction import configure_redacted_logging
 from app.schemas.account import (
+    DeleteAccountIn,
+    DeleteAccountOut,
     LoginIn,
     LoginOut,
     MeOut,
+    MessageOut,
+    PasswordResetConfirmIn,
+    PasswordResetRequestIn,
     ProfileOut,
     ProfileUpdate,
     RegisterIn,
     RegisterOut,
+    RevokedCountOut,
     RevokedOut,
+    SessionListOut,
 )
 from app.schemas.transaction import (
     AuditTrailOut,
@@ -37,14 +48,103 @@ from app.services import dashboard as dashboard_service
 from app.services import profile as profile_service
 from app.services import subscription as subscription_service
 from app.services import transactions as transaction_service
+from app.services.auth import (
+    ACCOUNT_DELETED_MESSAGE,
+    GENERIC_RESET_MESSAGE,
+    RESET_SUCCESS_MESSAGE,
+)
 from app.services.snapshot import active_ruleset
+
+configure_redacted_logging()
 
 router = APIRouter()
 
 
+def _trusted_proxy_networks():
+    """Parse ``TRUSTED_PROXY_IPS`` (comma-separated IPs/CIDRs). Empty → trust none."""
+    raw = os.environ.get("TRUSTED_PROXY_IPS", "") or ""
+    networks: list = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            networks.append(ipaddress.ip_network(part, strict=False))
+        except ValueError:
+            continue
+    return tuple(networks)
+
+
+def _peer_is_trusted_proxy(peer: str) -> bool:
+    """True when the TCP peer is in ``TRUSTED_PROXY_IPS`` (CR3-1)."""
+    networks = _trusted_proxy_networks()
+    if not networks:
+        return False
+    host = (peer or "").strip()
+    if not host:
+        return False
+    # Strip IPv6 zone id if present (e.g. fe80::1%eth0).
+    if "%" in host:
+        host = host.split("%", 1)[0]
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return any(addr in network for network in networks)
+
+
+def _xff_joined(request: Request) -> str | None:
+    """Join every ``X-Forwarded-For`` header value in order (CR3-2).
+
+    ``headers.get()`` returns only the first header; an attacker who injects
+    their own XFF before the proxy's must not win. Starlette/HTTPX expose all
+    values via ``getlist``.
+    """
+    headers = request.headers
+    if hasattr(headers, "getlist"):
+        values = headers.getlist("x-forwarded-for")
+        if values:
+            return ",".join(values)
+    return headers.get("x-forwarded-for") or headers.get("X-Forwarded-For")
+
+
+def _client_ip(request: Request) -> str:
+    """Resolve the client IP for rate limits (ARGON-1 / CR3-1 / CR3-2).
+
+    ``TRUSTED_PROXY_COUNT`` (default 0) is the number of reverse proxies that
+    *append* to ``X-Forwarded-For``. XFF is honoured **only** when:
+
+    1. ``trusted >= 1``, and
+    2. ``request.client.host`` is in ``TRUSTED_PROXY_IPS`` (comma-separated
+       IPs/CIDRs parsed with :mod:`ipaddress`; empty means never trust XFF).
+
+    With the peer allowlist in place, the client hop is ``parts[-trusted]``
+    when ``len(parts) >= trusted``. Requiring ``len > trusted`` would break the
+    common single-proxy nginx ``$proxy_add_x_forwarded_for`` case, where a
+    legitimate request arrives as ``XFF: <client>`` (len == trusted == 1) and
+    every user would collapse onto the proxy IP. If the header is missing or
+    shorter than ``trusted``, fall back to ``request.client.host``.
+    """
+    peer = request.client.host if request.client and request.client.host else "0.0.0.0"
+    trusted = int(os.environ.get("TRUSTED_PROXY_COUNT", "0") or "0")
+    if trusted < 0:
+        trusted = 0
+    if trusted >= 1 and _peer_is_trusted_proxy(peer):
+        forwarded = _xff_joined(request)
+        if forwarded:
+            parts = [part.strip() for part in forwarded.split(",") if part.strip()]
+            if len(parts) >= trusted:
+                return parts[-trusted]
+    return peer
+
+
 @router.post("/auth/register", status_code=201, response_model=RegisterOut)
-def register(payload: RegisterIn, db: Session = Depends(get_db)) -> RegisterOut:
-    user = auth_service.register(db, payload)
+def register(
+    payload: RegisterIn,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> RegisterOut:
+    user = auth_service.register(db, payload, client_ip=_client_ip(request))
     return RegisterOut(
         user_id=user.id,
         email=user.email,
@@ -61,7 +161,13 @@ def login(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> LoginOut:
-    user, session = auth_service.login(db, payload, settings, request.headers.get("User-Agent", ""))
+    user, session = auth_service.login(
+        db,
+        payload,
+        settings,
+        request.headers.get("User-Agent", ""),
+        client_ip=_client_ip(request),
+    )
     token = auth_service.token_for(user, session, settings)
     non_browser = request.headers.get("X-Client-Type") == "non-browser"
     if not non_browser:
@@ -86,9 +192,17 @@ def logout(
     response: Response,
     context: AuthContext = Depends(current_session),
     db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
 ) -> RevokedOut:
     auth_service.logout(db, context.session)
-    response.delete_cookie("kp_session", path="/")
+    # HB-05: clear flags must match set_cookie (path/httponly/samesite/secure).
+    response.delete_cookie(
+        "kp_session",
+        path="/",
+        httponly=True,
+        samesite="lax",
+        secure=settings.is_production,
+    )
     return RevokedOut(revoked=True)
 
 
@@ -99,6 +213,73 @@ def me(context: AuthContext = Depends(current_session)) -> MeOut:
         email=context.user.email,
         username=context.user.username,
     )
+
+
+@router.post("/auth/password-reset/request", response_model=MessageOut)
+def password_reset_request(
+    payload: PasswordResetRequestIn,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> MessageOut:
+    # Discard plaintext; never leak account existence (API §5.4).
+    auth_service.request_password_reset(db, payload, client_ip=_client_ip(request))
+    return MessageOut(message=GENERIC_RESET_MESSAGE)
+
+
+@router.post("/auth/password-reset/confirm", response_model=MessageOut)
+def password_reset_confirm(
+    payload: PasswordResetConfirmIn,
+    db: Session = Depends(get_db),
+) -> MessageOut:
+    auth_service.confirm_password_reset(db, payload)
+    return MessageOut(message=RESET_SUCCESS_MESSAGE)
+
+
+@router.get("/auth/sessions", response_model=SessionListOut)
+def list_sessions(
+    context: AuthContext = Depends(current_session),
+    db: Session = Depends(get_db),
+) -> SessionListOut:
+    items = auth_service.list_sessions(db, context.user, context.session)
+    return SessionListOut(items=items)
+
+
+@router.delete("/auth/sessions/{session_id}", response_model=RevokedOut)
+def revoke_one_session(
+    session_id: str,
+    context: AuthContext = Depends(current_session),
+    db: Session = Depends(get_db),
+) -> RevokedOut:
+    auth_service.revoke_session(db, context.user, session_id)
+    return RevokedOut(revoked=True)
+
+
+@router.delete("/auth/sessions", response_model=RevokedCountOut)
+def revoke_other_sessions(
+    context: AuthContext = Depends(current_session),
+    db: Session = Depends(get_db),
+) -> RevokedCountOut:
+    count = auth_service.revoke_other_sessions(db, context.user, context.session)
+    return RevokedCountOut(revoked_count=count)
+
+
+@router.delete("/account", response_model=DeleteAccountOut)
+def delete_account(
+    payload: DeleteAccountIn,
+    response: Response,
+    context: AuthContext = Depends(current_session),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> DeleteAccountOut:
+    auth_service.delete_account(db, context.user, payload)
+    response.delete_cookie(
+        "kp_session",
+        path="/",
+        httponly=True,
+        samesite="lax",
+        secure=settings.is_production,
+    )
+    return DeleteAccountOut(deleted=True, message=ACCOUNT_DELETED_MESSAGE)
 
 
 @router.get("/profiles/{tax_year}", response_model=ProfileOut)

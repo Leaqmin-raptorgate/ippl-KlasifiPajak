@@ -467,8 +467,8 @@ async function jalankanHapus() {
       <div v-else class="sheet-done">
         <AppIcon name="checkCircle" :size="20" :stroke-width="1.8" />
         <p>
-          Demo selesai di sini. Tidak ada akun, transaksi, atau kertas kerja yang dihapus, karena
-          aplikasi ini menyimpan semuanya di memori peramban dan memuat ulang saat ditutup.
+          Seluruh data profil, transaksi, citra, dan cuplikan pajak Anda telah dihapus secara
+          permanen.
         </p>
       </div>
 

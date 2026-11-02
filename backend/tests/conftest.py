@@ -6,12 +6,14 @@ schema. Set ``DATABASE_URL`` to point elsewhere before running it.
 
 import os
 
+# ARGON review isolation: dedicated schema so parallel lanes do not clobber us.
 os.environ.setdefault(
     "DATABASE_URL",
-    "mysql+pymysql://klasifipajak:klasifipajak@127.0.0.1:3306/klasifipajak_test",
+    "mysql+pymysql://klasifipajak:klasifipajak@127.0.0.1:3306/klasifipajak_sec_m50",
 )
 os.environ.setdefault("APP_ENV", "test")
 os.environ.setdefault("JWT_SECRET", "test-secret-change-me")
+# ARGON-1: do not force TRUSTED_PROXY_COUNT=1; tests that need XFF set it themselves.
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

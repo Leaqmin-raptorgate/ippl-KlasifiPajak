@@ -625,6 +625,8 @@ def test_init_db_never_calls_create_all(monkeypatch):
         calls.append(bind)
 
     monkeypatch.setattr(db_mod.Base.metadata, "create_all", fake_create_all)
+    # HB-01: production/staging Settings() fail closed on a default JWT secret.
+    monkeypatch.setenv("JWT_SECRET", "merge-test-jwt-secret-0123456789abcdef")
 
     for env in ("development", "test", "production", "staging", "", "prod"):
         calls.clear()

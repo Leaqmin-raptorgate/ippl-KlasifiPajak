@@ -2,6 +2,19 @@
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 
+from app.api.errors import ApiError
+
+
+def validate_email_shape(email: str) -> str:
+    """Simple shape check from API §5.1 → 422 INVALID_EMAIL on failure."""
+    value = email.strip() if isinstance(email, str) else ""
+    if not value or len(value) > 254 or any(ch.isspace() for ch in value) or value.count("@") != 1:
+        raise ApiError(422, "INVALID_EMAIL", "Format surel tidak sah.")
+    local, _, domain = value.partition("@")
+    if not local or not domain or "." not in domain:
+        raise ApiError(422, "INVALID_EMAIL", "Format surel tidak sah.")
+    return value
+
 
 class RegisterIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -47,6 +60,60 @@ class RevokedOut(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     revoked: bool
+
+
+class MessageOut(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    message: str
+
+
+class PasswordResetRequestIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: StrictStr
+
+
+class PasswordResetConfirmIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    token: StrictStr
+    new_password: StrictStr
+
+
+class SessionItemOut(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    device_label: str
+    created_at: str
+    last_seen_at: str
+    current: bool
+
+
+class SessionListOut(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    items: list[SessionItemOut]
+
+
+class RevokedCountOut(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    revoked_count: int
+
+
+class DeleteAccountIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confirmation: StrictStr
+
+
+class DeleteAccountOut(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    deleted: bool
+    message: str
 
 
 class ProfileUpdate(BaseModel):
