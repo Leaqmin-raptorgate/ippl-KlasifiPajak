@@ -78,6 +78,8 @@ def _legacy_pbkdf2(password: str) -> str:
 
 def test_tc_hard_15_jwt_secret_fail_closed_in_production(monkeypatch):
     """TC-HARD-15: production refuses empty / placeholder / short secrets."""
+    from app.config.settings import _ENV_EXAMPLE_JWT_SECRET
+
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.delenv("JWT_SECRET", raising=False)
     with pytest.raises(RuntimeError, match="JWT_SECRET"):
@@ -88,8 +90,27 @@ def test_tc_hard_15_jwt_secret_fail_closed_in_production(monkeypatch):
     monkeypatch.setenv("JWT_SECRET", "short")
     with pytest.raises(RuntimeError, match="JWT_SECRET"):
         _jwt_secret()
+    # .env.example placeholder is 33 bytes — length alone must not pass.
+    assert len(_ENV_EXAMPLE_JWT_SECRET.encode("utf-8")) >= 32
+    monkeypatch.setenv("JWT_SECRET", _ENV_EXAMPLE_JWT_SECRET)
+    with pytest.raises(RuntimeError, match="JWT_SECRET"):
+        _jwt_secret()
+    monkeypatch.setenv("JWT_SECRET", "CHANGE_ME_OTHER_LONG_PLACEHOLDER_VALUE!!")
+    with pytest.raises(RuntimeError, match="JWT_SECRET"):
+        _jwt_secret()
     monkeypatch.setenv("JWT_SECRET", "x" * 32)
     assert _jwt_secret() == "x" * 32
+
+
+def test_tc_hard_15b_env_example_jwt_placeholder_allowed_in_dev_test(monkeypatch):
+    """TC-HARD-15b: development/test may boot with the .env.example JWT placeholder."""
+    from app.config.settings import _ENV_EXAMPLE_JWT_SECRET
+
+    monkeypatch.setenv("JWT_SECRET", _ENV_EXAMPLE_JWT_SECRET)
+    monkeypatch.setenv("APP_ENV", "development")
+    assert _jwt_secret() == _ENV_EXAMPLE_JWT_SECRET
+    monkeypatch.setenv("APP_ENV", "test")
+    assert _jwt_secret() == _ENV_EXAMPLE_JWT_SECRET
 
 
 def test_tc_hard_16_rejects_non_hs256_algorithms():
