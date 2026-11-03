@@ -47,19 +47,19 @@ def _jwt_secret() -> str:
 
     HB-01 / TC-HARD-15: production (and any non-dev/test env) must not boot with
     an empty secret, the built-in placeholder, the ``.env.example`` placeholder
-    (or any ``CHANGE_ME…`` marker value), or a secret shorter than 32 bytes.
+    (or any ``CHANGE_ME...`` marker value), or a secret shorter than 32 bytes.
     """
     secret = os.environ.get("JWT_SECRET", _DEV_PLACEHOLDER_SECRET)
     env = _app_env()
     if env in ("development", "test"):
         return secret or _DEV_PLACEHOLDER_SECRET
+    stripped = (secret or "").strip()
     if (
-        not secret
-        or secret.strip() == ""
+        not stripped
         or secret == _DEV_PLACEHOLDER_SECRET
-        or secret == _ENV_EXAMPLE_JWT_SECRET
-        or secret.startswith("CHANGE_ME")
-        or len(secret.encode("utf-8")) < _MIN_JWT_SECRET_LEN
+        or stripped == _ENV_EXAMPLE_JWT_SECRET
+        or stripped.upper().startswith("CHANGE_ME")
+        or len(stripped.encode("utf-8")) < _MIN_JWT_SECRET_LEN
     ):
         raise RuntimeError(
             "JWT_SECRET must be set to a non-default value of at least "
