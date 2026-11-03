@@ -66,18 +66,39 @@ export const useTransaksiStore = defineStore("transaksi", () => {
     return terpilih.value;
   }
 
-  async function buat(body: TransactionCreate) {
+  async function buat(body: TransactionCreate, init: RequestInit = {}) {
     const row = normal(
-      await api<Transaction>("/transactions", { method: "POST", body: JSON.stringify(body) }),
+      await api<Transaction>("/transactions", {
+        ...init,
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
     );
     terpilih.value = row;
     usePajakStore().tandaiUsang();
     return row;
   }
 
-  async function ubah(id: string, body: TransactionCreate & { version: number }) {
+  /** Fresh GET by id (API §5.x GET /transactions/{id}) — used after VERSION_CONFLICT. */
+  async function muatSatu(id: string) {
+    const row = normal(await api<Transaction>(`/transactions/${id}`));
+    terpilih.value = row;
+    const idx = items.value.findIndex((item) => item.id === id);
+    if (idx !== -1) items.value[idx] = row;
+    return row;
+  }
+
+  async function ubah(
+    id: string,
+    body: TransactionCreate & { version: number },
+    init: RequestInit = {},
+  ) {
     const row = normal(
-      await api<Transaction>(`/transactions/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+      await api<Transaction>(`/transactions/${id}`, {
+        ...init,
+        method: "PUT",
+        body: JSON.stringify(body),
+      }),
     );
     terpilih.value = row;
     const idx = items.value.findIndex((item) => item.id === id);
@@ -166,9 +187,14 @@ export const useTransaksiStore = defineStore("transaksi", () => {
     }>("/transactions/ocr-upload", { method: "POST", body });
   }
 
-  async function konfirmasiStruk(imageId: string, fields: Record<string, unknown>) {
+  async function konfirmasiStruk(
+    imageId: string,
+    fields: Record<string, unknown>,
+    init: RequestInit = {},
+  ) {
     const row = normal(
       await api<Transaction>("/transactions/ocr-confirm", {
+        ...init,
         method: "POST",
         body: JSON.stringify({ image_id: imageId, ...fields }),
       }),
@@ -190,6 +216,7 @@ export const useTransaksiStore = defineStore("transaksi", () => {
     byId,
     buka,
     buat,
+    muatSatu,
     ubah,
     hapus,
     muatKlarifikasi,
