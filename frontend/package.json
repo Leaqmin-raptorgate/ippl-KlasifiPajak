@@ -8,7 +8,9 @@
     "dev": "vite",
     "build": "vue-tsc --build && vite build",
     "preview": "vite preview",
-    "typecheck": "vue-tsc --build --force"
+    "typecheck": "vue-tsc --build --force",
+    "test:unit": "vitest run",
+    "test:unit:watch": "vitest"
   },
   "dependencies": {
     "pinia": "^3.0.3",
@@ -18,8 +20,11 @@
   "devDependencies": {
     "@types/node": "^22.20.5",
     "@vitejs/plugin-vue": "^6.0.1",
+    "@vue/test-utils": "2.4.6",
+    "happy-dom": "17.6.3",
     "typescript": "^5.9.2",
     "vite": "^7.1.5",
+    "vitest": "3.2.4",
     "vue-tsc": "^3.0.8"
   },
   "engines": {
