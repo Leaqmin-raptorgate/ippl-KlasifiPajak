@@ -8,7 +8,7 @@
  * placeholder and a question waiting for an answer, so the question is the
  * primary card and the meter is not rendered at all.
  */
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppCard from "@/components/ui/AppCard.vue";
@@ -21,14 +21,14 @@ import AppSelect from "@/components/ui/AppSelect.vue";
 import AppSheet from "@/components/ui/AppSheet.vue";
 import SourceTag from "@/components/app/SourceTag.vue";
 import WorkpaperNote from "@/components/app/WorkpaperNote.vue";
-import { ApiFailure } from "@/lib/api";
+import { ApiFailure, isAbortError, terapkanFieldErrors } from "@/lib/api";
+import { dasarHukumUntuk } from "@/lib/dasarHukum";
 import { CAPABILITIES } from "@/lib/capabilities";
 import {
   KATEGORI_LABEL,
   PUBLIC_RULESET,
   SOURCE_CHANNEL_LABEL,
   SUMBER_LABEL,
-  TAX_YEAR,
   type Kategori,
   type SourceChannel,
   type Sumber,
@@ -65,11 +65,6 @@ const stampDate = computed(
 );
 const batasBebas = computed(
   () => pajak.dashboard?.thresholds.pita_500_juta.limit_idr ?? PUBLIC_RULESET.bebasUsaha,
-);
-const plafon = computed(
-  () =>
-    pajak.dashboard?.thresholds.monitoring_current_year_cap_4_8m.limit_idr ??
-    PUBLIC_RULESET.plafonUsaha,
 );
 
 function labelKategori(value?: string) {
@@ -108,6 +103,8 @@ const kanalOpsi = (Object.keys(SOURCE_CHANNEL_LABEL) as SourceChannel[]).map((k)
 const sheetUbahTerbuka = ref(false);
 const sedangSimpanUbah = ref(false);
 const galatUbah = ref("");
+/** Per-field errors from 422 responses. */
+const galatUbahField = reactive<Record<string, string>>({});
 const draftEdit = reactive({
   tx_date: "",
   client_name: "",
@@ -118,46 +115,87 @@ const draftEdit = reactive({
   source_channel: "other" as SourceChannel,
 });
 
+watch(
+  () => draftEdit.tx_date,
+  () => {
+    delete galatUbahField.tx_date;
+  },
+);
+watch(
+  () => draftEdit.client_name,
+  () => {
+    delete galatUbahField.client_name;
+  },
+);
+watch(
+  () => draftEdit.description,
+  () => {
+    delete galatUbahField.description;
+  },
+);
+watch(
+  () => draftEdit.amount_idr,
+  () => {
+    delete galatUbahField.amount_idr;
+  },
+);
+watch(
+  () => draftEdit.invoice_no,
+  () => {
+    delete galatUbahField.invoice_no;
+  },
+);
+watch(
+  () => draftEdit.withheld_tax_amount_idr,
+  () => {
+    delete galatUbahField.withheld_tax_amount_idr;
+  },
+);
+watch(
+  () => draftEdit.source_channel,
+  () => {
+    delete galatUbahField.source_channel;
+  },
+);
+
+/** Guard state writes after this page unmounts (save/fetch race). */
+const masihTerpasang = ref(true);
+let simpanAbort: AbortController | null = null;
+onBeforeUnmount(() => {
+  masihTerpasang.value = false;
+  simpanAbort?.abort();
+  simpanAbort = null;
+});
+
+function bersihkanGalatUbah() {
+  galatUbah.value = "";
+  for (const key of Object.keys(galatUbahField)) delete galatUbahField[key];
+}
+
+function isiDraftDari(tx: {
+  tx_date: string;
+  client_name: string;
+  description: string;
+  amount_idr: number;
+  invoice_no?: string | null;
+  withheld_tax_amount_idr?: number | null;
+  source_channel?: string | null;
+}) {
+  draftEdit.tx_date = tx.tx_date;
+  draftEdit.client_name = tx.client_name;
+  draftEdit.description = tx.description;
+  draftEdit.amount_idr = String(tx.amount_idr);
+  draftEdit.invoice_no = tx.invoice_no || "";
+  draftEdit.withheld_tax_amount_idr = String(tx.withheld_tax_amount_idr || 0);
+  draftEdit.source_channel = (tx.source_channel as SourceChannel) || "other";
+}
+
 /** Older payloads carry no classification at all; that reads as classified, not as 0%. */
 const klasifikasi = computed(() => row.value?.classification);
 const perluJawab = computed(() => klasifikasi.value?.requires_clarification === true);
 
-const dasarHukum = computed(() => {
-  const cat = row.value?.category;
-  if (perluJawab.value) {
-    return {
-      judul: `Penentuan Kategori (${PUBLIC_RULESET.nama})`,
-      teks: `Klasifikasi memisahkan omzet usaha dengan penghasilan lainnya. Sebelum perlakuan pajak dapat dihitung, transaksi harus dipastikan apakah berasal dari peredaran usaha (PP 20/2026 Pasal 56), pekerjaan bebas, objek PPh final tersendiri, atau bukan objek pajak.`,
-      rujukan: `PP 20/2026 Pasal 56 & Prinsip Klasifikasi Transaksi`,
-    };
-  }
-  if (cat === "non_object") {
-    return {
-      judul: `Bukan Objek Pajak (UU PPh Pasal 4 Ayat 3)`,
-      teks: `Penerimaan berupa pengembalian dana, setor modal, atau mutasi antar-rekening sendiri bukan merupakan penghasilan bruto kena pajak. Transaksi ini dicatat untuk kebutuhan rekonsiliasi pembukuan dan tidak dimasukkan ke dalam perhitungan PPh Final maupun batas omzet usaha.`,
-      rujukan: `UU PPh Pasal 4 Ayat 3 · Berlaku Tahun Pajak ${TAX_YEAR}`,
-    };
-  }
-  if (cat === "already_final") {
-    return {
-      judul: `Penghasilan Final Tersendiri (UU PPh Pasal 4 Ayat 2)`,
-      teks: `Penghasilan yang telah dipotong PPh Final tersendiri oleh pihak ketiga (misalnya bunga deposito, sewa tanah/bangunan, dividen) tidak dihitung ulang dengan tarif omzet 0,5% agar tidak terjadi pemajakan berganda. Bukti potong dicatat sebagai dokumentasi kepatuhan.`,
-      rujukan: `UU PPh Pasal 4 Ayat 2 · Berlaku Tahun Pajak ${TAX_YEAR}`,
-    };
-  }
-  if (cat === "pekerjaan_bebas") {
-    return {
-      judul: `Pekerjaan Bebas (UU PPh Pasal 14 / Pasal 17)`,
-      teks: `Jasa atau keahlian yang dikerjakan atas nama pribadi (pekerjaan bebas) tidak memenuhi syarat skema PPh Final 0,5% peredaran usaha PP 20/2026. Penghasilan ini dihitung menggunakan Norma Penghitungan Penghasilan Neto (NPPN) atau tarif umum Pasal 17, dan tidak mengurangi batas bebas omzet usaha Rp 500.000.000.`,
-      rujukan: `UU PPh Pasal 14 & PP 20/2026 Pasal 56`,
-    };
-  }
-  return {
-    judul: `Omzet Usaha (${PUBLIC_RULESET.nama} Pasal 56)`,
-    teks: `Pasal 56 memisahkan dua dasar pengenaan. Omzet usaha dari orang pribadi yang jumlahnya dalam satu tahun pajak tidak melebihi ${rupiah(batasBebas.value)} tidak dikenai PPh final; untuk bagian omzet usaha di atas jumlah itu berlaku tarif ${PUBLIC_RULESET.tarifLabel} sampai plafon ${rupiah(plafon.value)}. Penghasilan dari pekerjaan yang dikerjakan sendiri dibaca dari norma penghasil, bukan dari tarif.`,
-    rujukan: `Ringkasan bacaan dari ${PUBLIC_RULESET.nama} Pasal 56 · berlaku ${tanggalPanjang(stampDate.value)}`,
-  };
-});
+/** Statutory basis from `@/lib/dasarHukum`. */
+const dasarHukum = computed(() => dasarHukumUntuk(row.value?.category, perluJawab.value === true));
 
 /** A human set this category, so there is no rule-match score to show. */
 const dariManusia = computed(() => row.value?.source !== "rule");
@@ -189,20 +227,14 @@ function tutupSheet() {
 
 function bukaSheetUbah() {
   if (!row.value) return;
-  draftEdit.tx_date = row.value.tx_date;
-  draftEdit.client_name = row.value.client_name;
-  draftEdit.description = row.value.description;
-  draftEdit.amount_idr = String(row.value.amount_idr);
-  draftEdit.invoice_no = row.value.invoice_no || "";
-  draftEdit.withheld_tax_amount_idr = String(row.value.withheld_tax_amount_idr || 0);
-  draftEdit.source_channel = (row.value.source_channel as SourceChannel) || "other";
-  galatUbah.value = "";
+  isiDraftDari(row.value);
+  bersihkanGalatUbah();
   sheetUbahTerbuka.value = true;
 }
 
 function tutupSheetUbah() {
   sheetUbahTerbuka.value = false;
-  galatUbah.value = "";
+  bersihkanGalatUbah();
 }
 
 async function simpanUbah() {
@@ -221,29 +253,73 @@ async function simpanUbah() {
       ? 0
       : (parseRupiah(draftEdit.withheld_tax_amount_idr) ?? 0);
   sedangSimpanUbah.value = true;
-  galatUbah.value = "";
+  bersihkanGalatUbah();
+  simpanAbort?.abort();
+  simpanAbort = new AbortController();
+  const signal = simpanAbort.signal;
+  const txId = row.value.id;
+  const version = row.value.version;
+  let updated: typeof row.value;
   try {
-    const updated = await store.ubah(row.value.id, {
-      amount_idr: nilai,
-      tx_date: draftEdit.tx_date,
-      client_name: draftEdit.client_name.trim(),
-      description: draftEdit.description.trim(),
-      invoice_no: draftEdit.invoice_no.trim() || undefined,
-      withheld_tax_amount_idr: pajakPotong,
-      source_channel: draftEdit.source_channel,
-      version: row.value.version,
-    });
-    sheetUbahTerbuka.value = false;
-    if (updated.classification?.requires_clarification) {
-      await muatPertanyaan(updated.id);
-    }
-    if (CAPABILITIES.auditTrail) await store.muatJejak(updated.id);
-    await pajak.muat(true);
+    updated = await store.ubah(
+      txId,
+      {
+        amount_idr: nilai,
+        tx_date: draftEdit.tx_date,
+        client_name: draftEdit.client_name.trim(),
+        description: draftEdit.description.trim(),
+        invoice_no: draftEdit.invoice_no.trim() || undefined,
+        withheld_tax_amount_idr: pajakPotong,
+        source_channel: draftEdit.source_channel,
+        version,
+      },
+      { signal },
+    );
   } catch (error) {
+    if (!masihTerpasang.value || isAbortError(error)) return;
+    // VERSION_CONFLICT: reload latest version into form and store.
+    if (error instanceof ApiFailure && error.code === "VERSION_CONFLICT") {
+      const conflictMsg =
+        error.message ||
+        "Versi data sudah berubah. Form diisi ulang dari data terbaru; periksa lalu simpan lagi.";
+      galatUbah.value = conflictMsg;
+      try {
+        const fresh = await store.muatSatu(txId, { signal });
+        if (!masihTerpasang.value) return;
+        isiDraftDari(fresh);
+      } catch (reloadError) {
+        if (!masihTerpasang.value || isAbortError(reloadError)) return;
+        galatUbah.value = `${conflictMsg} (Gagal memuat data terbaru: ${
+          reloadError instanceof ApiFailure ? reloadError.message : "koneksi terputus"
+        })`;
+      }
+      return;
+    }
+    if (error instanceof ApiFailure && Object.keys(error.fieldErrors).length > 0) {
+      terapkanFieldErrors(error.fieldErrors, galatUbahField);
+      galatUbah.value = error.message || "Periksa isian yang ditandai.";
+      return;
+    }
     galatUbah.value =
       error instanceof ApiFailure ? error.message : "Gagal menyimpan perubahan transaksi.";
+    return;
   } finally {
-    sedangSimpanUbah.value = false;
+    if (masihTerpasang.value) sedangSimpanUbah.value = false;
+  }
+
+  // Save succeeded: close sheet and perform follow-up refreshes outside save try/catch.
+  if (!masihTerpasang.value) return;
+  sheetUbahTerbuka.value = false;
+  try {
+    if (updated?.classification?.requires_clarification) {
+      await muatPertanyaan(updated.id);
+    }
+    if (!masihTerpasang.value) return;
+    if (CAPABILITIES.auditTrail) await store.muatJejak(updated.id);
+    if (!masihTerpasang.value) return;
+    await pajak.muat(true);
+  } catch {
+    // Secondary refresh errors after successful save do not fail the save.
   }
 }
 
@@ -616,37 +692,112 @@ onMounted(async () => {
       @close="tutupSheetUbah"
     >
       <div class="sheet-fields">
-        <AppField label="Tanggal transaksi" for-id="edit-tgl" required>
-          <AppInput id="edit-tgl" v-model="draftEdit.tx_date" type="date" required />
+        <AppField
+          label="Tanggal transaksi"
+          for-id="edit-tgl"
+          required
+          :error="galatUbahField.tx_date"
+          field="tx_date"
+        >
+          <AppInput
+            id="edit-tgl"
+            v-model="draftEdit.tx_date"
+            type="date"
+            required
+            :invalid="Boolean(galatUbahField.tx_date)"
+            :aria-describedby="galatUbahField.tx_date ? 'edit-tgl-err' : undefined"
+          />
         </AppField>
-        <AppField label="Nama klien atau lawan transaksi" for-id="edit-klien" required>
-          <AppInput id="edit-klien" v-model="draftEdit.client_name" required />
+        <AppField
+          label="Nama klien atau lawan transaksi"
+          for-id="edit-klien"
+          required
+          :error="galatUbahField.client_name"
+          field="client_name"
+        >
+          <AppInput
+            id="edit-klien"
+            v-model="draftEdit.client_name"
+            required
+            :invalid="Boolean(galatUbahField.client_name)"
+            :aria-describedby="galatUbahField.client_name ? 'edit-klien-err' : undefined"
+          />
         </AppField>
-        <AppField label="Deskripsi layanan atau barang" for-id="edit-deskripsi">
-          <AppInput id="edit-deskripsi" v-model="draftEdit.description" />
+        <AppField
+          label="Deskripsi layanan atau barang"
+          for-id="edit-deskripsi"
+          :error="galatUbahField.description"
+          field="description"
+        >
+          <AppInput
+            id="edit-deskripsi"
+            v-model="draftEdit.description"
+            :invalid="Boolean(galatUbahField.description)"
+            :aria-describedby="galatUbahField.description ? 'edit-deskripsi-err' : undefined"
+          />
         </AppField>
-        <AppField label="Nominal bruto" for-id="edit-nominal" required>
+        <AppField
+          label="Nominal bruto"
+          for-id="edit-nominal"
+          required
+          :error="galatUbahField.amount_idr"
+          field="amount_idr"
+        >
           <AppInput
             id="edit-nominal"
             v-model="draftEdit.amount_idr"
             mono
             inputmode="numeric"
             required
+            :invalid="Boolean(galatUbahField.amount_idr)"
+            :aria-describedby="galatUbahField.amount_idr ? 'edit-nominal-err' : undefined"
           />
         </AppField>
-        <AppField label="Nomor faktur / bukti potong" for-id="edit-faktur" optional>
-          <AppInput id="edit-faktur" v-model="draftEdit.invoice_no" />
+        <AppField
+          label="Nomor faktur / bukti potong"
+          for-id="edit-faktur"
+          optional
+          :error="galatUbahField.invoice_no"
+          field="invoice_no"
+        >
+          <AppInput
+            id="edit-faktur"
+            v-model="draftEdit.invoice_no"
+            :invalid="Boolean(galatUbahField.invoice_no)"
+            :aria-describedby="galatUbahField.invoice_no ? 'edit-faktur-err' : undefined"
+          />
         </AppField>
-        <AppField label="Pajak yang sudah dipotong" for-id="edit-pajak" optional>
+        <AppField
+          label="Pajak yang sudah dipotong"
+          for-id="edit-pajak"
+          optional
+          :error="galatUbahField.withheld_tax_amount_idr"
+          field="withheld_tax_amount_idr"
+        >
           <AppInput
             id="edit-pajak"
             v-model="draftEdit.withheld_tax_amount_idr"
             mono
             inputmode="numeric"
+            :invalid="Boolean(galatUbahField.withheld_tax_amount_idr)"
+            :aria-describedby="
+              galatUbahField.withheld_tax_amount_idr ? 'edit-pajak-err' : undefined
+            "
           />
         </AppField>
-        <AppField label="Saluran penjualan" for-id="edit-kanal">
-          <AppSelect id="edit-kanal" v-model="draftEdit.source_channel" :options="kanalOpsi" />
+        <AppField
+          label="Saluran penjualan"
+          for-id="edit-kanal"
+          :error="galatUbahField.source_channel"
+          field="source_channel"
+        >
+          <AppSelect
+            id="edit-kanal"
+            v-model="draftEdit.source_channel"
+            :options="kanalOpsi"
+            :invalid="Boolean(galatUbahField.source_channel)"
+            :aria-describedby="galatUbahField.source_channel ? 'edit-kanal-err' : undefined"
+          />
         </AppField>
       </div>
 

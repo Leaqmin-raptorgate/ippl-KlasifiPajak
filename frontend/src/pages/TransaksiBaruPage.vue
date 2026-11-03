@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** Capture form for one income transaction: the fields, and what classification will do with them. */
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppCard from "@/components/ui/AppCard.vue";
@@ -11,7 +11,8 @@ import AppPill from "@/components/ui/AppPill.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
 import SourceTag from "@/components/app/SourceTag.vue";
 import WorkpaperNote from "@/components/app/WorkpaperNote.vue";
-import { ApiFailure } from "@/lib/api";
+import { ApiFailure, isAbortError, terapkanFieldErrors } from "@/lib/api";
+import { KATEGORI_DASAR_HUKUM } from "@/lib/dasarHukum";
 import { CAPABILITIES } from "@/lib/capabilities";
 import {
   KATEGORI_LABEL,
@@ -41,7 +42,43 @@ const dipotong = ref("");
 const kanal = ref<SourceChannel>("other");
 const sudahCobaSimpan = ref(false);
 const galatSimpan = ref("");
+/** Server 422 field map. */
+const galatServer = reactive<Record<string, string>>({});
 const sibuk = ref(false);
+const masihTerpasang = ref(true);
+let simpanAbort: AbortController | null = null;
+onBeforeUnmount(() => {
+  masihTerpasang.value = false;
+  simpanAbort?.abort();
+  simpanAbort = null;
+});
+
+function bersihkanGalatServer() {
+  for (const key of Object.keys(galatServer)) delete galatServer[key];
+}
+
+watch(tanggalTransaksi, () => {
+  delete galatServer.tx_date;
+});
+watch(klien, () => {
+  delete galatServer.client_name;
+});
+watch(keterangan, () => {
+  delete galatServer.description;
+});
+watch(nominal, () => {
+  delete galatServer.amount_idr;
+});
+watch(faktur, () => {
+  delete galatServer.invoice_no;
+});
+watch(dipotong, () => {
+  delete galatServer.withheld_tax_amount_idr;
+});
+watch(kanal, () => {
+  delete galatServer.source_channel;
+});
+
 const berkas = ref<File | null>(null);
 const imageId = ref("");
 
@@ -52,15 +89,12 @@ const kanalOpsi = (Object.keys(SOURCE_CHANNEL_LABEL) as SourceChannel[]).map((k)
 
 const sumberOpsi = Object.keys(SUMBER_LABEL) as Sumber[];
 
-/** How each of the four categories is read, with its figures read from the ruleset. */
+/** How each of the four categories is read per regulation definition. */
 const CARA_MEMBACA: Record<Kategori, string> = {
-  usaha: `Omzet usaha. Batas bebas pajak ${rupiah(PUBLIC_RULESET.bebasUsaha)} dalam satu tahun, di atasnya tarif ${PUBLIC_RULESET.tarifLabel} berlaku sampai plafon ${rupiah(PUBLIC_RULESET.plafonUsaha)}.`,
-  pekerjaan_bebas:
-    "Penghasilan pekerjaan yang dikerjakan sendiri atas nama pribadi. Dihitung dengan norma, bukan dengan tarif, dan tidak memakai batas bebas usaha.",
-  already_final:
-    "Pajak sudah dipotong lawan transaksi sebelum uang diterima. Yang dicatat di baris ini adalah bukti potongnya.",
-  non_object:
-    "Bukan penghasilan. Modal, pengembalian deposit, atau pemindahan dana antar rekening sendiri masuk ke sini dan tidak menambah omzet.",
+  usaha: KATEGORI_DASAR_HUKUM.usaha.teks,
+  pekerjaan_bebas: KATEGORI_DASAR_HUKUM.pekerjaan_bebas.teks,
+  already_final: KATEGORI_DASAR_HUKUM.already_final.teks,
+  non_object: KATEGORI_DASAR_HUKUM.non_object.teks,
 };
 
 const TONE: Record<Kategori, "usaha" | "bebas" | "final" | "non"> = {
@@ -83,15 +117,18 @@ const dipotongAngka = computed(() =>
 );
 
 /** An empty untouched field stays quiet; anything typed is checked as it is typed. */
-const galatTanggal = computed(() =>
-  tanggalTransaksi.value || !sudahCobaSimpan.value ? "" : "Tanggal transaksi wajib diisi.",
-);
+const galatTanggal = computed(() => {
+  if (galatServer.tx_date) return galatServer.tx_date;
+  return tanggalTransaksi.value || !sudahCobaSimpan.value ? "" : "Tanggal transaksi wajib diisi.";
+});
 
-const galatKlien = computed(() =>
-  klien.value.trim() || !sudahCobaSimpan.value ? "" : "Nama klien wajib diisi.",
-);
+const galatKlien = computed(() => {
+  if (galatServer.client_name) return galatServer.client_name;
+  return klien.value.trim() || !sudahCobaSimpan.value ? "" : "Nama klien wajib diisi.";
+});
 
 const galatNominal = computed(() => {
+  if (galatServer.amount_idr) return galatServer.amount_idr;
   if (nominal.value === "" && !sudahCobaSimpan.value) return "";
   if (nominal.value === "") return "Nominal bruto wajib diisi.";
   if (nominalAngka.value === null) return "Nominal harus angka bulat saja, misalnya 12500000.";
@@ -99,11 +136,16 @@ const galatNominal = computed(() => {
   return "";
 });
 
-const galatPajak = computed(() =>
-  dipotongAngka.value === null ? "Pajak dipotong harus angka bulat saja, misalnya 3750000." : "",
-);
+const galatPajak = computed(() => {
+  if (galatServer.withheld_tax_amount_idr) return galatServer.withheld_tax_amount_idr;
+  return dipotongAngka.value === null
+    ? "Pajak dipotong harus angka bulat saja, misalnya 3750000."
+    : "";
+});
 
-const galatFaktur = computed(() => "");
+const galatFaktur = computed(() => galatServer.invoice_no || "");
+const galatDeskripsi = computed(() => galatServer.description || "");
+const galatKanal = computed(() => galatServer.source_channel || "");
 
 function hariIni(): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(new Date());
@@ -156,12 +198,16 @@ function batal() {
 async function simpan() {
   sudahCobaSimpan.value = true;
   galatSimpan.value = "";
+  bersihkanGalatServer();
   const nilai = nominalAngka.value;
   const pajak = dipotongAngka.value;
   if (!tanggalTransaksi.value || klien.value.trim() === "") return;
   if (nilai === null || nilai <= 0 || pajak === null) return;
   if (profil.belumAda) return;
   sibuk.value = true;
+  simpanAbort?.abort();
+  simpanAbort = new AbortController();
+  const signal = simpanAbort.signal;
   try {
     const fields = {
       amount_idr: nilai,
@@ -173,21 +219,32 @@ async function simpan() {
       source_channel: kanal.value,
     };
     const row = imageId.value
-      ? await store.konfirmasiStruk(imageId.value, {
-          confirmed_amount_idr: nilai,
-          confirmed_tx_date: tanggalTransaksi.value,
-          confirmed_client_name: klien.value.trim(),
-          confirmed_description: keterangan.value.trim(),
-          confirmed_invoice_no: faktur.value.trim(),
-          withheld_tax_amount_idr: pajak,
-          source_channel: kanal.value,
-        })
-      : await store.buat(fields);
+      ? await store.konfirmasiStruk(
+          imageId.value,
+          {
+            confirmed_amount_idr: nilai,
+            confirmed_tx_date: tanggalTransaksi.value,
+            confirmed_client_name: klien.value.trim(),
+            confirmed_description: keterangan.value.trim(),
+            confirmed_invoice_no: faktur.value.trim(),
+            withheld_tax_amount_idr: pajak,
+            source_channel: kanal.value,
+          },
+          { signal },
+        )
+      : await store.buat(fields, { signal });
+    if (!masihTerpasang.value) return;
     await router.push(`/transaksi/${row.id}`);
   } catch (error) {
+    if (!masihTerpasang.value || isAbortError(error)) return;
+    if (error instanceof ApiFailure && Object.keys(error.fieldErrors).length > 0) {
+      terapkanFieldErrors(error.fieldErrors, galatServer);
+      galatSimpan.value = error.message || "Periksa isian yang ditandai.";
+      return;
+    }
     galatSimpan.value = error instanceof ApiFailure ? error.message : "Simpan gagal.";
   } finally {
-    sibuk.value = false;
+    if (masihTerpasang.value) sibuk.value = false;
   }
 }
 </script>
@@ -213,7 +270,13 @@ async function simpan() {
         @submit.prevent="simpan"
       >
         <div class="fields">
-          <AppField label="Tanggal transaksi" class="wajib" for-id="tanggal" :error="galatTanggal">
+          <AppField
+            label="Tanggal transaksi"
+            class="wajib"
+            for-id="tanggal"
+            :error="galatTanggal"
+            field="tx_date"
+          >
             <AppInput
               id="tanggal"
               v-model="tanggalTransaksi"
@@ -228,6 +291,7 @@ async function simpan() {
             class="wajib"
             for-id="klien"
             :error="galatKlien"
+            field="client_name"
           >
             <AppInput
               id="klien"
@@ -243,6 +307,8 @@ async function simpan() {
             label="Deskripsi layanan atau barang"
             for-id="deskripsi"
             hint="Tulis yang dibaca klasifikasi: barang atau jasa apa, berapa banyak, dan untuk siapa."
+            :error="galatDeskripsi"
+            field="description"
           >
             <textarea
               id="deskripsi"
@@ -260,6 +326,7 @@ async function simpan() {
               for-id="nominal"
               hint="Bruto sebelum dipotong lawan transaksi."
               :error="galatNominal"
+              field="amount_idr"
             >
               <AppInput
                 id="nominal"
@@ -280,6 +347,7 @@ async function simpan() {
               optional
               hint="Dipakai untuk menemukan nomor yang sama tercatat dua kali."
               :error="galatFaktur"
+              field="invoice_no"
             >
               <AppInput
                 id="faktur"
@@ -297,6 +365,7 @@ async function simpan() {
             optional
             hint="Isi hanya bila potongannya benar-benar sudah diterima."
             :error="galatPajak"
+            field="withheld_tax_amount_idr"
           >
             <AppInput
               id="dipotong"
@@ -310,7 +379,12 @@ async function simpan() {
             </AppInput>
           </AppField>
 
-          <AppField label="Saluran penjualan" for-id="kanal">
+          <AppField
+            label="Saluran penjualan"
+            for-id="kanal"
+            :error="galatKanal"
+            field="source_channel"
+          >
             <AppSelect id="kanal" v-model="kanal" :options="kanalOpsi" />
           </AppField>
 

@@ -17,16 +17,20 @@ related), and `UC-01` to `UC-26`. It lives outside this repository under
 Ids such as `FR-17`, `FR-23a`, `UC-20`, `NFR-12` and `NFR-13` are defined in
 the SRS. Do not treat them as invented.
 
-## M50 milestone (PRs #1–#4) — merged 2026-11-03
+## M50 milestone (PRs #1-#4) : merged 2026-11-03
 
 Parallel hardening / feature slice on `main` @ `3d5ced0` (merge of PR #3).
 
-| PR  | Branch / theme                                                                                                         | Status     |
-| --- | ---------------------------------------------------------------------------------------------------------------------- | ---------- |
-| #1  | Storage: Alembic ERD r3, compose `migrate` one-shot, app vs migrate MySQL users, HEALTHCHECK / non-root image          | **merged** |
-| #2  | Testing: CI gates (ruff, prettier, frontend `vue-tsc` build, fail-closed pip-audit, gitleaks, coverage, docker test)   | **merged** |
-| #3  | Security: argon2id, password reset, sessions, account delete, rate limits, XFF/`TRUSTED_PROXY_IPS`, log redaction      | **merged** |
-| #4  | Tax: CRUD/override/reclassify/audit-trail, versioned `month_snapshots`, `as_of` = today WIB, quotas/subscription reads | **merged** |
+| PR  | Branch / theme                                                                                                         | Status        |
+| --- | ---------------------------------------------------------------------------------------------------------------------- | ------------- |
+| #1  | Storage: Alembic ERD r3, compose `migrate` one-shot, app vs migrate MySQL users, HEALTHCHECK / non-root image          | **merged**    |
+| #2  | Testing: CI gates (ruff, prettier, frontend `vue-tsc` build, fail-closed pip-audit, gitleaks, coverage, docker test)   | **merged**    |
+| #3  | Security: argon2id, password reset, sessions, account delete, rate limits, XFF/`TRUSTED_PROXY_IPS`, log redaction      | **merged**    |
+| #4  | Tax: CRUD/override/reclassify/audit-trail, versioned `month_snapshots`, `as_of` = today WIB, quotas/subscription reads | **merged**    |
+| #6  | UI: UX defects, transaction edit sheet, dashboard freshness, onboarding, responsive fixes                              | **merged**    |
+| #9  | Security: reject `.env.example` JWT placeholder and CHANGE_ME outside dev/test (HB-01)                                 | **merged**    |
+| #8  | UI: review follow-ups, 409 conflict reload, 422 field errors, unmount guards, single-source legal basis                | **in review** |
+| #7  | Testing: Vitest test runner, transaction edit and field errors unit test coverage                                      | **in review** |
 
 Follow-ups that are **not** merge blockers are tracked as B-11 outside this
 repo's Lead backlog (quota reserve SQL, receipt byte cleanup after OCR,
