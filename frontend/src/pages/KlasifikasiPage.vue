@@ -253,13 +253,14 @@ async function simpanUbah() {
     if (!masihTerpasang.value || isAbortError(error)) return;
     // API Spec v1.3.1 §2.5 / §5.12: VERSION_CONFLICT → re-GET latest version, refresh form+store.
     if (error instanceof ApiFailure && error.code === "VERSION_CONFLICT") {
+      // Show the conflict right away; the reload below only refreshes the form.
+      galatUbah.value =
+        error.message ||
+        "Versi data sudah berubah. Form diisi ulang dari data terbaru; periksa lalu simpan lagi.";
       try {
         const fresh = await store.muatSatu(txId);
         if (!masihTerpasang.value) return;
         isiDraftDari(fresh);
-        galatUbah.value =
-          error.message ||
-          "Versi data sudah berubah. Form diisi ulang dari data terbaru; periksa lalu simpan lagi.";
       } catch (reloadError) {
         if (!masihTerpasang.value || isAbortError(reloadError)) return;
         galatUbah.value =
@@ -655,6 +656,7 @@ onMounted(async () => {
           for-id="edit-tgl"
           required
           :error="galatUbahField.tx_date"
+          field="tx_date"
         >
           <AppInput id="edit-tgl" v-model="draftEdit.tx_date" type="date" required />
         </AppField>
@@ -663,6 +665,7 @@ onMounted(async () => {
           for-id="edit-klien"
           required
           :error="galatUbahField.client_name"
+          field="client_name"
         >
           <AppInput id="edit-klien" v-model="draftEdit.client_name" required />
         </AppField>
@@ -670,6 +673,7 @@ onMounted(async () => {
           label="Deskripsi layanan atau barang"
           for-id="edit-deskripsi"
           :error="galatUbahField.description"
+          field="description"
         >
           <AppInput id="edit-deskripsi" v-model="draftEdit.description" />
         </AppField>
@@ -678,6 +682,7 @@ onMounted(async () => {
           for-id="edit-nominal"
           required
           :error="galatUbahField.amount_idr"
+          field="amount_idr"
         >
           <AppInput
             id="edit-nominal"
@@ -692,6 +697,7 @@ onMounted(async () => {
           for-id="edit-faktur"
           optional
           :error="galatUbahField.invoice_no"
+          field="invoice_no"
         >
           <AppInput id="edit-faktur" v-model="draftEdit.invoice_no" />
         </AppField>
@@ -700,6 +706,7 @@ onMounted(async () => {
           for-id="edit-pajak"
           optional
           :error="galatUbahField.withheld_tax_amount_idr"
+          field="withheld_tax_amount_idr"
         >
           <AppInput
             id="edit-pajak"
@@ -712,6 +719,7 @@ onMounted(async () => {
           label="Saluran penjualan"
           for-id="edit-kanal"
           :error="galatUbahField.source_channel"
+          field="source_channel"
         >
           <AppSelect id="edit-kanal" v-model="draftEdit.source_channel" :options="kanalOpsi" />
         </AppField>

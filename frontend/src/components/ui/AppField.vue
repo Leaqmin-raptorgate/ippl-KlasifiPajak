@@ -6,6 +6,8 @@ defineProps<{
   error?: string;
   optional?: boolean;
   forId?: string;
+  /** API field name (e.g. `tx_date`); tags the error node for 422 field_errors. */
+  field?: string;
 }>();
 </script>
 
@@ -16,7 +18,15 @@ defineProps<{
       <span v-if="optional" class="opt">opsional</span>
     </div>
     <slot />
-    <p v-if="error" class="msg err" role="alert">{{ error }}</p>
+    <p
+      v-if="error"
+      :id="forId ? `${forId}-err` : undefined"
+      class="msg err"
+      role="alert"
+      :data-field-error="field"
+    >
+      {{ error }}
+    </p>
     <p v-else-if="hint" class="msg">{{ hint }}</p>
   </div>
 </template>

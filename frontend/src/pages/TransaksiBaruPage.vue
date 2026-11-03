@@ -250,7 +250,13 @@ async function simpan() {
         @submit.prevent="simpan"
       >
         <div class="fields">
-          <AppField label="Tanggal transaksi" class="wajib" for-id="tanggal" :error="galatTanggal">
+          <AppField
+            label="Tanggal transaksi"
+            class="wajib"
+            for-id="tanggal"
+            :error="galatTanggal"
+            field="tx_date"
+          >
             <AppInput
               id="tanggal"
               v-model="tanggalTransaksi"
@@ -265,6 +271,7 @@ async function simpan() {
             class="wajib"
             for-id="klien"
             :error="galatKlien"
+            field="client_name"
           >
             <AppInput
               id="klien"
@@ -281,6 +288,7 @@ async function simpan() {
             for-id="deskripsi"
             hint="Tulis yang dibaca klasifikasi: barang atau jasa apa, berapa banyak, dan untuk siapa."
             :error="galatDeskripsi"
+            field="description"
           >
             <textarea
               id="deskripsi"
@@ -298,6 +306,7 @@ async function simpan() {
               for-id="nominal"
               hint="Bruto sebelum dipotong lawan transaksi."
               :error="galatNominal"
+              field="amount_idr"
             >
               <AppInput
                 id="nominal"
@@ -318,6 +327,7 @@ async function simpan() {
               optional
               hint="Dipakai untuk menemukan nomor yang sama tercatat dua kali."
               :error="galatFaktur"
+              field="invoice_no"
             >
               <AppInput
                 id="faktur"
@@ -335,6 +345,7 @@ async function simpan() {
             optional
             hint="Isi hanya bila potongannya benar-benar sudah diterima."
             :error="galatPajak"
+            field="withheld_tax_amount_idr"
           >
             <AppInput
               id="dipotong"
@@ -348,7 +359,12 @@ async function simpan() {
             </AppInput>
           </AppField>
 
-          <AppField label="Saluran penjualan" for-id="kanal" :error="galatKanal">
+          <AppField
+            label="Saluran penjualan"
+            for-id="kanal"
+            :error="galatKanal"
+            field="source_channel"
+          >
             <AppSelect id="kanal" v-model="kanal" :options="kanalOpsi" />
           </AppField>
 
