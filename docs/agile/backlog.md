@@ -8,13 +8,29 @@ Plane holds 116 items: 24 top-level stories and 92 sub-tasks. Every story names
 its SRS requirement ids, or is labelled `needs-decision` when the requirement
 does not exist yet.
 
-Requirement provenance matters here. The SRS of record is **v2.6**, dated 18 Okt
-2026, with `FR-01` to `FR-47`, `FR-23a`, `FR-PAY-01` to `FR-PAY-09`, `NFR-01` to
-`NFR-14` and `UC-01` to `UC-26`. It is on disk at
-`SPEC/KlasifiPajak/KlasifiPajak_SRS.md`, beside ERD v1.2.2 and API v1.2.2.
+Requirement provenance: the SRS of record is **v2.7**, with `FR-01` to
+`FR-47`, `FR-23a`, `FR-PAY-01` to `FR-PAY-09`, `NFR-01` to `NFR-15` (and
+related), and `UC-01` to `UC-26`. It lives outside this repository under
+`SPEC/`, beside **ERD r3** and **API v1.3.1**. The API contract is mirrored at
+`docs/api/KlasifiPajak_API_Specification.md`.
 
 Ids such as `FR-17`, `FR-23a`, `UC-20`, `NFR-12` and `NFR-13` are defined in
-v2.6. Do not treat them as invented.
+the SRS. Do not treat them as invented.
+
+## M50 milestone (PRs #1–#4) — merged 2026-11-03
+
+Parallel hardening / feature slice on `main` @ `3d5ced0` (merge of PR #3).
+
+| PR  | Branch / theme                                                                                                         | Status     |
+| --- | ---------------------------------------------------------------------------------------------------------------------- | ---------- |
+| #1  | Storage: Alembic ERD r3, compose `migrate` one-shot, app vs migrate MySQL users, HEALTHCHECK / non-root image          | **merged** |
+| #2  | Testing: CI gates (ruff, prettier, frontend `vue-tsc` build, fail-closed pip-audit, gitleaks, coverage, docker test)   | **merged** |
+| #3  | Security: argon2id, password reset, sessions, account delete, rate limits, XFF/`TRUSTED_PROXY_IPS`, log redaction      | **merged** |
+| #4  | Tax: CRUD/override/reclassify/audit-trail, versioned `month_snapshots`, `as_of` = today WIB, quotas/subscription reads | **merged** |
+
+Follow-ups that are **not** merge blockers are tracked as B-11 outside this
+repo's Lead backlog (quota reserve SQL, receipt byte cleanup after OCR,
+snapshot history reads, CI SHA-pin, §5.31 mount-time gate, rate-limit TTL, …).
 
 ## Modules
 
@@ -31,7 +47,7 @@ v2.6. Do not treat them as invented.
 | Export         | FR-31 to FR-33                                  |
 | UI             | Vue 3 frontend                                  |
 | Quality        | Tests, Docker, CI, NFR-14                       |
-| SRS, SDD       | Documentation, existing                         |
+| SRS, SDD       | Documentation                                   |
 
 ## Labels
 
@@ -41,46 +57,46 @@ v2.6. Do not treat them as invented.
 `needs-decision` is not decoration. Anything carrying it is waiting on the
 developer, not on work.
 
-## Engine — eligibility rules (SRS v2.6, SDD v1.3)
+## Engine — eligibility rules (SRS v2.7)
 
 Done in code: `backend/tests/test_golden.py`, `backend/app/engine/compute.py`,
 `backend/app/engine/types.py`, `backend/app/engine/ruleset/load.py`.
 
 - [x] `rounding_rule` is a ruleset parameter, `floor` or `round_half_up`,
-      default `floor`. TC-ARITH-500001 expects tax Rp 0 under both, so the
-      figure is locked without waiting for the elucidation text.
+      default `floor`. TC-ARITH-500001 expects tax Rp 0 under both.
 - [x] Prior-year gross revenue for eligibility is the sum of usaha,
       `pekerjaan_bebas`, and `already_final`, gross. Three profile fields.
 - [x] FR-20: crossing the Rp 4,8 miliar cap in the current year keeps the
-      current year's rate and only sets `next_year_at_risk`. Test:
-      `test_crossing_the_cap_in_the_current_year_keeps_the_rate`.
+      current year's rate and only sets `next_year_at_risk`.
 - [x] TC-GOLDEN-CAP-FIRST-YEAR, -CURRENT-YEAR, -PRIOR-YEAR,
-      -COMPOSITION-FAIL, -COMPOSITION-PASS, -SPOUSE. All six in the test file.
-- [x] FR-21 / UC-13b: `spouse_in_band` and `spouse_in_cap` are ruleset
-      parameters defaulting to `false` / `true` per PMK 164/2023 Lampiran B.
-      Spouse omzet joins the cap check only, never the free band.
-      `TODO(PASAL-58)` is **closed** by v2.6.
-- [x] FR-23 / UC-13c: `sisa_bayar_idr` and `overwithheld_excess_idr` on `Line`
-      and `MonthSummary`, both non-negative. Excess is surfaced as _belum
-      diperhitungkan_, never carried forward. `TODO(LEBIH-POTONG)` is
-      **provisionally closed** by v2.6 §4.5 item 1.
-- [x] FR-22 / UC-11a / NFR-02: canonical `input_hash` prefixed `v1:`, hashed
-      per month, payload carrying `rate_str`, both spouse switches and the
-      prior-year resolution source. `TODO(PENYELARASAN)` is **closed**.
-- [x] FR-03: prior-year fields distinguish _not filled in_ from a genuine
-      zero, as v2.6 requires. This is what makes TC-GOLDEN-CAP-FIRST-YEAR
-      (new taxpayer, no prior data) a real case rather than an accident of
-      `int = 0` defaults.
-- [x] FR-21 `agregasi_pasal_58` is a boolean distinct from FR-03 marital
-      status. Both are on `Profile`.
+      -COMPOSITION-FAIL, -COMPOSITION-PASS, -SPOUSE.
+- [x] FR-21 / UC-13b: `spouse_in_band` / `spouse_in_cap` ruleset defaults.
+- [x] FR-23 / UC-13c: `sisa_bayar_idr` and `overwithheld_excess_idr`.
+- [x] FR-22 / UC-11a / NFR-02: canonical `input_hash` prefixed `v1:`.
+- [x] FR-03: prior-year empty vs zero (`UNSET`).
+- [x] Versioned month snapshots (D-11 / ERD r3) + dashboard `as_of` = today WIB.
 - [ ] Still open: L3-B Bagian A columns (FR-31) and live KAP/KJS values.
 
-## Payments — Midtrans Snap sandbox (SDD 1.3)
+## Rubric features — not yet implemented
 
-- [ ] Webhook notification fields, SHA512 signature check with
-      `hmac.compare_digest`, and status normalisation. Contract is in
-      `SPEC/KlasifiPajak/KlasifiPajak_SDD.md` section 4.8.
-- [x] FR-PAY-01 to FR-PAY-08 Must, FR-PAY-09 Should (SRS 4.9).
+These are **required for graded v1** (D-08) and must not be marked done:
+
+- [ ] OCR receipt upload (FR-06, FR-06a, FR-06b) — DB stub / D-01 design only
+- [ ] Real Midtrans Snap + webhook (FR-PAY-01…05; FR-PAY-09 Should)
+- [ ] AI classifier **or** assistant (FR-12/13 or FR-27…30) via 9router (D-09)
+- [ ] Annual recap PDF (FR-31…33); library locked to `fpdf2` (D-11)
+
+## Payments — Midtrans Snap (not started)
+
+Held until D-10 placeholders are wired into an adapter. Contract is API
+**v1.3.1** §5.30 (HMAC over `order_id`, status, `amount_str`; monotonic status;
+30-day renewal). Never use production keys.
+
+- [ ] `GatewayAdapter` plus `FakeGatewayAdapter`
+- [ ] Signature verification with `hmac.compare_digest`
+- [ ] Reject a tampered `gross_amount_idr`
+- [ ] Webhook idempotency, monotonic status, renewal arithmetic
+- [ ] Map Snap `redirect_url` → API `payment_url` (D-11)
 
 ## Sprint 1 — docs and stack
 
@@ -88,80 +104,57 @@ Done in code: `backend/tests/test_golden.py`, `backend/app/engine/compute.py`,
 - [x] Polish the SRS (IPPL-3)
 - [x] Draft the SDD once the SRS feels complete
 - [x] **BLOCKER** supply the PP 20/2026 elucidation golden values for `TC-GOLDEN-*`
-- [x] **BLOCKER** write SRS v2.6 covering payments, OCR, and the missing ids
+- [x] **BLOCKER** write SRS covering payments, OCR, and the missing ids (now v2.7)
 
 ## Sprint 2 — classification without a model
 
-- [x] FR-3.2 heuristic-first path, zero model calls (IPPL-9) — the keyword
-      table runs inside transaction create
-- [x] FR-3.3 non-object and already-final keyword table (IPPL-10)
-- [ ] NFR-Q1 labeled set of at least 40 transactions (IPPL-11)
+- [x] Heuristic-first path, zero model calls — keyword table on transaction create
+- [x] Non-object and already-final keyword table
+- [ ] NFR-Q1 labeled set of at least 40 transactions
 - [ ] NFR-Q2, NFR-Q3 report heuristic accuracy
 
 ## Sprint 3 — storage and dashboard
 
-- [x] FR-1.1, FR-1.2 profile capture and non-destructive history (IPPL-13)
-- [x] FR-2.1 manual entry with validation (IPPL-14)
-- [x] FR-2.2 uniqueness key, empty invoice number stored as NULL (IPPL-15)
-- [x] FR-5.1, FR-5.2, FR-5.4 threshold tracker, monthly summary, disclaimer (IPPL-16)
-- [x] SQL syntax reference under `docs/sql_syntaxes/` (procedures, functions,
-      views, triggers, access, optimization); not wired into services yet
-- [x] `GET /quotas` and `GET /subscriptions/status` read models; idempotent
-      demo seed with one gratis and one berbayar account
+- [x] Profile capture and non-destructive history
+- [x] Manual entry with validation; uniqueness key; empty invoice → NULL
+- [x] Threshold tracker, monthly summary, disclaimer (WORKPAPER string locked)
+- [x] SQL syntax reference under `docs/sql_syntaxes/` (not wired into services)
+- [x] `GET /quotas` and `GET /subscriptions/status`; Alembic head = ERD r3
+- [x] Compose `migrate` one-shot + app/migrate MySQL users (PR #1)
 
 ## Sprint 4 — AI fallback
 
-- [ ] FR-3.4, FR-3.5 request bundle and validated reply (IPPL-17)
-- [ ] FR-3.6 one targeted clarifying question (IPPL-18)
-- [ ] FR-3.7, FR-3.8 override and stale recompute (IPPL-19)
-- [ ] FR-9.1, FR-9.2 quota counters and `paid_flag` (IPPL-20)
+- [ ] Request bundle and validated reply (model path)
+- [ ] One targeted clarifying question (model path)
+- [x] Override and stale recompute (rules/user path on main)
+- [x] Quota counters and `paid_flag` read models (reserve-on-AI still open)
 
 ## Sprint 5 — trace and demo
 
-- [ ] FR-7.1 per-transaction trace (IPPL-21)
-- [ ] FR-6.1 to FR-6.4 read-only assistant (stretch)
-- [ ] FR-8.1 to FR-8.3 annual workpaper PDF (stretch)
-- [ ] Demo script, README, report numbers
+- [x] Per-transaction audit trail endpoint (PR #4)
+- [ ] FR-6.x read-only assistant (rubric; not started)
+- [ ] FR-8.x annual workpaper PDF (rubric; not started)
+- [ ] Demo script, report numbers
 
 ## Frontend design — mockup v1.4.2 (25 Sep 2026)
 
-Static HTML mockups live in `IPPL/mockup/` (outside this repo). Synced to Plane
-as one story per screen, plus one `needs-decision` story for gaps. UI strings
-are Indonesian.
+Static HTML mockups live in `IPPL/mockup/` (outside this repo). UI strings
+are Indonesian. Pinia wiring is largely present; treat OCR / asisten / rekap
+screens as incomplete until the backend features exist.
 
-- [ ] Mockup 1/6 Profil Usaha onboarding — `index.html` (Sprint 3)
-- [ ] Mockup 2/6 Tambah Transaksi + bukti upload with OCR preview — `transaksi.html` (Sprint 3)
-- [ ] Mockup 3/6 Hasil Klasifikasi — verdict, alasan, one closed question, what-if cards — `klasifikasi.html` (Sprint 4)
-- [ ] Mockup 4/6 Dashboard — omzet cap progress, monthly summary, PPh split — `dashboard.html` (Sprint 3)
-- [ ] Mockup 5/6 Tanya Asisten — read-only chat with citations — `asisten.html` (Sprint 5, stretch)
-- [ ] Mockup 6/6 Rekap Tahunan — workpaper table, CSV + PDF export — `rekap.html` (Sprint 5, stretch)
-- [ ] **needs-decision** frontend gaps: Pengaturan screen, onboarding step 2,
-      OCR paywall vs v2.6 FR-06, Pasal 17 range on the what-if card, UI tag to
-      category mapping, override note, CSV export scope, confirmation-learning
-      behaviour, unexplained "Rp 0" (Sprint 1)
-
-## Payments, no sprint yet
-
-Held in backlog. API v1.2.2 §5.30 fixes the contract: HMAC-SHA256 over
-`order_id\nstatus\namount_str`, with monotonic order status and 30-day renewal.
-
-- [ ] Read the payment contract in API v1.2.2 §5.30 and capture a sandbox payload
-- [ ] Signature verification with `hmac.compare_digest`
-- [ ] Reject a tampered `gross_amount_idr`
-- [ ] `GatewayAdapter` plus `FakeGatewayAdapter`
-- [ ] Webhook idempotency, monotonic status, renewal arithmetic
+- [ ] Mockup screens vs live routes (Profil, Transaksi, Klasifikasi, Dashboard,
+      Asisten, Rekap) — track in Plane
+- [ ] **needs-decision** residual UI gaps (Pengaturan, OCR paywall vs FR-06, …)
 
 ## Quality gates
 
-- [x] Lint and format: ruff (`npm run lint`) and ruff format + Prettier
-      (`npm run format:check`), enforced by the Husky pre-commit hook and in CI
-- [x] Conventional Commits enforced by commitlint (`.husky/commit-msg`)
-- [x] GitHub Actions CI on push and PR to `main`: lint and format first, then
-      pytest with a branch coverage gate of 80% on `backend/app/engine` (NFR-14),
-      plus the same suite inside the Docker test image
-      (`.github/workflows/ci.yml`)
-- [ ] CD to CasaOS — undecided; needs a self-hosted runner or SSH deploy
-      decision first
+- [x] Lint and format: ruff + Prettier (Husky + CI)
+- [x] Conventional Commits (commitlint)
+- [x] GitHub Actions CI on push/PR to `main` (`.github/workflows/ci.yml`):
+      lint & format → frontend typecheck/build → pip-audit (high/critical,
+      fail-closed) → gitleaks → pytest coverage gate 80% on
+      `backend/app/engine` (NFR-14) → Docker test image
+- [ ] CD to CasaOS — undecided
 
 ## Definition of done
 

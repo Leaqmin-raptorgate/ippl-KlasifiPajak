@@ -86,8 +86,9 @@ npm run lint:fix
 npm run format
 ```
 
-These same checks — plus the pytest suite with the 80% branch coverage gate
-(NFR-14) and the Docker test image — are enforced in CI
+These same checks — plus the frontend typecheck/build, fail-closed
+pip-audit, gitleaks, the pytest suite with the 80% branch coverage gate on
+`backend/app/engine` (NFR-14), and the Docker test image — are enforced in CI
 (`.github/workflows/ci.yml`) on every push and pull request to `main`. Lint and
 format run first; tests only run once they pass. Bypassing the pre-commit hook
 (e.g. with `--no-verify`) only skips the local check; the PR will still fail CI
