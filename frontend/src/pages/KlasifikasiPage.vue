@@ -8,7 +8,7 @@
  * placeholder and a question waiting for an answer, so the question is the
  * primary card and the meter is not rendered at all.
  */
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppCard from "@/components/ui/AppCard.vue";
@@ -28,10 +28,20 @@ import {
   PUBLIC_RULESET,
   SOURCE_CHANNEL_LABEL,
   SUMBER_LABEL,
+  TAX_YEAR,
   type Kategori,
+  type SourceChannel,
   type Sumber,
 } from "@/lib/domain";
-import { persen, rupiah, rupiahPlain, tanggal, tanggalPanjang } from "@/lib/format";
+import {
+  parseRupiah,
+  persen,
+  rupiah,
+  rupiahPlain,
+  tanggal,
+  tanggalPanjang,
+  tanggalWaktuJakarta,
+} from "@/lib/format";
 import { usePajakStore } from "@/stores/pajak";
 import { useTransaksiStore } from "@/stores/transaksi";
 
@@ -86,9 +96,68 @@ const sedangTerapkan = ref(false);
 const klarifikasiSelesai = ref(false);
 const sedangDijawab = ref(false);
 
+const sheetHapusTerbuka = ref(false);
+const sedangHapus = ref(false);
+const galatHapus = ref("");
+
+const kanalOpsi = (Object.keys(SOURCE_CHANNEL_LABEL) as SourceChannel[]).map((k) => ({
+  value: k,
+  label: SOURCE_CHANNEL_LABEL[k],
+}));
+
+const sheetUbahTerbuka = ref(false);
+const sedangSimpanUbah = ref(false);
+const galatUbah = ref("");
+const draftEdit = reactive({
+  tx_date: "",
+  client_name: "",
+  description: "",
+  amount_idr: "",
+  invoice_no: "",
+  withheld_tax_amount_idr: "0",
+  source_channel: "other" as SourceChannel,
+});
+
 /** Older payloads carry no classification at all; that reads as classified, not as 0%. */
 const klasifikasi = computed(() => row.value?.classification);
 const perluJawab = computed(() => klasifikasi.value?.requires_clarification === true);
+
+const dasarHukum = computed(() => {
+  const cat = row.value?.category;
+  if (perluJawab.value) {
+    return {
+      judul: `Penentuan Kategori (${PUBLIC_RULESET.nama})`,
+      teks: `Klasifikasi memisahkan omzet usaha dengan penghasilan lainnya. Sebelum perlakuan pajak dapat dihitung, transaksi harus dipastikan apakah berasal dari peredaran usaha (PP 20/2026 Pasal 56), pekerjaan bebas, objek PPh final tersendiri, atau bukan objek pajak.`,
+      rujukan: `PP 20/2026 Pasal 56 & Prinsip Klasifikasi Transaksi`,
+    };
+  }
+  if (cat === "non_object") {
+    return {
+      judul: `Bukan Objek Pajak (UU PPh Pasal 4 Ayat 3)`,
+      teks: `Penerimaan berupa pengembalian dana, setor modal, atau mutasi antar-rekening sendiri bukan merupakan penghasilan bruto kena pajak. Transaksi ini dicatat untuk kebutuhan rekonsiliasi pembukuan dan tidak dimasukkan ke dalam perhitungan PPh Final maupun batas omzet usaha.`,
+      rujukan: `UU PPh Pasal 4 Ayat 3 · Berlaku Tahun Pajak ${TAX_YEAR}`,
+    };
+  }
+  if (cat === "already_final") {
+    return {
+      judul: `Penghasilan Final Tersendiri (UU PPh Pasal 4 Ayat 2)`,
+      teks: `Penghasilan yang telah dipotong PPh Final tersendiri oleh pihak ketiga (misalnya bunga deposito, sewa tanah/bangunan, dividen) tidak dihitung ulang dengan tarif omzet 0,5% agar tidak terjadi pemajakan berganda. Bukti potong dicatat sebagai dokumentasi kepatuhan.`,
+      rujukan: `UU PPh Pasal 4 Ayat 2 · Berlaku Tahun Pajak ${TAX_YEAR}`,
+    };
+  }
+  if (cat === "pekerjaan_bebas") {
+    return {
+      judul: `Pekerjaan Bebas (UU PPh Pasal 14 / Pasal 17)`,
+      teks: `Jasa atau keahlian yang dikerjakan atas nama pribadi (pekerjaan bebas) tidak memenuhi syarat skema PPh Final 0,5% peredaran usaha PP 20/2026. Penghasilan ini dihitung menggunakan Norma Penghitungan Penghasilan Neto (NPPN) atau tarif umum Pasal 17, dan tidak mengurangi batas bebas omzet usaha Rp 500.000.000.`,
+      rujukan: `UU PPh Pasal 14 & PP 20/2026 Pasal 56`,
+    };
+  }
+  return {
+    judul: `Omzet Usaha (${PUBLIC_RULESET.nama} Pasal 56)`,
+    teks: `Pasal 56 memisahkan dua dasar pengenaan. Omzet usaha dari orang pribadi yang jumlahnya dalam satu tahun pajak tidak melebihi ${rupiah(batasBebas.value)} tidak dikenai PPh final; untuk bagian omzet usaha di atas jumlah itu berlaku tarif ${PUBLIC_RULESET.tarifLabel} sampai plafon ${rupiah(plafon.value)}. Penghasilan dari pekerjaan yang dikerjakan sendiri dibaca dari norma penghasil, bukan dari tarif.`,
+    rujukan: `Ringkasan bacaan dari ${PUBLIC_RULESET.nama} Pasal 56 · berlaku ${tanggalPanjang(stampDate.value)}`,
+  };
+});
 
 /** A human set this category, so there is no rule-match score to show. */
 const dariManusia = computed(() => row.value?.source !== "rule");
@@ -118,6 +187,66 @@ function tutupSheet() {
   galatOverride.value = "";
 }
 
+function bukaSheetUbah() {
+  if (!row.value) return;
+  draftEdit.tx_date = row.value.tx_date;
+  draftEdit.client_name = row.value.client_name;
+  draftEdit.description = row.value.description;
+  draftEdit.amount_idr = String(row.value.amount_idr);
+  draftEdit.invoice_no = row.value.invoice_no || "";
+  draftEdit.withheld_tax_amount_idr = String(row.value.withheld_tax_amount_idr || 0);
+  draftEdit.source_channel = (row.value.source_channel as SourceChannel) || "other";
+  galatUbah.value = "";
+  sheetUbahTerbuka.value = true;
+}
+
+function tutupSheetUbah() {
+  sheetUbahTerbuka.value = false;
+  galatUbah.value = "";
+}
+
+async function simpanUbah() {
+  if (!row.value || sedangSimpanUbah.value) return;
+  const nilai = parseRupiah(draftEdit.amount_idr);
+  if (nilai === null || nilai <= 0) {
+    galatUbah.value = "Nominal bruto harus angka positif.";
+    return;
+  }
+  if (!draftEdit.client_name.trim() || !draftEdit.tx_date) {
+    galatUbah.value = "Nama klien dan tanggal transaksi wajib diisi.";
+    return;
+  }
+  const pajakPotong =
+    draftEdit.withheld_tax_amount_idr.trim() === ""
+      ? 0
+      : (parseRupiah(draftEdit.withheld_tax_amount_idr) ?? 0);
+  sedangSimpanUbah.value = true;
+  galatUbah.value = "";
+  try {
+    const updated = await store.ubah(row.value.id, {
+      amount_idr: nilai,
+      tx_date: draftEdit.tx_date,
+      client_name: draftEdit.client_name.trim(),
+      description: draftEdit.description.trim(),
+      invoice_no: draftEdit.invoice_no.trim() || undefined,
+      withheld_tax_amount_idr: pajakPotong,
+      source_channel: draftEdit.source_channel,
+      version: row.value.version,
+    });
+    sheetUbahTerbuka.value = false;
+    if (updated.classification?.requires_clarification) {
+      await muatPertanyaan(updated.id);
+    }
+    if (CAPABILITIES.auditTrail) await store.muatJejak(updated.id);
+    await pajak.muat(true);
+  } catch (error) {
+    galatUbah.value =
+      error instanceof ApiFailure ? error.message : "Gagal menyimpan perubahan transaksi.";
+  } finally {
+    sedangSimpanUbah.value = false;
+  }
+}
+
 async function terapkan() {
   if (!row.value || kategoriBaru.value === "" || sedangTerapkan.value) return;
   sedangTerapkan.value = true;
@@ -130,6 +259,7 @@ async function terapkan() {
     );
     sheetTerbuka.value = false;
     galatOverride.value = "";
+    if (CAPABILITIES.auditTrail) await store.muatJejak(row.value.id);
     await pajak.muat(true);
   } catch (error) {
     galatOverride.value = error instanceof ApiFailure ? error.message : "Override gagal.";
@@ -145,6 +275,7 @@ async function jawab(category: Kategori) {
   try {
     await store.jawab(row.value.id, category);
     klarifikasiSelesai.value = true;
+    if (CAPABILITIES.auditTrail) await store.muatJejak(row.value.id);
     await pajak.muat(true);
   } catch (error) {
     galatKlarifikasi.value = error instanceof ApiFailure ? error.message : "Klarifikasi gagal.";
@@ -167,15 +298,28 @@ async function muatPertanyaan(transactionId: string) {
   }
 }
 
-async function hapus() {
-  if (!row.value) return;
-  if (!window.confirm("Hapus transaksi ini? Cuplikan bulan itu akan dihitung ulang.")) return;
-  galat.value = "";
+function konfirmasiHapus() {
+  galatHapus.value = "";
+  sheetHapusTerbuka.value = true;
+}
+
+function tutupSheetHapus() {
+  sheetHapusTerbuka.value = false;
+  galatHapus.value = "";
+}
+
+async function eksekusiHapus() {
+  if (!row.value || sedangHapus.value) return;
+  sedangHapus.value = true;
+  galatHapus.value = "";
   try {
     await store.hapus(row.value.id);
+    sheetHapusTerbuka.value = false;
     await router.push("/transaksi");
   } catch (error) {
-    galat.value = error instanceof ApiFailure ? error.message : "Hapus gagal.";
+    galatHapus.value = error instanceof ApiFailure ? error.message : "Hapus transaksi gagal.";
+  } finally {
+    sedangHapus.value = false;
   }
 }
 
@@ -199,8 +343,7 @@ onMounted(async () => {
           <div>
             <p class="kosong-judul">Transaksi tidak ditemukan</p>
             <p class="kosong-sub">
-              Tidak ada baris <span class="figure">{{ id || "—" }}</span> di daftar lokal ini. Baris
-              bisa hilang kalau daftarnya dimuat ulang.
+              Transaksi ini tidak ditemukan atau sudah dihapus dari akun Anda.
             </p>
           </div>
         </div>
@@ -229,6 +372,11 @@ onMounted(async () => {
         subtitle="Fakta yang dicatat. Kategori dibaca dari fakta ini, bukan sebaliknya."
         inset
       >
+        <template #actions>
+          <AppButton variant="ghost" size="sm" icon="ubah" @click="bukaSheetUbah">
+            Ubah detail
+          </AppButton>
+        </template>
         <dl class="dl">
           <div class="dl-row">
             <dt>Klien / lawan transaksi</dt>
@@ -276,16 +424,16 @@ onMounted(async () => {
           <p class="u-label">Kategori yang ditetapkan</p>
           <div class="putusan-nama">
             <span class="nama" :class="perluJawab ? 'i-belum' : `i-${TONE[row.category]}`">
-              {{ KATEGORI_LABEL[row.category] }}
+              {{ perluJawab ? "Belum terklasifikasi" : KATEGORI_LABEL[row.category] }}
             </span>
             <AppPill
               v-if="perluJawab"
               tone="ask"
-              label="Belum terklasifikasi"
+              label="Perlu klarifikasi"
               icon="helpCircle"
               attention
             />
-            <SourceTag :sumber="row.source" />
+            <SourceTag v-if="!perluJawab" :sumber="row.source" />
           </div>
           <p v-if="perluJawab" class="asal">
             Tidak ada aturan yang cocok pada keterangan baris ini, jadi
@@ -363,19 +511,10 @@ onMounted(async () => {
         </div>
       </AppCard>
 
-      <AppCard title="Dasar hukum" :subtitle="`Ringkasan bacaan ${PUBLIC_RULESET.nama} Pasal 56`">
+      <AppCard title="Dasar hukum" :subtitle="dasarHukum.judul">
         <blockquote class="kutip">
-          <p>
-            Pasal 56 memisahkan dua dasar pengenaan. Omzet usaha dari orang pribadi yang jumlahnya
-            dalam satu tahun pajak tidak melebihi {{ rupiah(batasBebas) }} tidak dikenai PPh final;
-            untuk bagian omzet usaha di atas jumlah itu berlaku tarif
-            {{ PUBLIC_RULESET.tarifLabel }} sampai plafon {{ rupiah(plafon) }}. Penghasilan dari
-            pekerjaan yang dikerjakan sendiri dibaca dari norma penghasil, bukan dari tarif.
-          </p>
-          <footer>
-            Ringkasan bacaan dari {{ PUBLIC_RULESET.nama }} Pasal 56 · berlaku
-            {{ tanggalPanjang(stampDate) }}
-          </footer>
+          <p>{{ dasarHukum.teks }}</p>
+          <footer>{{ dasarHukum.rujukan }}</footer>
         </blockquote>
         <p class="kunci">
           Ini ringkasan untuk dibaca, bukan nasihat hukum dan bukan penetapan resmi. Untuk keputusan
@@ -405,22 +544,24 @@ onMounted(async () => {
         subtitle="Kalau mesin salah atau keterangan belum cukup, pindahkan sendiri."
       >
         <div class="override-isi">
-          <AppButton
-            v-if="CAPABILITIES.manualOverride"
-            variant="outline"
-            icon="ubah"
-            @click="bukaSheet"
-          >
-            Ubah klasifikasi manual
-          </AppButton>
-          <AppButton
-            v-if="CAPABILITIES.deleteTransaction"
-            variant="danger"
-            icon="sampah"
-            @click="hapus"
-          >
-            Hapus
-          </AppButton>
+          <div class="aksi-grup">
+            <AppButton
+              v-if="CAPABILITIES.manualOverride"
+              variant="outline"
+              icon="ubah"
+              @click="bukaSheet"
+            >
+              Ubah klasifikasi manual
+            </AppButton>
+            <AppButton
+              v-if="CAPABILITIES.deleteTransaction"
+              variant="danger"
+              icon="sampah"
+              @click="konfirmasiHapus"
+            >
+              Hapus transaksi
+            </AppButton>
+          </div>
           <p class="override-note">
             Kategori yang Anda pilih akan menimpa tebakan mesin dan baris ini ditandai Override,
             beserta catatannya. Batas bebas usaha {{ rupiah(batasBebas) }} tidak ikut dipakai kalau
@@ -436,10 +577,23 @@ onMounted(async () => {
         <p v-if="store.jejakPesan">{{ store.jejakPesan }}</p>
         <ul v-else class="dl">
           <li v-for="(ev, i) in store.jejak" :key="i">
-            {{ tanggal(ev.timestamp.slice(0, 10)) }} ·
+            {{ tanggalWaktuJakarta(ev.timestamp) }} ·
             {{ SUMBER_LABEL[ev.source as Sumber] ?? ev.source }} ·
-            <template v-if="ev.old_category">{{ labelKategori(ev.old_category) }} → </template>
+            <template
+              v-if="
+                ev.old_category && ev.old_category !== (ev.new_category || ev.assigned_category)
+              "
+            >
+              {{ labelKategori(ev.old_category) }} →
+            </template>
             {{ labelKategori(ev.new_category || ev.assigned_category) }}
+            <template
+              v-if="
+                ev.old_category && ev.old_category === (ev.new_category || ev.assigned_category)
+              "
+            >
+              (dicek ulang)
+            </template>
             <template v-if="ev.note"> · {{ ev.note }}</template>
           </li>
         </ul>
@@ -453,6 +607,87 @@ onMounted(async () => {
       </RouterLink>
     </div>
 
+    <!-- Edit Transaction Sheet -->
+    <AppSheet
+      :open="sheetUbahTerbuka"
+      title="Ubah detail transaksi"
+      subtitle="Perubahan nilai atau tanggal akan memicu evaluasi klasifikasi dan cuplikan bulan terkait."
+      :error="galatUbah"
+      @close="tutupSheetUbah"
+    >
+      <div class="sheet-fields">
+        <AppField label="Tanggal transaksi" for-id="edit-tgl" required>
+          <AppInput id="edit-tgl" v-model="draftEdit.tx_date" type="date" required />
+        </AppField>
+        <AppField label="Nama klien atau lawan transaksi" for-id="edit-klien" required>
+          <AppInput id="edit-klien" v-model="draftEdit.client_name" required />
+        </AppField>
+        <AppField label="Deskripsi layanan atau barang" for-id="edit-deskripsi">
+          <AppInput id="edit-deskripsi" v-model="draftEdit.description" />
+        </AppField>
+        <AppField label="Nominal bruto" for-id="edit-nominal" required>
+          <AppInput
+            id="edit-nominal"
+            v-model="draftEdit.amount_idr"
+            mono
+            inputmode="numeric"
+            required
+          />
+        </AppField>
+        <AppField label="Nomor faktur / bukti potong" for-id="edit-faktur" optional>
+          <AppInput id="edit-faktur" v-model="draftEdit.invoice_no" />
+        </AppField>
+        <AppField label="Pajak yang sudah dipotong" for-id="edit-pajak" optional>
+          <AppInput
+            id="edit-pajak"
+            v-model="draftEdit.withheld_tax_amount_idr"
+            mono
+            inputmode="numeric"
+          />
+        </AppField>
+        <AppField label="Saluran penjualan" for-id="edit-kanal">
+          <AppSelect id="edit-kanal" v-model="draftEdit.source_channel" :options="kanalOpsi" />
+        </AppField>
+      </div>
+
+      <template #footer>
+        <div class="sheet-aksi">
+          <AppButton variant="ghost" @click="tutupSheetUbah">Batal</AppButton>
+          <AppButton
+            variant="primary"
+            icon="check"
+            :disabled="sedangSimpanUbah"
+            @click="simpanUbah"
+          >
+            {{ sedangSimpanUbah ? "Menyimpan…" : "Simpan perubahan" }}
+          </AppButton>
+        </div>
+      </template>
+    </AppSheet>
+
+    <!-- Delete Confirmation Sheet -->
+    <AppSheet
+      :open="sheetHapusTerbuka"
+      title="Hapus transaksi ini?"
+      :subtitle="`Transaksi ${row?.client_name} sebesar ${row ? rupiah(row.amount_idr) : '—'} akan dihapus permanen.`"
+      :error="galatHapus"
+      @close="tutupSheetHapus"
+    >
+      <p class="sheet-teks">
+        Cuplikan bulan untuk tanggal transaksi ini akan dihitung ulang secara otomatis. Tindakan ini
+        tidak dapat dibatalkan.
+      </p>
+      <template #footer>
+        <div class="sheet-aksi">
+          <AppButton variant="ghost" @click="tutupSheetHapus">Batal</AppButton>
+          <AppButton variant="danger" icon="sampah" :disabled="sedangHapus" @click="eksekusiHapus">
+            {{ sedangHapus ? "Menghapus…" : "Hapus permanen" }}
+          </AppButton>
+        </div>
+      </template>
+    </AppSheet>
+
+    <!-- Manual Override Sheet -->
     <AppSheet
       v-if="CAPABILITIES.manualOverride"
       :open="sheetTerbuka"
@@ -836,6 +1071,20 @@ onMounted(async () => {
   flex-direction: column;
   align-items: flex-start;
   gap: var(--s-3);
+  width: 100%;
+}
+
+.aksi-grup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+  width: 100%;
+}
+
+.sheet-teks {
+  font: var(--t-body);
+  color: var(--ink);
+  line-height: 1.5;
 }
 
 .override-note {

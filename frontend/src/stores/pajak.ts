@@ -45,6 +45,10 @@ export const usePajakStore = defineStore("pajak", () => {
     await muat(true);
   }
 
+  function tandaiUsang() {
+    dimuat = false;
+  }
+
   async function unduhPdf() {
     const blob = await apiBlob(`/recap/${TAX_YEAR}/pdf`, { method: "POST" });
     const url = URL.createObjectURL(blob);
@@ -55,5 +59,5 @@ export const usePajakStore = defineStore("pajak", () => {
     URL.revokeObjectURL(url);
   }
 
-  return { dashboard, recap, pesan, recapPesan, muat, hitungUlang, unduhPdf };
+  return { dashboard, recap, pesan, recapPesan, muat, hitungUlang, tandaiUsang, unduhPdf };
 });

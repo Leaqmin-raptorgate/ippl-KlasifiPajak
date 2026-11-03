@@ -23,7 +23,7 @@ const routes: RouteRecordRaw[] = [
           path: "/atur-ulang",
           name: "atur-ulang",
           component: () => import("@/pages/AturUlangPage.vue"),
-          meta: { bare: true },
+          meta: { bare: true, title: "Atur ulang kata sandi" },
         } satisfies RouteRecordRaw,
       ]
     : []),

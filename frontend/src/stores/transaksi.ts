@@ -5,6 +5,7 @@ import { defineStore } from "pinia";
 import { ref } from "vue";
 import { ApiFailure, api } from "@/lib/api";
 import { TAX_YEAR } from "@/lib/domain";
+import { usePajakStore } from "@/stores/pajak";
 import type { Kategori } from "@/lib/domain";
 import type {
   AuditEvent,
@@ -70,6 +71,7 @@ export const useTransaksiStore = defineStore("transaksi", () => {
       await api<Transaction>("/transactions", { method: "POST", body: JSON.stringify(body) }),
     );
     terpilih.value = row;
+    usePajakStore().tandaiUsang();
     return row;
   }
 
@@ -78,6 +80,9 @@ export const useTransaksiStore = defineStore("transaksi", () => {
       await api<Transaction>(`/transactions/${id}`, { method: "PUT", body: JSON.stringify(body) }),
     );
     terpilih.value = row;
+    const idx = items.value.findIndex((item) => item.id === id);
+    if (idx !== -1) items.value[idx] = row;
+    usePajakStore().tandaiUsang();
     return row;
   }
 
@@ -85,6 +90,7 @@ export const useTransaksiStore = defineStore("transaksi", () => {
     await api(`/transactions/${id}`, { method: "DELETE" });
     items.value = items.value.filter((row) => row.id !== id);
     if (terpilih.value?.id === id) terpilih.value = null;
+    usePajakStore().tandaiUsang();
   }
 
   async function muatKlarifikasi(id: string) {
@@ -105,6 +111,7 @@ export const useTransaksiStore = defineStore("transaksi", () => {
     );
     terpilih.value = { ...byId(id), ...row, id };
     klarifikasi.value = null;
+    usePajakStore().tandaiUsang();
     return terpilih.value;
   }
 
@@ -116,6 +123,7 @@ export const useTransaksiStore = defineStore("transaksi", () => {
       }),
     );
     terpilih.value = { ...byId(id), ...row, id };
+    usePajakStore().tandaiUsang();
     return terpilih.value;
   }
 
@@ -133,10 +141,15 @@ export const useTransaksiStore = defineStore("transaksi", () => {
   }
 
   async function klasifikasiUlang(ids: string[]) {
-    return api("/transactions/reclassify", {
+    const res = await api<{
+      reclassified_count?: number;
+      results?: Array<{ id: string; old_category: string; new_category: string; source: string }>;
+    }>("/transactions/reclassify", {
       method: "POST",
       body: JSON.stringify({ transaction_ids: ids }),
     });
+    usePajakStore().tandaiUsang();
+    return res;
   }
 
   async function unggahStruk(file: File) {
@@ -161,6 +174,7 @@ export const useTransaksiStore = defineStore("transaksi", () => {
       }),
     );
     terpilih.value = row;
+    usePajakStore().tandaiUsang();
     return row;
   }
 

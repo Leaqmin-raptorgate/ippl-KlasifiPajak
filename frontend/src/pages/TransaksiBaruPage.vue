@@ -337,7 +337,19 @@ async function simpan() {
             </div>
           </AppField>
 
-          <p v-if="galatSimpan" class="kunci" role="alert">{{ galatSimpan }}</p>
+          <div v-if="profil.belumAda" class="peringatan-profil">
+            <AppIcon name="info" :size="18" />
+            <div class="peringatan-isi">
+              <p>
+                Status NIB untuk tahun pajak berjalan harus diisi sebelum mencatat transaksi
+                pertama.
+              </p>
+              <AppButton to="/profil" variant="outline" size="sm" icon="profil">
+                Isi profil sekarang
+              </AppButton>
+            </div>
+          </div>
+          <p v-else-if="galatSimpan" class="kunci" role="alert">{{ galatSimpan }}</p>
           <div class="aksi u-hairline-top">
             <AppButton variant="ghost" size="lg" @click="batal">Batal</AppButton>
             <AppButton
@@ -345,7 +357,7 @@ async function simpan() {
               variant="primary"
               size="lg"
               icon="checkCircle"
-              :disabled="sibuk"
+              :disabled="sibuk || profil.belumAda"
             >
               Simpan dan klasifikasikan
             </AppButton>
@@ -599,6 +611,27 @@ async function simpan() {
   margin-top: var(--s-4);
   padding-top: var(--s-4);
   border-top: 1px solid var(--hairline);
+}
+
+.peringatan-profil {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3);
+  margin-top: var(--s-4);
+  padding: var(--s-4);
+  border-radius: var(--r-md);
+  background: var(--cat-ask-bg);
+  border: 1px solid var(--cat-ask-line);
+  color: var(--cat-ask-ink);
+}
+
+.peringatan-isi {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s-3);
+  font: var(--t-body-sm);
+  line-height: 1.45;
 }
 
 .tag-row {

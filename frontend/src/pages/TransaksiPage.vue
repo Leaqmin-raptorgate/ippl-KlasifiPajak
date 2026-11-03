@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /** Ledger screen: every captured transaction, searchable and filterable in place. */
 import { computed, onMounted, ref } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppCard from "@/components/ui/AppCard.vue";
 import AppField from "@/components/ui/AppField.vue";
@@ -9,6 +9,7 @@ import AppIcon from "@/components/ui/AppIcon.vue";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppSegmented from "@/components/ui/AppSegmented.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
+import AppSheet from "@/components/ui/AppSheet.vue";
 import TransactionLedger from "@/components/app/TransactionLedger.vue";
 import WorkpaperNote from "@/components/app/WorkpaperNote.vue";
 import { ApiFailure } from "@/lib/api";
@@ -19,14 +20,21 @@ import { bulanTahun, rupiah } from "@/lib/format";
 
 const store = useTransaksiStore();
 const router = useRouter();
+const route = useRoute();
 
 const cari = ref("");
 const kategori = ref("all");
 const bulan = ref("all");
 const galat = ref("");
+const infoPesan = ref("");
+
+const sheetKlasifikasiBuka = ref(false);
+const sertakanManual = ref(false);
+const sedangKlasifikasi = ref(false);
 
 const kategoriOpsi = computed(() => [
   { value: "all", label: "Semua" },
+  { value: "pending", label: "Perlu klarifikasi" },
   ...(Object.keys(KATEGORI_LABEL) as Kategori[]).map((k) => ({
     value: k,
     label: KATEGORI_RINGKAS[k],
@@ -42,7 +50,11 @@ const bulanOpsi = [
 ];
 
 const hasil = computed(() =>
-  store.items.filter((row) => kategori.value === "all" || row.category === kategori.value),
+  store.items.filter((row) => {
+    if (kategori.value === "all") return true;
+    if (kategori.value === "pending") return Boolean(row.classification?.requires_clarification);
+    return row.category === kategori.value;
+  }),
 );
 
 const totalHasil = computed(() => hasil.value.reduce((sum, row) => sum + row.amount_idr, 0));
@@ -50,6 +62,18 @@ const totalHasil = computed(() => hasil.value.reduce((sum, row) => sum + row.amo
 const adaFilter = computed(
   () => cari.value !== "" || kategori.value !== "all" || bulan.value !== "all",
 );
+
+const manualRows = computed(() =>
+  hasil.value.filter((r) => r.source === "user_clarification" || r.source === "user_override"),
+);
+const manualCount = computed(() => manualRows.value.length);
+
+const targetRows = computed(() => {
+  if (sertakanManual.value) return hasil.value;
+  return hasil.value.filter(
+    (r) => r.source !== "user_clarification" && r.source !== "user_override",
+  );
+});
 
 async function muat() {
   galat.value = "";
@@ -70,19 +94,43 @@ function bersihkanFilter() {
   void muat();
 }
 
-async function klasifikasiUlang() {
+function bukaKlasifikasiUlang() {
+  infoPesan.value = "";
   galat.value = "";
-  const ids = hasil.value.map((row) => row.id);
-  if (ids.length === 0) return;
+  sertakanManual.value = false;
+  sheetKlasifikasiBuka.value = true;
+}
+
+function tutupKlasifikasiUlang() {
+  sheetKlasifikasiBuka.value = false;
+}
+
+async function jalankanKlasifikasiUlang() {
+  galat.value = "";
+  infoPesan.value = "";
+  const ids = targetRows.value.map((row) => row.id);
+  if (ids.length === 0) {
+    sheetKlasifikasiBuka.value = false;
+    return;
+  }
+  sedangKlasifikasi.value = true;
   try {
-    await store.klasifikasiUlang(ids);
+    const res = await store.klasifikasiUlang(ids);
+    sheetKlasifikasiBuka.value = false;
     await muat();
+    const count = res?.reclassified_count ?? ids.length;
+    infoPesan.value = `${count} transaksi berhasil diklasifikasi ulang.`;
   } catch (error) {
     galat.value = error instanceof ApiFailure ? error.message : "Klasifikasi ulang gagal.";
+  } finally {
+    sedangKlasifikasi.value = false;
   }
 }
 
 onMounted(() => {
+  if (route.query.kategori && typeof route.query.kategori === "string") {
+    kategori.value = route.query.kategori;
+  }
   void muat();
 });
 
@@ -106,7 +154,8 @@ function goto(id: string) {
           v-if="CAPABILITIES.reclassifyAll"
           variant="outline"
           class="ekspor"
-          @click="klasifikasiUlang"
+          icon="tukar"
+          @click="bukaKlasifikasiUlang"
         >
           <span class="ekspor-label">Klasifikasi ulang</span>
         </AppButton>
@@ -117,6 +166,7 @@ function goto(id: string) {
     </header>
 
     <p v-if="galat" class="sub" role="alert">{{ galat }}</p>
+    <p v-if="infoPesan" class="info-pesan" role="status">{{ infoPesan }}</p>
 
     <AppCard flush>
       <div class="filter">
@@ -199,6 +249,49 @@ function goto(id: string) {
     </section>
 
     <WorkpaperNote />
+
+    <AppSheet
+      v-model:open="sheetKlasifikasiBuka"
+      title="Klasifikasi ulang transaksi?"
+      subtitle="Menjalankan kembali aturan kata kunci untuk transaksi pada filter ini."
+      @close="tutupKlasifikasiUlang"
+    >
+      <div class="sheet-fields">
+        <p class="sheet-teks">
+          Ditemukan <strong>{{ hasil.length }}</strong> transaksi pada filter yang aktif saat ini.
+        </p>
+        <div v-if="manualCount > 0" class="sheet-warn">
+          <p class="sheet-teks">
+            Terdapat <strong>{{ manualCount }}</strong> transaksi yang telah ditetapkan manual
+            (klarifikasi atau override).
+          </p>
+          <label class="opt-label">
+            <input v-model="sertakanManual" type="checkbox" />
+            <span
+              >Sertakan transaksi manual (pilihan manual Anda sebelumnya akan ditimpa aturan)</span
+            >
+          </label>
+        </div>
+        <p v-else class="sheet-subteks">
+          Aturan kata kunci akan dijalankan ulang untuk
+          <strong>{{ targetRows.length }}</strong> transaksi.
+        </p>
+      </div>
+
+      <template #footer>
+        <div class="sheet-aksi">
+          <AppButton variant="ghost" @click="tutupKlasifikasiUlang">Batal</AppButton>
+          <AppButton
+            variant="primary"
+            icon="tukar"
+            :disabled="sedangKlasifikasi || targetRows.length === 0"
+            @click="jalankanKlasifikasiUlang"
+          >
+            {{ sedangKlasifikasi ? "Memproses…" : `Klasifikasi ulang (${targetRows.length})` }}
+          </AppButton>
+        </div>
+      </template>
+    </AppSheet>
   </div>
 </template>
 
@@ -231,6 +324,16 @@ function goto(id: string) {
   margin-top: var(--s-2);
 }
 
+.info-pesan {
+  padding: var(--s-3) var(--s-4);
+  border-radius: var(--r-md);
+  background: var(--cat-usaha-bg);
+  color: var(--cat-usaha-ink);
+  border: 1px solid var(--cat-usaha-line);
+  font: var(--t-body-sm);
+  font-weight: 500;
+}
+
 .acts {
   display: flex;
   flex-wrap: wrap;
@@ -248,6 +351,9 @@ function goto(id: string) {
 @media (max-width: 519px) {
   .acts > :first-child {
     flex: 0 0 auto;
+    width: 2.75rem;
+    padding-inline: 0;
+    justify-content: center;
   }
 
   .ekspor-label {
@@ -360,5 +466,68 @@ function goto(id: string) {
 .sep {
   margin-inline: var(--s-2);
   opacity: 0.5;
+}
+
+.sheet-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+
+.sheet-teks {
+  font: var(--t-body);
+  color: var(--ink);
+  line-height: 1.5;
+}
+
+.sheet-subteks {
+  font: var(--t-body-sm);
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+
+.sheet-warn {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  border-radius: var(--r-md);
+  background: var(--surface-sunken);
+  border: 1px solid var(--hairline);
+}
+
+.opt-label {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-2);
+  font: var(--t-body-sm);
+  color: var(--ink-2);
+  cursor: pointer;
+  line-height: 1.4;
+}
+
+.opt-label input {
+  margin-top: 0.1875rem;
+  flex: none;
+}
+
+.sheet-aksi {
+  display: flex;
+  flex: 1;
+  gap: var(--s-3);
+}
+
+.sheet-aksi > * {
+  flex: 1 1 auto;
+}
+
+@media (min-width: 480px) {
+  .sheet-aksi {
+    justify-content: flex-end;
+  }
+
+  .sheet-aksi > * {
+    flex: none;
+  }
 }
 </style>

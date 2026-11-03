@@ -15,7 +15,13 @@ import { KATEGORI_LABEL } from "@/lib/domain";
 import { rupiahPlain, tanggalPendek } from "@/lib/format";
 import type { Transaction } from "@/lib/wire";
 
-const props = defineProps<{ rows: Transaction[] }>();
+const props = withDefaults(
+  defineProps<{
+    rows: Transaction[];
+    emptyText?: string;
+  }>(),
+  { emptyText: "Tidak ada transaksi yang cocok dengan filter ini." },
+);
 
 const TONE: Record<string, "usaha" | "bebas" | "final" | "non" | "ask"> = {
   usaha: "usaha",
@@ -45,7 +51,7 @@ const anyPending = computed(() => props.rows.some((r) => r.classification?.requi
         <button
           class="row"
           type="button"
-          :aria-label="`${r.client_name}, ${r.description}, ${rupiahPlain(r.amount_idr)} rupiah, ${KATEGORI_LABEL[r.category]}`"
+          :aria-label="`${r.client_name}, ${r.description || 'tanpa deskripsi'}, ${rupiahPlain(r.amount_idr)} rupiah, ${r.classification?.requires_clarification ? 'Perlu klarifikasi' : KATEGORI_LABEL[r.category]}`"
           @click="emit('open', r.id)"
         >
           <span class="c date">
@@ -55,16 +61,8 @@ const anyPending = computed(() => props.rows.some((r) => r.classification?.requi
           <span class="c who">
             <span class="kl">{{ r.client_name }}</span>
             <span class="kt">{{ r.description }}</span>
-            <span class="kb">
-              <AppPill
-                v-if="r.classification?.requires_clarification"
-                tone="ask"
-                label="Perlu klarifikasi"
-                icon="helpCircle"
-                size="sm"
-                attention
-              />
-              <span v-if="r.invoice_no" class="npwp figure">{{ r.invoice_no }}</span>
+            <span v-if="r.invoice_no" class="kb">
+              <span class="npwp figure">{{ r.invoice_no }}</span>
             </span>
           </span>
 
@@ -72,21 +70,34 @@ const anyPending = computed(() => props.rows.some((r) => r.classification?.requi
 
           <span class="c cat">
             <AppPill
+              v-if="r.classification?.requires_clarification"
+              tone="ask"
+              label="Perlu klarifikasi"
+              icon="helpCircle"
+              attention
+              size="sm"
+            />
+            <AppPill
+              v-else
               :tone="TONE[r.category]"
               :label="KATEGORI_LABEL[r.category]"
-              :attention="Boolean(r.classification?.requires_clarification)"
               size="sm"
             />
           </span>
 
-          <span class="c src"><SourceTag :sumber="r.source" /></span>
+          <span class="c src">
+            <span v-if="r.classification?.requires_clarification" class="menunggu-tag"
+              >Menunggu</span
+            >
+            <SourceTag v-else :sumber="r.source" />
+          </span>
 
           <span class="c go"><AppIcon name="chevronRight" :size="16" :stroke-width="1.8" /></span>
         </button>
       </li>
 
       <li v-if="rows.length === 0" class="empty">
-        Tidak ada transaksi yang cocok dengan filter ini.
+        {{ emptyText }}
       </li>
     </ul>
   </div>
@@ -210,6 +221,15 @@ const anyPending = computed(() => props.rows.some((r) => r.classification?.requi
 
 .src {
   grid-area: src;
+}
+
+.menunggu-tag {
+  font: var(--t-caption);
+  letter-spacing: var(--track-caption);
+  text-transform: uppercase;
+  color: var(--cat-ask-ink);
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .go {

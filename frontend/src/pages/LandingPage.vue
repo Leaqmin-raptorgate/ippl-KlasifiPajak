@@ -70,12 +70,12 @@ const fakta = [
         <nav class="links" aria-label="Bagian halaman">
           <a href="#fitur" class="link">Fitur</a>
           <a href="#regulasi" class="link">Dasar regulasi</a>
-          <a href="#mulai" class="link">Harga</a>
+          <a href="#mulai" class="link">Mulai</a>
         </nav>
 
         <div class="acts">
           <RouterLink to="/masuk" class="sign">Masuk</RouterLink>
-          <AppButton to="/masuk" variant="primary">Mulai gratis</AppButton>
+          <AppButton to="/masuk?mode=daftar" variant="primary">Mulai gratis</AppButton>
         </div>
       </div>
     </header>
@@ -92,7 +92,7 @@ const fakta = [
       </p>
 
       <div class="cta">
-        <AppButton to="/masuk" variant="primary" size="lg" icon-end="arrowRight">
+        <AppButton to="/masuk?mode=daftar" variant="primary" size="lg" icon-end="arrowRight">
           Mulai gratis
         </AppButton>
       </div>
@@ -162,7 +162,7 @@ const fakta = [
         Buat akun, catat mutasi masuk pertama, dan lihat kertas kerjanya terbentuk.
       </p>
       <div class="cta">
-        <AppButton to="/masuk" variant="primary" size="lg" icon-end="arrowRight">
+        <AppButton to="/masuk?mode=daftar" variant="primary" size="lg" icon-end="arrowRight">
           Mulai gratis
         </AppButton>
       </div>

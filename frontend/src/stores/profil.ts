@@ -3,6 +3,7 @@ import { defineStore } from "pinia";
 import { ref } from "vue";
 import { ApiFailure, api } from "@/lib/api";
 import { HAPUS_AKUN, TAX_YEAR } from "@/lib/domain";
+import { usePajakStore } from "@/stores/pajak";
 import type { Profile, ProfileUpdate, SessionItem } from "@/lib/wire";
 
 export const useProfilStore = defineStore("profil", () => {
@@ -37,6 +38,7 @@ export const useProfilStore = defineStore("profil", () => {
       });
       belumAda.value = false;
       dimuat = true;
+      usePajakStore().tandaiUsang();
     } catch (error) {
       if (error instanceof ApiFailure && error.code === "VERSION_CONFLICT") await muat(true);
       throw error;

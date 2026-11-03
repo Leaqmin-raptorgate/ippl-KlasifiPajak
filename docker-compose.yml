@@ -55,10 +55,10 @@ services:
     healthcheck:
       disable: true
 
-  # Development API. It binds to localhost and must never be published.
+  # Development API. Host port 8000 binds to localhost and must never be published.
   api:
     build: .
-    command: uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     ports:
       - "127.0.0.1:8000:8000"
     environment:
