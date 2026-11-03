@@ -47,6 +47,7 @@ async function mountPage(row: Transaction) {
   vi.spyOn(store, "buka").mockResolvedValue(row);
   vi.spyOn(store, "muatJejak").mockResolvedValue(undefined);
   vi.spyOn(store, "muatKlarifikasi").mockResolvedValue(undefined);
+  vi.spyOn(store, "muatSatu").mockResolvedValue(row);
 
   const pajak = usePajakStore();
   vi.spyOn(pajak, "muat").mockResolvedValue(undefined);
@@ -116,7 +117,8 @@ describe("KlasifikasiPage transaction edit sheet", () => {
     expect(ubah).toHaveBeenCalled();
     const payload = ubah.mock.calls[0]?.[1] as { version: number };
     expect(payload.version).toBe(3);
-    // Sheet closed on success (open flag false → dialog gone / title absent as open sheet).
+    // Sheet closed on success (open flag false: dialog gone).
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
     expect(wrapper.find(".err").exists()).toBe(false);
   });
 
@@ -132,6 +134,10 @@ describe("KlasifikasiPage transaction edit sheet", () => {
           "Data ini sudah diubah di perangkat lain. Muat ulang, lalu simpan lagi.",
         ),
       );
+    // Explicitly reject muatSatu to test graceful degradation when reload fails
+    vi.spyOn(store, "muatSatu").mockRejectedValue(
+      new ApiFailure(503, "ROUTE_UNAVAILABLE", "Layanan belum tersambung."),
+    );
 
     const openBtn = wrapper.findAll("button").find((b) => b.text().includes("Ubah detail"));
     await openBtn!.trigger("click");
@@ -148,66 +154,53 @@ describe("KlasifikasiPage transaction edit sheet", () => {
     expect(wrapper.text()).toContain(
       "Data ini sudah diubah di perangkat lain. Muat ulang, lalu simpan lagi.",
     );
-    // Main (and #7): ubah rethrows; page shows message and leaves store row alone.
     expect(store.terpilih?.client_name).toBe("Lokal Lama");
     expect(store.terpilih?.version).toBe(3);
     expect(ubah).toHaveBeenCalledTimes(1);
   });
 
-  // Required after API §5.12 conflict: re-GET via store.muatSatu (landed on PR #8 only).
-  // Main has no muatSatu and does not reload — keep it.fails until #8 (or equivalent) merges.
-  // Do not vi.spyOn(muatSatu) unconditionally: that throws on main when the method is absent.
-  it.fails(
-    "409 stale: reloads via muatSatu and holds the refreshed server row (PR #8)",
-    async () => {
-      const row = sampleRow({ client_name: "Lokal Lama", version: 3, amount_idr: 1_000_000 });
-      const refreshed = sampleRow({
-        client_name: "Dari Server",
-        version: 4,
-        amount_idr: 9_999_999,
-        description: "Nilai server setelah konflik",
-      });
-      const { wrapper, store } = await mountPage(row);
+  // Conflict handling (FR-08): reloads fresh row via store.muatSatu.
+  it("409 stale: reloads via muatSatu and holds the refreshed server row", async () => {
+    const row = sampleRow({ client_name: "Lokal Lama", version: 3, amount_idr: 1_000_000 });
+    const refreshed = sampleRow({
+      client_name: "Dari Server",
+      version: 4,
+      amount_idr: 9_999_999,
+      description: "Nilai server setelah konflik",
+    });
+    const { wrapper, store } = await mountPage(row);
 
-      const ubah = vi
-        .spyOn(store, "ubah")
-        .mockRejectedValue(
-          new ApiFailure(
-            409,
-            "VERSION_CONFLICT",
-            "Data ini sudah diubah di perangkat lain. Muat ulang, lalu simpan lagi.",
-          ),
-        );
+    const ubah = vi
+      .spyOn(store, "ubah")
+      .mockRejectedValue(
+        new ApiFailure(
+          409,
+          "VERSION_CONFLICT",
+          "Data ini sudah diubah di perangkat lain. Muat ulang, lalu simpan lagi.",
+        ),
+      );
 
-      // Defensive stub only when PR #8's helper exists — never spy a missing method on main.
-      // Mirror real muatSatu: return the row AND write it into terpilih/items (a bare
-      // mockResolvedValue leaves the store stale and falsely fails against PR #8).
-      const storeAny = store as unknown as { muatSatu?: (id: string) => Promise<Transaction> };
-      if (typeof storeAny.muatSatu === "function") {
-        vi.spyOn(storeAny, "muatSatu").mockImplementation(async () => {
-          store.terpilih = refreshed;
-          const idx = store.items.findIndex((item) => item.id === refreshed.id);
-          if (idx !== -1) store.items[idx] = refreshed;
-          return refreshed;
-        });
-      }
+    vi.spyOn(store, "muatSatu").mockImplementation(async () => {
+      store.terpilih = refreshed;
+      const idx = store.items.findIndex((item) => item.id === refreshed.id);
+      if (idx !== -1) store.items[idx] = refreshed;
+      return refreshed;
+    });
 
-      const openBtn = wrapper.findAll("button").find((b) => b.text().includes("Ubah detail"));
-      await openBtn!.trigger("click");
-      await nextTick();
-      const saveBtn = wrapper.findAll("button").find((b) => b.text().includes("Simpan perubahan"));
-      await saveBtn!.trigger("click");
-      await flushPromises();
+    const openBtn = wrapper.findAll("button").find((b) => b.text().includes("Ubah detail"));
+    await openBtn!.trigger("click");
+    await nextTick();
+    const saveBtn = wrapper.findAll("button").find((b) => b.text().includes("Simpan perubahan"));
+    await saveBtn!.trigger("click");
+    await flushPromises();
 
-      expect(wrapper.text()).toMatch(/sudah diubah|Versi data sudah berubah|Muat ulang/i);
-      // Edit is not retried automatically after conflict.
-      expect(ubah).toHaveBeenCalledTimes(1);
-      // Spec/PR #8: store holds the refreshed GET row (version 4), not the stale local copy.
-      expect(store.terpilih?.version).toBe(4);
-      expect(store.terpilih?.client_name).toBe("Dari Server");
-      expect(store.items.find((r) => r.id === "tx-001")?.amount_idr).toBe(9_999_999);
-    },
-  );
+    expect(wrapper.text()).toMatch(/sudah diubah|Versi data sudah berubah|Muat ulang/i);
+    // Edit is not retried automatically after conflict.
+    expect(ubah).toHaveBeenCalledTimes(1);
+    expect(store.terpilih?.version).toBe(4);
+    expect(store.terpilih?.client_name).toBe("Dari Server");
+    expect(store.items.find((r) => r.id === "tx-001")?.amount_idr).toBe(9_999_999);
+  });
 
   it("422: shows validation message from ApiFailure", async () => {
     const row = sampleRow();
@@ -264,9 +257,8 @@ describe("KlasifikasiPage transaction edit sheet", () => {
     await flushPromises();
   });
 
-  // Spec: 422 may carry per-field Indonesian errors (API §5.12 / create-like validation).
-  // Current UI only surfaces ApiFailure.message, not fieldErrors — track as known gap.
-  it.fails("422: renders field_errors next to the affected inputs (spec)", async () => {
+  // 422 validation response with per-field error messages (FR-08).
+  it("422: renders field_errors next to the affected inputs", async () => {
     const row = sampleRow();
     const { wrapper, store } = await mountPage(row);
     vi.spyOn(store, "ubah").mockRejectedValue(

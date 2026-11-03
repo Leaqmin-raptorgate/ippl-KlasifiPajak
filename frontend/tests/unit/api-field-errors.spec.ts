@@ -1,6 +1,5 @@
 /**
- * TC-FE-API-01… — exercises real `api()` JSON→ApiFailure.fieldErrors mapping
- * (mutation M5 from PR #7 review: dropping field_errors must go red here).
+ * TC-FE-API-01: exercises real `api()` JSON to ApiFailure.fieldErrors mapping.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiFailure, api } from "@/lib/api";

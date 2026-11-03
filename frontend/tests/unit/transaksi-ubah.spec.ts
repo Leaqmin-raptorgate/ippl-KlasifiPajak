@@ -1,6 +1,6 @@
 /**
  * Unit tests for transaction edit (PUT /transactions/{id}).
- * API contract: docs/api §5.12 — body includes `version`; 409 VERSION_CONFLICT;
+ * API contract (FR-08): body includes `version`; 409 VERSION_CONFLICT;
  * 422 field validation. HTTP is mocked; no network.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -138,7 +138,7 @@ describe("useTransaksiStore.ubah (PUT /transactions/{id})", () => {
 
   it("409: store does not auto-reload the row (caller must show message / reload)", async () => {
     // Contrast: profil.simpan calls muat(true) on VERSION_CONFLICT.
-    // transaksi.ubah currently only rethrows — document actual behaviour.
+    // transaksi.ubah rethrows to let the caller handle the conflict.
     const store = useTransaksiStore();
     store.items = [sampleRow()];
     const muatSpy = vi.spyOn(store, "muat");
