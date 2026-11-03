@@ -29,7 +29,7 @@ Parallel hardening / feature slice on `main` @ `3d5ced0` (merge of PR #3).
 | #4  | Tax: CRUD/override/reclassify/audit-trail, versioned `month_snapshots`, `as_of` = today WIB, quotas/subscription reads | **merged**    |
 | #6  | UI: UX defects, transaction edit sheet, dashboard freshness, onboarding, responsive fixes                              | **merged**    |
 | #9  | Security: reject `.env.example` JWT placeholder and CHANGE_ME outside dev/test (HB-01)                                 | **merged**    |
-| #8  | UI: review follow-ups, 409 conflict reload, 422 field errors, unmount guards, single-source legal basis                | **in review** |
+| #8  | UI: review follow-ups, 409 conflict reload, 422 field errors, unmount guards, single-source legal basis                | **merged**    |
 | #7  | Testing: Vitest test runner, transaction edit and field errors unit test coverage                                      | **in review** |
 
 Follow-ups that are **not** merge blockers are tracked as B-11 outside this

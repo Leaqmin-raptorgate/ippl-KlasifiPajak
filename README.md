@@ -72,6 +72,7 @@ PYTHONPATH=backend .venv/bin/python -m uvicorn app.main:app --reload --host 127.
 npm run test                          # host pytest
 npm run test:coverage                 # 80% branch gate on backend/app/engine (NFR-14)
 docker compose run --rm test          # same suite inside the Docker test image
+npm --prefix frontend run test:unit   # Vitest (happy-dom); no backend required
 ```
 
 ## API surface (what exists on main today)

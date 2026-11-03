@@ -373,14 +373,15 @@ npm ci   # ALWAYS npm ci, never npm install (lockfile-locked)
 
 npm scripts (Node is dev tooling only, never runtime):
 
-| Task                        | Command                 |
-| --------------------------- | ----------------------- |
-| Run tests                   | `npm run test`          |
-| Tests with coverage gate    | `npm run test:coverage` |
-| Run ruff lint               | `npm run lint`          |
-| Fix ruff lint issues        | `npm run lint:fix`      |
-| Fix Python + doc formatting | `npm run format`        |
-| Check formatting (both)     | `npm run format:check`  |
+| Task                        | Command                               |
+| --------------------------- | ------------------------------------- |
+| Run tests                   | `npm run test`                        |
+| Tests with coverage gate    | `npm run test:coverage`               |
+| Frontend unit tests         | `npm --prefix frontend run test:unit` |
+| Run ruff lint               | `npm run lint`                        |
+| Fix ruff lint issues        | `npm run lint:fix`                    |
+| Fix Python + doc formatting | `npm run format`                      |
+| Check formatting (both)     | `npm run format:check`                |
 
 Docker runs the same suite:
 
@@ -451,6 +452,8 @@ MUST NOT add complexity only to satisfy one.
 
 - **Lint & format**: ruff (`npm run lint`) and ruff format + Prettier
   (`npm run format:check`).
+- **Frontend unit tests**: Vitest test runner (`npm --prefix frontend run test:unit`)
+  and audit gate.
 - **Tests**: the pytest suite with the 80% branch coverage gate on the engine
   (NFR-14), and the same suite inside the Docker test image.
 
