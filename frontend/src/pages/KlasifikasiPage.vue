@@ -8,7 +8,7 @@
  * placeholder and a question waiting for an answer, so the question is the
  * primary card and the meter is not rendered at all.
  */
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppCard from "@/components/ui/AppCard.vue";
@@ -21,7 +21,7 @@ import AppSelect from "@/components/ui/AppSelect.vue";
 import AppSheet from "@/components/ui/AppSheet.vue";
 import SourceTag from "@/components/app/SourceTag.vue";
 import WorkpaperNote from "@/components/app/WorkpaperNote.vue";
-import { ApiFailure, isAbortError } from "@/lib/api";
+import { ApiFailure, isAbortError, terapkanFieldErrors } from "@/lib/api";
 import { dasarHukumUntuk } from "@/lib/dasarHukum";
 import { CAPABILITIES } from "@/lib/capabilities";
 import {
@@ -103,7 +103,7 @@ const kanalOpsi = (Object.keys(SOURCE_CHANNEL_LABEL) as SourceChannel[]).map((k)
 const sheetUbahTerbuka = ref(false);
 const sedangSimpanUbah = ref(false);
 const galatUbah = ref("");
-/** Per-field errors from API §2.5 `field_errors` / `details` (422). */
+/** Per-field errors from 422 responses. */
 const galatUbahField = reactive<Record<string, string>>({});
 const draftEdit = reactive({
   tx_date: "",
@@ -114,6 +114,49 @@ const draftEdit = reactive({
   withheld_tax_amount_idr: "0",
   source_channel: "other" as SourceChannel,
 });
+
+watch(
+  () => draftEdit.tx_date,
+  () => {
+    delete galatUbahField.tx_date;
+  },
+);
+watch(
+  () => draftEdit.client_name,
+  () => {
+    delete galatUbahField.client_name;
+  },
+);
+watch(
+  () => draftEdit.description,
+  () => {
+    delete galatUbahField.description;
+  },
+);
+watch(
+  () => draftEdit.amount_idr,
+  () => {
+    delete galatUbahField.amount_idr;
+  },
+);
+watch(
+  () => draftEdit.invoice_no,
+  () => {
+    delete galatUbahField.invoice_no;
+  },
+);
+watch(
+  () => draftEdit.withheld_tax_amount_idr,
+  () => {
+    delete galatUbahField.withheld_tax_amount_idr;
+  },
+);
+watch(
+  () => draftEdit.source_channel,
+  () => {
+    delete galatUbahField.source_channel;
+  },
+);
 
 /** Guard state writes after this page unmounts (save/fetch race). */
 const masihTerpasang = ref(true);
@@ -147,20 +190,11 @@ function isiDraftDari(tx: {
   draftEdit.source_channel = (tx.source_channel as SourceChannel) || "other";
 }
 
-function terapkanFieldErrors(errors: Record<string, string>) {
-  for (const key of Object.keys(galatUbahField)) delete galatUbahField[key];
-  for (const [key, msg] of Object.entries(errors)) {
-    // Map nested FastAPI locs like "amount_idr" or "body.amount_idr"
-    const field = key.includes(".") ? (key.split(".").pop() ?? key) : key;
-    galatUbahField[field] = msg;
-  }
-}
-
 /** Older payloads carry no classification at all; that reads as classified, not as 0%. */
 const klasifikasi = computed(() => row.value?.classification);
 const perluJawab = computed(() => klasifikasi.value?.requires_clarification === true);
 
-/** SRS v2.7 § Definisi dan Istilah — see `@/lib/dasarHukum`. */
+/** Statutory basis from `@/lib/dasarHukum`. */
 const dasarHukum = computed(() => dasarHukumUntuk(row.value?.category, perluJawab.value === true));
 
 /** A human set this category, so there is no rule-match score to show. */
@@ -225,8 +259,9 @@ async function simpanUbah() {
   const signal = simpanAbort.signal;
   const txId = row.value.id;
   const version = row.value.version;
+  let updated: typeof row.value;
   try {
-    const updated = await store.ubah(
+    updated = await store.ubah(
       txId,
       {
         amount_idr: nilai,
@@ -240,45 +275,51 @@ async function simpanUbah() {
       },
       { signal },
     );
-    if (!masihTerpasang.value) return;
-    sheetUbahTerbuka.value = false;
-    if (updated.classification?.requires_clarification) {
+  } catch (error) {
+    if (!masihTerpasang.value || isAbortError(error)) return;
+    // VERSION_CONFLICT: reload latest version into form and store.
+    if (error instanceof ApiFailure && error.code === "VERSION_CONFLICT") {
+      const conflictMsg =
+        error.message ||
+        "Versi data sudah berubah. Form diisi ulang dari data terbaru; periksa lalu simpan lagi.";
+      galatUbah.value = conflictMsg;
+      try {
+        const fresh = await store.muatSatu(txId, { signal });
+        if (!masihTerpasang.value) return;
+        isiDraftDari(fresh);
+      } catch (reloadError) {
+        if (!masihTerpasang.value || isAbortError(reloadError)) return;
+        galatUbah.value = `${conflictMsg} (Gagal memuat data terbaru: ${
+          reloadError instanceof ApiFailure ? reloadError.message : "koneksi terputus"
+        })`;
+      }
+      return;
+    }
+    if (error instanceof ApiFailure && Object.keys(error.fieldErrors).length > 0) {
+      terapkanFieldErrors(error.fieldErrors, galatUbahField);
+      galatUbah.value = error.message || "Periksa isian yang ditandai.";
+      return;
+    }
+    galatUbah.value =
+      error instanceof ApiFailure ? error.message : "Gagal menyimpan perubahan transaksi.";
+    return;
+  } finally {
+    if (masihTerpasang.value) sedangSimpanUbah.value = false;
+  }
+
+  // Save succeeded: close sheet and perform follow-up refreshes outside save try/catch.
+  if (!masihTerpasang.value) return;
+  sheetUbahTerbuka.value = false;
+  try {
+    if (updated?.classification?.requires_clarification) {
       await muatPertanyaan(updated.id);
     }
     if (!masihTerpasang.value) return;
     if (CAPABILITIES.auditTrail) await store.muatJejak(updated.id);
     if (!masihTerpasang.value) return;
     await pajak.muat(true);
-  } catch (error) {
-    if (!masihTerpasang.value || isAbortError(error)) return;
-    // API Spec v1.3.1 §2.5 / §5.12: VERSION_CONFLICT → re-GET latest version, refresh form+store.
-    if (error instanceof ApiFailure && error.code === "VERSION_CONFLICT") {
-      // Show the conflict right away; the reload below only refreshes the form.
-      galatUbah.value =
-        error.message ||
-        "Versi data sudah berubah. Form diisi ulang dari data terbaru; periksa lalu simpan lagi.";
-      try {
-        const fresh = await store.muatSatu(txId);
-        if (!masihTerpasang.value) return;
-        isiDraftDari(fresh);
-      } catch (reloadError) {
-        if (!masihTerpasang.value || isAbortError(reloadError)) return;
-        galatUbah.value =
-          reloadError instanceof ApiFailure
-            ? reloadError.message
-            : error.message || "Versi bentrok; gagal memuat ulang transaksi.";
-      }
-      return;
-    }
-    if (error instanceof ApiFailure && Object.keys(error.fieldErrors).length > 0) {
-      terapkanFieldErrors(error.fieldErrors);
-      galatUbah.value = error.message || "Periksa isian yang ditandai.";
-      return;
-    }
-    galatUbah.value =
-      error instanceof ApiFailure ? error.message : "Gagal menyimpan perubahan transaksi.";
-  } finally {
-    if (masihTerpasang.value) sedangSimpanUbah.value = false;
+  } catch {
+    // Secondary refresh errors after successful save do not fail the save.
   }
 }
 
@@ -658,7 +699,14 @@ onMounted(async () => {
           :error="galatUbahField.tx_date"
           field="tx_date"
         >
-          <AppInput id="edit-tgl" v-model="draftEdit.tx_date" type="date" required />
+          <AppInput
+            id="edit-tgl"
+            v-model="draftEdit.tx_date"
+            type="date"
+            required
+            :invalid="Boolean(galatUbahField.tx_date)"
+            :aria-describedby="galatUbahField.tx_date ? 'edit-tgl-err' : undefined"
+          />
         </AppField>
         <AppField
           label="Nama klien atau lawan transaksi"
@@ -667,7 +715,13 @@ onMounted(async () => {
           :error="galatUbahField.client_name"
           field="client_name"
         >
-          <AppInput id="edit-klien" v-model="draftEdit.client_name" required />
+          <AppInput
+            id="edit-klien"
+            v-model="draftEdit.client_name"
+            required
+            :invalid="Boolean(galatUbahField.client_name)"
+            :aria-describedby="galatUbahField.client_name ? 'edit-klien-err' : undefined"
+          />
         </AppField>
         <AppField
           label="Deskripsi layanan atau barang"
@@ -675,7 +729,12 @@ onMounted(async () => {
           :error="galatUbahField.description"
           field="description"
         >
-          <AppInput id="edit-deskripsi" v-model="draftEdit.description" />
+          <AppInput
+            id="edit-deskripsi"
+            v-model="draftEdit.description"
+            :invalid="Boolean(galatUbahField.description)"
+            :aria-describedby="galatUbahField.description ? 'edit-deskripsi-err' : undefined"
+          />
         </AppField>
         <AppField
           label="Nominal bruto"
@@ -690,6 +749,8 @@ onMounted(async () => {
             mono
             inputmode="numeric"
             required
+            :invalid="Boolean(galatUbahField.amount_idr)"
+            :aria-describedby="galatUbahField.amount_idr ? 'edit-nominal-err' : undefined"
           />
         </AppField>
         <AppField
@@ -699,7 +760,12 @@ onMounted(async () => {
           :error="galatUbahField.invoice_no"
           field="invoice_no"
         >
-          <AppInput id="edit-faktur" v-model="draftEdit.invoice_no" />
+          <AppInput
+            id="edit-faktur"
+            v-model="draftEdit.invoice_no"
+            :invalid="Boolean(galatUbahField.invoice_no)"
+            :aria-describedby="galatUbahField.invoice_no ? 'edit-faktur-err' : undefined"
+          />
         </AppField>
         <AppField
           label="Pajak yang sudah dipotong"
@@ -713,6 +779,10 @@ onMounted(async () => {
             v-model="draftEdit.withheld_tax_amount_idr"
             mono
             inputmode="numeric"
+            :invalid="Boolean(galatUbahField.withheld_tax_amount_idr)"
+            :aria-describedby="
+              galatUbahField.withheld_tax_amount_idr ? 'edit-pajak-err' : undefined
+            "
           />
         </AppField>
         <AppField
@@ -721,7 +791,13 @@ onMounted(async () => {
           :error="galatUbahField.source_channel"
           field="source_channel"
         >
-          <AppSelect id="edit-kanal" v-model="draftEdit.source_channel" :options="kanalOpsi" />
+          <AppSelect
+            id="edit-kanal"
+            v-model="draftEdit.source_channel"
+            :options="kanalOpsi"
+            :invalid="Boolean(galatUbahField.source_channel)"
+            :aria-describedby="galatUbahField.source_channel ? 'edit-kanal-err' : undefined"
+          />
         </AppField>
       </div>
 

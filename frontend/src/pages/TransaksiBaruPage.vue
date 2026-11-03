@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** Capture form for one income transaction: the fields, and what classification will do with them. */
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppCard from "@/components/ui/AppCard.vue";
@@ -11,8 +11,8 @@ import AppPill from "@/components/ui/AppPill.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
 import SourceTag from "@/components/app/SourceTag.vue";
 import WorkpaperNote from "@/components/app/WorkpaperNote.vue";
-import { ApiFailure, isAbortError } from "@/lib/api";
-import { SRS_KATEGORI_DEFINISI } from "@/lib/dasarHukum";
+import { ApiFailure, isAbortError, terapkanFieldErrors } from "@/lib/api";
+import { KATEGORI_DASAR_HUKUM } from "@/lib/dasarHukum";
 import { CAPABILITIES } from "@/lib/capabilities";
 import {
   KATEGORI_LABEL,
@@ -42,7 +42,7 @@ const dipotong = ref("");
 const kanal = ref<SourceChannel>("other");
 const sudahCobaSimpan = ref(false);
 const galatSimpan = ref("");
-/** Server 422 field map (API Spec v1.3.1 §2.5). */
+/** Server 422 field map. */
 const galatServer = reactive<Record<string, string>>({});
 const sibuk = ref(false);
 const masihTerpasang = ref(true);
@@ -57,13 +57,28 @@ function bersihkanGalatServer() {
   for (const key of Object.keys(galatServer)) delete galatServer[key];
 }
 
-function terapkanFieldErrors(errors: Record<string, string>) {
-  bersihkanGalatServer();
-  for (const [key, msg] of Object.entries(errors)) {
-    const field = key.includes(".") ? (key.split(".").pop() ?? key) : key;
-    galatServer[field] = msg;
-  }
-}
+watch(tanggalTransaksi, () => {
+  delete galatServer.tx_date;
+});
+watch(klien, () => {
+  delete galatServer.client_name;
+});
+watch(keterangan, () => {
+  delete galatServer.description;
+});
+watch(nominal, () => {
+  delete galatServer.amount_idr;
+});
+watch(faktur, () => {
+  delete galatServer.invoice_no;
+});
+watch(dipotong, () => {
+  delete galatServer.withheld_tax_amount_idr;
+});
+watch(kanal, () => {
+  delete galatServer.source_channel;
+});
+
 const berkas = ref<File | null>(null);
 const imageId = ref("");
 
@@ -74,8 +89,13 @@ const kanalOpsi = (Object.keys(SOURCE_CHANNEL_LABEL) as SourceChannel[]).map((k)
 
 const sumberOpsi = Object.keys(SUMBER_LABEL) as Sumber[];
 
-/** How each of the four categories is read — SRS v2.7 § Definisi dan Istilah (verbatim). */
-const CARA_MEMBACA: Record<Kategori, string> = { ...SRS_KATEGORI_DEFINISI };
+/** How each of the four categories is read per regulation definition. */
+const CARA_MEMBACA: Record<Kategori, string> = {
+  usaha: KATEGORI_DASAR_HUKUM.usaha.teks,
+  pekerjaan_bebas: KATEGORI_DASAR_HUKUM.pekerjaan_bebas.teks,
+  already_final: KATEGORI_DASAR_HUKUM.already_final.teks,
+  non_object: KATEGORI_DASAR_HUKUM.non_object.teks,
+};
 
 const TONE: Record<Kategori, "usaha" | "bebas" | "final" | "non"> = {
   usaha: "usaha",
@@ -218,7 +238,7 @@ async function simpan() {
   } catch (error) {
     if (!masihTerpasang.value || isAbortError(error)) return;
     if (error instanceof ApiFailure && Object.keys(error.fieldErrors).length > 0) {
-      terapkanFieldErrors(error.fieldErrors);
+      terapkanFieldErrors(error.fieldErrors, galatServer);
       galatSimpan.value = error.message || "Periksa isian yang ditandai.";
       return;
     }

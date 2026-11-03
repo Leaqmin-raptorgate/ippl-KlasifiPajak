@@ -4,7 +4,7 @@
  * The browser never sends `X-Client-Type` and never stores a JWT. A 401 is
  * reported to the session handler; the caller still receives the error.
  *
- * Error envelope: API Spec v1.3.1 §2.5 —
+ * Error envelope format:
  * `{ "error": { "code", "message" }, "field_errors"?: { [field]: string } }`.
  * `field_errors` (and `error.details` when shaped the same way) map to
  * per-field form errors. Unknown shapes fall back to a generic message.
@@ -105,21 +105,20 @@ function fail(status: number, payload: unknown): ApiFailure {
 }
 
 /**
- * API Spec v1.3.1 §2.5: `field_errors` is an object of field → Indonesian text.
- * Also accept `error.details` when it has the same shape. Fallback: FastAPI
- * `detail: [{ loc, msg }]` arrays become a best-effort map; unknown entries
- * are skipped so the caller can show the generic `message`.
+ * Collect field errors from the API response payload.
+ * Accepts `field_errors`, `error.details`, or `details` maps, and falls back to
+ * FastAPI detail arrays with `{ loc, msg }`.
  */
 function collectFieldErrors(
   body: Record<string, unknown> | null,
   error: Record<string, unknown> | null,
 ): Record<string, string> {
   const fromSpec =
-    asStringMap(body?.field_errors) ||
-    asStringMap(error?.field_errors) ||
-    asStringMap(error?.details) ||
-    asStringMap(body?.details);
-  if (Object.keys(fromSpec).length > 0) return fromSpec;
+    asStringMapOrNull(body?.field_errors) ??
+    asStringMapOrNull(error?.field_errors) ??
+    asStringMapOrNull(error?.details) ??
+    asStringMapOrNull(body?.details);
+  if (fromSpec) return fromSpec;
 
   const detail = body?.detail;
   if (!Array.isArray(detail)) return {};
@@ -140,12 +139,30 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" ? (value as Record<string, unknown>) : null;
 }
 
-function asStringMap(value: unknown): Record<string, string> {
+function asStringMapOrNull(value: unknown): Record<string, string> | null {
   const record = asRecord(value);
-  if (!record) return {};
+  if (!record) return null;
   const out: Record<string, string> = {};
   for (const [key, item] of Object.entries(record)) {
     if (typeof item === "string" && item.length > 0) out[key] = item;
   }
-  return out;
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+/**
+ * Map server field errors to a reactive form errors object.
+ * Strips confirmed_ prefix so OCR confirmation errors bind to standard fields.
+ */
+export function terapkanFieldErrors(
+  errors: Record<string, string>,
+  target: Record<string, string>,
+): void {
+  for (const key of Object.keys(target)) delete target[key];
+  for (const [key, msg] of Object.entries(errors)) {
+    const field = (key.includes(".") ? (key.split(".").pop() ?? key) : key).replace(
+      /^confirmed_/,
+      "",
+    );
+    target[field] = msg;
+  }
 }

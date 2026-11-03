@@ -6,8 +6,6 @@
  * `GET /tax/dashboard` or `GET /recap/{tax_year}`.
  */
 
-import { SRS_PP_20_2026_ISTILAH } from "@/lib/dasarHukum";
-
 export const TAX_YEAR = 2026;
 
 export type Kategori = "usaha" | "pekerjaan_bebas" | "already_final" | "non_object";
@@ -44,7 +42,7 @@ export const SOURCE_CHANNEL_LABEL: Record<SourceChannel, string> = {
 
 export const PUBLIC_RULESET = {
   id: "pp20-2026-academic-1",
-  nama: SRS_PP_20_2026_ISTILAH,
+  nama: "PP 20/2026",
   berlaku: "2026-09-26",
   bebasUsaha: 500_000_000,
   plafonUsaha: 4_800_000_000,

@@ -79,9 +79,9 @@ export const useTransaksiStore = defineStore("transaksi", () => {
     return row;
   }
 
-  /** Fresh GET by id (API §5.x GET /transactions/{id}) — used after VERSION_CONFLICT. */
-  async function muatSatu(id: string) {
-    const row = normal(await api<Transaction>(`/transactions/${id}`));
+  /** Fetch a fresh transaction row by id, used after a 409 version conflict. */
+  async function muatSatu(id: string, init: RequestInit = {}) {
+    const row = normal(await api<Transaction>(`/transactions/${id}`, init));
     terpilih.value = row;
     const idx = items.value.findIndex((item) => item.id === id);
     if (idx !== -1) items.value[idx] = row;

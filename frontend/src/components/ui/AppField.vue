@@ -5,6 +5,7 @@ defineProps<{
   hint?: string;
   error?: string;
   optional?: boolean;
+  required?: boolean;
   forId?: string;
   /** API field name (e.g. `tx_date`); tags the error node for 422 field_errors. */
   field?: string;

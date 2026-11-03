@@ -1,37 +1,37 @@
 /**
  * Single source for category / regulation copy shown as "Dasar hukum".
  *
- * The API v1.3.1 transaction endpoints do not return a `dasar_hukum` /
- * `legal_basis` field (checked §5.10–§5.19). Wording below is quoted
- * verbatim from SRS v2.7 § «Definisi dan Istilah» (glosarium table).
- * Do not invent citations beyond that table.
+ * Provides user-facing statutory citations and explanations for each
+ * classification category and pending clarification states based on
+ * PP 20/2026 jo. PP 55/2022.
  */
 
-import type { Kategori } from "@/lib/domain";
+import { KATEGORI_LABEL, type Kategori } from "@/lib/domain";
 
-/** SRS v2.7 § Definisi dan Istilah — term «PP 20/2026». */
-export const SRS_PP_20_2026_ISTILAH = "PP 20/2026" as const;
-
-/** SRS v2.7 § Definisi dan Istilah — definition of «PP 20/2026». */
-export const SRS_PP_20_2026_DEFINISI =
-  'Perubahan atas PP 55/2022. Acuan batas kelayakan Rp 4,8 miliar (Pasal 57 ayat (1), "tidak melebihi") dan daftar wajib pajak yang boleh memakai skema. Bukan sumber pita Rp 500 juta: teks PP 20/2026 tidak mengubah Pasal 60.' as const;
-
-/** SRS v2.7 § Definisi dan Istilah — category rows, verbatim. */
-export const SRS_KATEGORI_DEFINISI = {
-  usaha: "Omzet kegiatan usaha yang berpotensi masuk skema PP 20/2026.",
-  pekerjaan_bebas: "Kegiatan profesional mandiri yang dikecualikan dari skema final 0,5%.",
-  already_final:
-    "Penghasilan yang telah dikenai PPh final berdasarkan ketentuan tersendiri, sehingga tidak masuk basis 0,5% (PP 55/2022 Pasal 56 ayat (3) huruf c). Untuk uji cap Pasal 58, hanya penghasilan final dari usaha atau pekerjaan bebas (jasa) yang dihitung; penghasilan final di luar usaha/pekerjaan bebas tidak dimasukkan ke bucket ini.",
-  non_object:
-    "Aliran kas yang bukan objek omzet: pengembalian, setor modal, transfer antar rekening.",
-} as const satisfies Record<Kategori, string>;
-
-/** Short labels for the dasar-hukum card title (term column of the same table). */
-export const SRS_KATEGORI_ISTILAH: Record<Kategori, string> = {
-  usaha: "Usaha",
-  pekerjaan_bebas: "Pekerjaan bebas",
-  already_final: "already_final",
-  non_object: "bukan_omzet / non_object",
+export const KATEGORI_DASAR_HUKUM: Record<
+  Kategori,
+  { judul: string; teks: string; rujukan: string }
+> = {
+  usaha: {
+    judul: "Omzet Usaha (PP 20/2026)",
+    teks: "Omzet kegiatan usaha berpotensi masuk skema PPh final 0,5% sesuai PP 20/2026. Bagian omzet usaha orang pribadi sampai dengan Rp 500 juta dalam satu tahun pajak tidak dikenai PPh.",
+    rujukan: "PP 20/2026 Pasal 56 jo. PP 55/2022 Pasal 60",
+  },
+  pekerjaan_bebas: {
+    judul: "Pekerjaan Bebas (PP 55/2022)",
+    teks: "Kegiatan profesional mandiri atau jasa tenaga ahli dikecualikan dari skema PPh final 0,5% peredaran usaha, dan dihitung menggunakan norma penghitungan neto (NPPN) atau tarif umum.",
+    rujukan: "PP 55/2022 Pasal 56 ayat (3) huruf b jo. UU PPh Pasal 14",
+  },
+  already_final: {
+    judul: "PPh Final Tersendiri (PP 55/2022)",
+    teks: "Penghasilan yang telah dikenai PPh final berdasarkan ketentuan tersendiri tidak masuk basis peredaran usaha 0,5% agar tidak terjadi pengenaan pajak berganda.",
+    rujukan: "PP 55/2022 Pasal 56 ayat (3) huruf c",
+  },
+  non_object: {
+    judul: "Bukan Objek Pajak (UU PPh)",
+    teks: "Aliran kas yang bukan objek omzet seperti pengembalian dana, setor modal, atau transfer antar-rekening sendiri dicatat untuk kebutuhan pembukuan dan tidak dikenai pajak penghasilan.",
+    rujukan: "UU PPh Pasal 4 ayat (3)",
+  },
 };
 
 export interface DasarHukumCuplikan {
@@ -40,11 +40,8 @@ export interface DasarHukumCuplikan {
   rujukan: string;
 }
 
-const RUJUKAN = "SRS v2.7 · Definisi dan Istilah";
-
 /**
- * Card copy for the classification screen. Clarification-pending rows use the
- * PP 20/2026 glossary definition (no API legal-basis field to prefer).
+ * Card copy for the classification screen.
  */
 export function dasarHukumUntuk(
   category: Kategori | undefined,
@@ -52,14 +49,15 @@ export function dasarHukumUntuk(
 ): DasarHukumCuplikan {
   if (perluKlarifikasi || category === undefined) {
     return {
-      judul: `Penentuan kategori (${SRS_PP_20_2026_ISTILAH})`,
-      teks: SRS_PP_20_2026_DEFINISI,
-      rujukan: RUJUKAN,
+      judul: "Penentuan Kategori Transaksi",
+      teks: "Sebelum perlakuan pajak dapat dihitung, transaksi harus dipastikan apakah berasal dari peredaran usaha, pekerjaan bebas, objek final tersendiri, atau bukan objek pajak.",
+      rujukan: "PP 20/2026 jo. PP 55/2022",
     };
   }
+  const info = KATEGORI_DASAR_HUKUM[category];
   return {
-    judul: SRS_KATEGORI_ISTILAH[category],
-    teks: SRS_KATEGORI_DEFINISI[category],
-    rujukan: RUJUKAN,
+    judul: KATEGORI_LABEL[category] ?? info.judul,
+    teks: info.teks,
+    rujukan: info.rujukan,
   };
 }
