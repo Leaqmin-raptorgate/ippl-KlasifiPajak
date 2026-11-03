@@ -105,9 +105,7 @@ describe("KlasifikasiPage transaction edit sheet", () => {
     await openBtn!.trigger("click");
     await nextTick();
 
-    expect(
-      wrapper.find('[role="dialog"]').exists() || wrapper.text().includes("Ubah detail transaksi"),
-    ).toBe(true);
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(true);
 
     const saveBtn = wrapper.findAll("button").find((b) => b.text().includes("Simpan perubahan"));
     expect(saveBtn).toBeTruthy();
