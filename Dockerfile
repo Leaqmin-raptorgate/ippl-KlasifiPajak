@@ -7,7 +7,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONPATH=/app/backend
 
-COPY requirements.txt pyproject.toml ./
+COPY requirements.txt pyproject.toml .env.example ./
 RUN pip install --no-cache-dir -r requirements.txt \
     && useradd --create-home --uid 10001 --shell /usr/sbin/nologin appuser
 

@@ -13,6 +13,8 @@ from pathlib import Path
 DEFAULT_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173")
 
 _DEV_PLACEHOLDER_SECRET = "dev-secret-change-me"
+#: Must stay in sync with the JWT_SECRET line in ``.env.example``.
+_ENV_EXAMPLE_JWT_SECRET = "CHANGE_ME_TO_A_LONG_RANDOM_STRING"
 _MIN_JWT_SECRET_LEN = 32
 
 
@@ -44,17 +46,20 @@ def _jwt_secret() -> str:
     """Resolve the HS256 secret, refusing unsafe values outside development/test.
 
     HB-01 / TC-HARD-15: production (and any non-dev/test env) must not boot with
-    an empty secret, the built-in placeholder, or a secret shorter than 32 bytes.
+    an empty secret, the built-in placeholder, the ``.env.example`` placeholder
+    (or any ``CHANGE_ME...`` marker value), or a secret shorter than 32 bytes.
     """
     secret = os.environ.get("JWT_SECRET", _DEV_PLACEHOLDER_SECRET)
     env = _app_env()
     if env in ("development", "test"):
         return secret or _DEV_PLACEHOLDER_SECRET
+    stripped = (secret or "").strip()
     if (
-        not secret
-        or secret.strip() == ""
+        not stripped
         or secret == _DEV_PLACEHOLDER_SECRET
-        or len(secret.encode("utf-8")) < _MIN_JWT_SECRET_LEN
+        or stripped == _ENV_EXAMPLE_JWT_SECRET
+        or stripped.upper().startswith("CHANGE_ME")
+        or len(stripped.encode("utf-8")) < _MIN_JWT_SECRET_LEN
     ):
         raise RuntimeError(
             "JWT_SECRET must be set to a non-default value of at least "

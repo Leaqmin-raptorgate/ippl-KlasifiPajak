@@ -9,7 +9,8 @@ import base64
 import hashlib
 import json
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -78,6 +79,8 @@ def _legacy_pbkdf2(password: str) -> str:
 
 def test_tc_hard_15_jwt_secret_fail_closed_in_production(monkeypatch):
     """TC-HARD-15: production refuses empty / placeholder / short secrets."""
+    from app.config.settings import _ENV_EXAMPLE_JWT_SECRET
+
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.delenv("JWT_SECRET", raising=False)
     with pytest.raises(RuntimeError, match="JWT_SECRET"):
@@ -88,8 +91,46 @@ def test_tc_hard_15_jwt_secret_fail_closed_in_production(monkeypatch):
     monkeypatch.setenv("JWT_SECRET", "short")
     with pytest.raises(RuntimeError, match="JWT_SECRET"):
         _jwt_secret()
+    # .env.example placeholder is 33 bytes: length alone must not pass.
+    assert len(_ENV_EXAMPLE_JWT_SECRET.encode("utf-8")) >= 32
+    monkeypatch.setenv("JWT_SECRET", _ENV_EXAMPLE_JWT_SECRET)
+    with pytest.raises(RuntimeError, match="JWT_SECRET"):
+        _jwt_secret()
+    monkeypatch.setenv("JWT_SECRET", "CHANGE_ME_OTHER_LONG_PLACEHOLDER_VALUE!!")
+    with pytest.raises(RuntimeError, match="JWT_SECRET"):
+        _jwt_secret()
+    monkeypatch.setenv("JWT_SECRET", "  CHANGE_ME_LONG_SECRET_1234567890!!")
+    with pytest.raises(RuntimeError, match="JWT_SECRET"):
+        _jwt_secret()
+    monkeypatch.setenv("JWT_SECRET", "change_me_to_a_long_random_string")
+    with pytest.raises(RuntimeError, match="JWT_SECRET"):
+        _jwt_secret()
+    monkeypatch.setenv("JWT_SECRET", " " * 31 + "x")
+    with pytest.raises(RuntimeError, match="JWT_SECRET"):
+        _jwt_secret()
+
+    env_path = Path(__file__).resolve().parents[2] / ".env.example"
+    if env_path.exists():
+        matched = False
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("JWT_SECRET="):
+                assert line.split("=", 1)[1].strip() == _ENV_EXAMPLE_JWT_SECRET
+                matched = True
+        assert matched, "JWT_SECRET line not found in .env.example"
+
     monkeypatch.setenv("JWT_SECRET", "x" * 32)
     assert _jwt_secret() == "x" * 32
+
+
+def test_tc_hard_15b_env_example_jwt_placeholder_allowed_in_dev_test(monkeypatch):
+    """TC-HARD-15b: development/test may boot with the .env.example JWT placeholder."""
+    from app.config.settings import _ENV_EXAMPLE_JWT_SECRET
+
+    monkeypatch.setenv("JWT_SECRET", _ENV_EXAMPLE_JWT_SECRET)
+    monkeypatch.setenv("APP_ENV", "development")
+    assert _jwt_secret() == _ENV_EXAMPLE_JWT_SECRET
+    monkeypatch.setenv("APP_ENV", "test")
+    assert _jwt_secret() == _ENV_EXAMPLE_JWT_SECRET
 
 
 def test_tc_hard_16_rejects_non_hs256_algorithms():
@@ -192,8 +233,9 @@ def test_tc_sec_em_02_email_casefold_duplicate(client):
 # --- HB-03 rate limits --------------------------------------------------------
 
 
-def test_tc_sec_rl_01_sixth_register_from_same_ip_is_limited(client):
+def test_tc_sec_rl_01_sixth_register_from_same_ip_is_limited(client, monkeypatch):
     """TC-SEC-RL-01 / register 5/IP/15min → 6th 429."""
+    monkeypatch.setattr("app.services.auth.now_utc", lambda: datetime(2026, 10, 18, 10, 5, 0))
     for i in range(5):
         response = _register(
             client,
@@ -206,8 +248,9 @@ def test_tc_sec_rl_01_sixth_register_from_same_ip_is_limited(client):
     assert sixth.json()["error"]["code"] == "RATE_LIMITED"
 
 
-def test_tc_4_10_62_sixth_login_same_identity_is_limited(client):
+def test_tc_4_10_62_sixth_login_same_identity_is_limited(client, monkeypatch):
     """TC-4.10-62: 6th login attempt for one identity → 429."""
+    monkeypatch.setattr("app.services.auth.now_utc", lambda: datetime(2026, 10, 18, 10, 5, 0))
     assert _register(client).status_code == 201
     for _ in range(5):
         bad = _login(client, password="WrongPassword123")
@@ -350,8 +393,9 @@ def test_tc_4_10_38_reset_confirm_revokes_sessions_and_is_single_use(client):
     assert again.json()["error"]["code"] == "TOKEN_INVALID_OR_EXPIRED"
 
 
-def test_tc_4_10_42_reset_request_rate_limited(client):
+def test_tc_4_10_42_reset_request_rate_limited(client, monkeypatch):
     """TC-4.10-42: reset request shares login identity/IP limits."""
+    monkeypatch.setattr("app.services.auth.now_utc", lambda: datetime(2026, 10, 18, 10, 5, 0))
     assert _register(client).status_code == 201
     for _ in range(5):
         assert (
@@ -461,6 +505,7 @@ def test_tc_4_10_63_login_ip_limit_twenty(monkeypatch):
     so register-ip buckets stay separate, then fires logins from one shared
     login-ip bucket.
     """
+    monkeypatch.setattr("app.services.auth.now_utc", lambda: datetime(2026, 10, 18, 10, 5, 0))
     client = _trusted_xff_client(monkeypatch)
     shared_ip = "203.0.113.63"
     for i in range(21):
@@ -1124,8 +1169,9 @@ def test_argon2a_login_ip_does_not_block_register(monkeypatch):
     assert ok.status_code == 201, ok.text
 
 
-def test_argon2b_email_and_username_share_login_id_bucket(client):
+def test_argon2b_email_and_username_share_login_id_bucket(client, monkeypatch):
     """ARGON-2b: email and username logins share one login-id bucket per user."""
+    monkeypatch.setattr("app.services.auth.now_utc", lambda: datetime(2026, 10, 18, 10, 5, 0))
     assert _register(client).status_code == 201
     # 3 failures via email + 2 via username = 5; 6th must 429.
     for _ in range(3):
@@ -1154,6 +1200,7 @@ def test_argon2b_email_and_username_share_login_id_bucket(client):
 
 def test_argon2c_ip_block_does_not_increment_id_bucket(monkeypatch):
     """ARGON-2c: once login-ip is exhausted, further attempts do not burn login-id."""
+    monkeypatch.setattr("app.services.auth.now_utc", lambda: datetime(2026, 10, 18, 10, 5, 0))
     client = _trusted_xff_client(monkeypatch)
     # Victim registers from a clean IP.
     assert (
@@ -1190,8 +1237,9 @@ def test_argon2c_ip_block_does_not_increment_id_bucket(monkeypatch):
         assert r.status_code == 401, (i, r.text)
 
 
-def test_argon2d_hit_atomic_no_lost_increments(client):
+def test_argon2d_hit_atomic_no_lost_increments(client, monkeypatch):
     """ARGON-2d: concurrent _hit callers do not lose increments (MySQL upsert)."""
+    monkeypatch.setattr("app.services.auth.now_utc", lambda: datetime(2026, 10, 18, 10, 5, 0))
     import threading
 
     from app.db import SessionLocal
@@ -1524,8 +1572,9 @@ def test_cr3_a_redaction_does_not_eat_bare_password_words_or_cookie_delim():
     assert ";" in cookie_out
 
 
-def test_cr3_b_known_and_unknown_identifiers_share_lockout_shape(client):
+def test_cr3_b_known_and_unknown_identifiers_share_lockout_shape(client, monkeypatch):
     """CR3-b: known and unknown identifiers both 429 after the same N failures."""
+    monkeypatch.setattr("app.services.auth.now_utc", lambda: datetime(2026, 10, 18, 10, 5, 0))
     assert _register(client).status_code == 201
 
     # Known account: 5 failures then 429
