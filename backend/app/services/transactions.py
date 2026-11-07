@@ -70,32 +70,14 @@ def _month_key(d: date) -> str:
     return d.strftime("%Y-%m")
 
 
-def _stale_and_rebuild(
-    db: Session,
-    profile,
-    ruleset: Ruleset,
-    *,
-    from_month: int,
-    end_month: int | None = None,
-) -> list:
-    """Recompute affected months (FR-23a / API §5.12/§5.22).
+def _stale_and_rebuild(db: Session, profile, ruleset: Ruleset) -> list:
+    """Recompute stored months after a write (FR-08, FR-09, FR-23a).
 
-    Does **not** blanket-mark usang first: ``rebuild`` compares each month's
-    recomputed ``input_hash`` to the current berlaku row and no-ops (no version
-    bump) when inputs are unchanged — e.g. a description-only PUT. When the hash
-    differs, ``_insert_berlaku_month`` marks the prior berlaku usang and inserts
-    ``version + 1``.
-
-    End of band is the Jakarta as_of month for the current tax year (API §2.4);
-    past years run through December. Lock order: profile FOR UPDATE first, then
-    snapshot rows inside ``rebuild``.
+    Check January through the Jakarta as-of month, including rows whose dates
+    arrived since the last write. Unchanged hashes retain their versions.
     """
-    if end_month is None:
-        end_month = snapshot_end_month(ruleset.tax_year)
-    if end_month < from_month or end_month == 0:
-        lock_profile(db, profile)
-        return rebuild(db, profile, ruleset, month_keys=[], only_usang=False)
-    keys = month_keys_through(ruleset.tax_year, from_month, end_month=end_month)
+    end_month = snapshot_end_month(ruleset.tax_year)
+    keys = month_keys_through(ruleset.tax_year, 1, end_month=end_month) if end_month else []
     lock_profile(db, profile)
     return rebuild(db, profile, ruleset, month_keys=keys, only_usang=False)
 
@@ -333,7 +315,7 @@ def create_transaction(
             effective_date=date.fromisoformat(ruleset.effective_date),
         )
     )
-    _stale_and_rebuild(db, profile, ruleset, from_month=payload.tx_date.month)
+    _stale_and_rebuild(db, profile, ruleset)
     db.commit()
 
     return row_out(row)
@@ -462,7 +444,7 @@ def answer_clarification(
             effective_date=date.fromisoformat(ruleset.effective_date),
         )
     )
-    _stale_and_rebuild(db, profile, ruleset, from_month=row.tx_date.month)
+    _stale_and_rebuild(db, profile, ruleset)
     db.commit()
     return row_out(row)
 
@@ -476,8 +458,8 @@ def update_transaction(
 ) -> TransactionOut:
     """PUT /transactions/{id} — optimistic concurrency via ``version`` (FR-08).
 
-    Classification is not re-run on a field edit (UC-05a A1). Snapshots from the
-    earlier of the old and new month through the Jakarta as_of month are rebuilt (API §2.4/§5.12).
+    Classification is not re-run on a field edit (UC-05a A1). Snapshots from
+    January through the Jakarta as-of month are checked and changed months rebuilt.
 
     Lock order: profile → transaction (FOR UPDATE + conditional version claim)
     → snapshots. Parallel PUTs with the same expected version yield exactly one
@@ -518,7 +500,6 @@ def update_transaction(
                 "Nomor faktur ini sudah tercatat untuk klien, nominal, dan tanggal yang sama.",
             )
 
-    old_month = row.tx_date.month
     # Conditional UPDATE claims the version slot; rowcount==0 → 409.
     _claim_transaction_version(db, user, transaction_id, payload.version)
     row.tx_date = payload.tx_date
@@ -532,8 +513,7 @@ def update_transaction(
     row.source_channel = payload.source_channel
     row.version = payload.version + 1
     db.flush()
-    start = min(old_month, payload.tx_date.month)
-    _stale_and_rebuild(db, profile, ruleset, from_month=start)
+    _stale_and_rebuild(db, profile, ruleset)
     db.commit()
     return row_out(row)
 
@@ -553,10 +533,9 @@ def delete_transaction(db: Session, user: User, transaction_id: str, ruleset: Ru
         select(ClassificationEvent).where(ClassificationEvent.transaction_id == row.id)
     ).all():
         db.delete(event)
-    deleted_month = row.tx_date.month
     db.delete(row)
     db.flush()
-    _stale_and_rebuild(db, profile, ruleset, from_month=deleted_month)
+    _stale_and_rebuild(db, profile, ruleset)
     db.commit()
     return {"deleted": True, "id": transaction_id}
 
@@ -608,7 +587,7 @@ def override_category(
             effective_date=date.fromisoformat(ruleset.effective_date),
         )
     )
-    _stale_and_rebuild(db, profile, ruleset, from_month=row.tx_date.month)
+    _stale_and_rebuild(db, profile, ruleset)
     db.commit()
     return row_out(row)
 
@@ -695,8 +674,7 @@ def reclassify_transactions(
                 "source": row.source,
             }
         )
-    start = min(r.tx_date.month for r in rows)
-    _stale_and_rebuild(db, profile, ruleset, from_month=start)
+    _stale_and_rebuild(db, profile, ruleset)
     db.commit()
     return {"reclassified_count": len(results), "results": results}
 

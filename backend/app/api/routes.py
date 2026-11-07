@@ -1,6 +1,6 @@
 """Bagian A: the stateless engine on the loopback interface.
 
-No session, no database. Mounted only for development and test (API v1.2.2
+No session, no database. Mounted only for development and test (API v1.3.2
 section 3). Thin by rule: validate, call one service, return.
 """
 
@@ -35,7 +35,7 @@ def _ruleset_out() -> RulesetOut:
 
 @router.get("/health")
 def health() -> dict[str, str]:
-    """Liveness probe. API v1.2.2 section 3.1 fixes the body."""
+    """Liveness probe. API v1.3.2 section 3.1 fixes the body."""
     return {"status": "ok"}
 
 

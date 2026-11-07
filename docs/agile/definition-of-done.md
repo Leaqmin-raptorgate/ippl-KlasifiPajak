@@ -9,5 +9,5 @@ A story is done when all of these are true:
 - Public functions have a docstring. Indentation is 4 spaces.
 - Secrets are not in the repo. `.env` stays local.
 - The backlog status is updated in the same change.
-- Spec citations use **SRS v2.7**, **API v1.3.1**, and **ERD r3** (not older
+- Spec citations use **SRS v2.7**, **API v1.3.2**, and **ERD r3** (not older
   version numbers).

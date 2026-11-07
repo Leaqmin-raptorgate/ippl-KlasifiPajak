@@ -53,7 +53,7 @@ Putra. It supersedes v1.0, v2.5 and v2.6. Its ids include `FR-01` through
 
 > **Provenance.** SRS **v2.7** lives on disk outside this repository at
 > `SPEC/KlasifiPajak/` (course SRS is never committed here). The HTTP contract
-> of record is API **v1.3.1**, mirrored at
+> of record is API **v1.3.2**, mirrored at
 > `docs/api/KlasifiPajak_API_Specification.md`. The schema of record is ERD
 > **r3** (D-11 `month_snapshots.version`); Alembic head `76fcdbc4af30` matches
 > r3. Do not add `TODO(SRS-COMMIT)` markers; every id cited here has a source
@@ -132,8 +132,10 @@ These do not change without the developer saying so.
     and `overwithheld_excess_idr` are both `>= 0`. Excess is reported as
     _belum diperhitungkan_ with a note to consult a licensed consultant
     (FR-23), never moved between months and never treated as a credit.
-17. **`input_hash` is `v1:<sha256_hex>`** over Canonical JSON, per month, and
-    excludes `computed_at` and snapshot ids (FR-22, NFR-02).
+17. **`input_hash` is `v2:<sha256_hex>`** over Canonical JSON, per month, and
+    excludes `computed_at` and snapshot ids (FR-22, NFR-02). A month hashes its
+    own rows plus `carry_forward` (combined gross and usaha omzet of the months
+    before it), because band use and gross carry forward into later months.
 
 ## Layering
 

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 CATEGORIES = ("usaha", "pekerjaan_bebas", "already_final", "non_object")
 
 #: How a prior-year gross figure was resolved. The wire values are the three
-#: API v1.2.2 enum members; the legacy names stay as aliases so existing
+#: API v1.3.2 enum members; the legacy names stay as aliases so existing
 #: engine tests keep reading the same intent.
 PRIOR_YEAR_UNSET = "first_year_taxpayer"
 PRIOR_YEAR_REPORTED = "manual_profile"
@@ -103,6 +103,14 @@ class Line:
 
 
 @dataclass(frozen=True)
+class MonthContext:
+    """Digest and cumulative eligibility risk for a month (FR-20, FR-22)."""
+
+    input_hash: str
+    next_year_at_risk: bool
+
+
+@dataclass(frozen=True)
 class MonthSummary:
     """Usaha totals for one calendar month.
 
@@ -110,6 +118,10 @@ class MonthSummary:
     ``withheld_tax_amount_idr`` for the month and compares it against that
     month's tax. Both figures are non-negative and any excess is surfaced,
     never carried into another month.
+
+    ``next_year_at_risk`` is cumulative through the end of this month: combined
+    gross of the year so far, plus the spouse's current-year figure when it
+    joins the cap (FR-20).
     """
 
     month: str
@@ -124,6 +136,7 @@ class MonthSummary:
     overwithheld_excess_idr: int
     withhold_status: str
     input_hash: str
+    next_year_at_risk: bool
 
 
 @dataclass(frozen=True)

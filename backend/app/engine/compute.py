@@ -30,6 +30,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+from collections.abc import Iterable
 from datetime import date, datetime
 
 from app.engine.types import (
@@ -40,6 +42,7 @@ from app.engine.types import (
     WITHHOLD_KURANG_POTONG,
     WITHHOLD_NIHIL,
     Line,
+    MonthContext,
     MonthSummary,
     Profile,
     Ruleset,
@@ -48,12 +51,12 @@ from app.engine.types import (
 )
 
 _CATEGORIES = frozenset({"usaha", "pekerjaan_bebas", "already_final", "non_object"})
-_CAP_CATEGORIES = frozenset({"pekerjaan_bebas", "already_final"})
+_GROSS_CATEGORIES = frozenset({"usaha", "pekerjaan_bebas", "already_final"})
 _SPOUSE_FLAGS = frozenset({"yes", "no", "unknown"})
 _ROUNDING_RULES = frozenset({"floor", "round_half_up"})
 
 #: SRS FR-22 pins the canonical hash format with a version prefix.
-_INPUT_HASH_PREFIX = "v1:"
+_INPUT_HASH_PREFIX = "v2:"
 
 
 def disclaimer(ruleset_id: str, as_of_date: str) -> str:
@@ -65,22 +68,73 @@ def disclaimer(ruleset_id: str, as_of_date: str) -> str:
 
 
 def month_input_hash(
-    transactions: list[Transaction] | tuple[Transaction, ...],
+    period_transactions: list[Transaction] | tuple[Transaction, ...],
     profile: Profile,
     ruleset: Ruleset,
     month: str,
 ) -> str:
     """Canonical digest for one month, including a month with no rows.
 
-    API v1.2.2 section 2.4 requires every month through the as-of month to
-    carry a real digest even when its transaction list is empty.
+    Pass every row of the period, not only the month's: the month's figures
+    depend on earlier months, so the digest also covers their totals (FR-22).
     """
+    _validate_month(month)
+    return _input_hash(_prepare(period_transactions, profile, ruleset), profile, ruleset, month)
+
+
+def month_next_year_at_risk(
+    period_transactions: list[Transaction] | tuple[Transaction, ...],
+    profile: Profile,
+    ruleset: Ruleset,
+    month: str,
+) -> bool:
+    """Whether combined gross through the end of ``month`` is over the cap.
+
+    Works for a month that has no usaha rows, which ``Snapshot.months`` omits.
+    Pass every row of the period (FR-20, Pasal 57 ayat (2) huruf e dan ayat (4)).
+    """
+    _validate_month(month)
+    ordered = _prepare(period_transactions, profile, ruleset)
+    return _next_year_at_risk_through(
+        ordered, _cap_spouse_current(profile, ruleset), ruleset, month
+    )
+
+
+def month_contexts(
+    transactions: list[Transaction] | tuple[Transaction, ...],
+    profile: Profile,
+    ruleset: Ruleset,
+    month_keys: list[str] | tuple[str, ...],
+) -> dict[str, MonthContext]:
+    """Return digests and cumulative risk for each month (FR-20, FR-22)."""
+    for month in month_keys:
+        _validate_month(month)
+    ordered = _prepare(transactions, profile, ruleset)
+    cap_spouse = _cap_spouse_current(profile, ruleset)
+    return {
+        month: MonthContext(
+            input_hash=_input_hash(ordered, profile, ruleset, month),
+            next_year_at_risk=_next_year_at_risk_through(ordered, cap_spouse, ruleset, month),
+        )
+        for month in month_keys
+    }
+
+
+def _validate_month(month: str) -> None:
+    """Reject anything but an ASCII ``YYYY-MM`` key with a month from 01 to 12."""
+    if not re.fullmatch(r"[0-9]{4}-(0[1-9]|1[0-2])", month):
+        raise ValueError("month must be YYYY-MM")
+
+
+def _prepare(
+    transactions: list[Transaction] | tuple[Transaction, ...],
+    profile: Profile,
+    ruleset: Ruleset,
+) -> tuple[Transaction, ...]:
+    """Validate the inputs and return the rows normalized and in calculation order."""
     _validate_ruleset(ruleset)
     _validate_profile(profile)
-    ordered = tuple(
-        sorted((_normalize(tx) for tx in transactions), key=lambda tx: (tx.date, tx.id))
-    )
-    return _input_hash(ordered, profile, ruleset, month)
+    return tuple(sorted((_normalize(tx) for tx in transactions), key=lambda tx: (tx.date, tx.id)))
 
 
 def compute(
@@ -120,10 +174,8 @@ def compute(
     else:
         exemption_used = min(ruleset.exemption_band_idr, exempt + taxable)
         exemption_remaining = ruleset.exemption_band_idr - exemption_used
-    current_gross = ytd + sum(line.amount for line in lines if line.category in _CAP_CATEGORIES)
-    next_year_at_risk = _over_cap(
-        current_gross + cap_spouse_ytd, ruleset.eligibility_cap_idr, ruleset.ineligible_when
-    )
+    current_gross = _combined_gross(ordered)
+    next_year_at_risk = _over_next_year_cap(current_gross, cap_spouse_ytd, ruleset)
     return Snapshot(
         ruleset_id=ruleset.ruleset_id,
         as_of_date=labeled_as_of,
@@ -337,6 +389,9 @@ def _months(
 ) -> tuple[MonthSummary, ...]:
     """Usaha totals and withholding reconciliation per calendar month.
 
+    ``next_year_at_risk`` is cumulative: it covers combined gross through the
+    end of that month (FR-20).
+
     ``self_paid`` is the sum of the per-row clamped figures and can differ from
     ``sisa_bayar_idr``, which is the authoritative FR-23 monthly reconciliation
     of the month's summed withholding against the month's tax.
@@ -353,6 +408,7 @@ def _months(
         row[4] += line.final_tax
         row[5] += line.withheld_tax_amount
         row[6] += line.self_paid
+    cap_spouse = _cap_spouse_current(profile, ruleset)
     return tuple(
         MonthSummary(
             month=month,
@@ -367,9 +423,57 @@ def _months(
             overwithheld_excess_idr=max(0, row[5] - row[4]),
             withhold_status=_withhold_status(row[4], row[5]),
             input_hash=_input_hash(ordered, profile, ruleset, month),
+            next_year_at_risk=_next_year_at_risk_through(ordered, cap_spouse, ruleset, month),
         )
         for month, row in sorted(buckets.items())
     )
+
+
+def _combined_gross(rows: Iterable[Transaction]) -> int:
+    """Gross counted toward the eligibility cap (FR-20)."""
+    return sum(tx.amount for tx in rows if tx.category in _GROSS_CATEGORIES)
+
+
+def _cap_spouse_current(profile: Profile, ruleset: Ruleset) -> int:
+    """Spouse current-year gross that joins the cap, or 0 (FR-20, FR-21)."""
+    spouse_ytd, _ = _spouse_figures(profile, ruleset)
+    return spouse_ytd if ruleset.spouse_in_cap else 0
+
+
+def _over_next_year_cap(gross: int, cap_spouse_ytd: int, ruleset: Ruleset) -> bool:
+    """Compare current gross plus the spouse figure to the cap (FR-20, FR-21)."""
+    return _over_cap(gross + cap_spouse_ytd, ruleset.eligibility_cap_idr, ruleset.ineligible_when)
+
+
+def _next_year_at_risk_through(
+    ordered: tuple[Transaction, ...],
+    cap_spouse_ytd: int,
+    ruleset: Ruleset,
+    month: str,
+) -> bool:
+    """Combined gross through the end of ``month`` against the eligibility cap.
+
+    Counts usaha, pekerjaan_bebas and already_final rows dated in or before the
+    month, plus the spouse's current-year figure when the ruleset puts spouse
+    gross in the cap and Pasal 58 aggregation is active (FR-20, FR-21).
+    """
+    gross = _combined_gross(tx for tx in ordered if tx.date[:7] <= month)
+    return _over_next_year_cap(gross, cap_spouse_ytd, ruleset)
+
+
+def _carry_forward(ordered: tuple[Transaction, ...], month: str | None) -> dict[str, int]:
+    """Totals of rows dated before ``month`` that later months build on (FR-22).
+
+    A month's band use and combined gross start from these totals. Both are 0
+    for the whole-period hash. non_object rows never count.
+    """
+    if month is None:
+        return {"combined_gross_before_month_idr": 0, "usaha_omzet_before_month_idr": 0}
+    earlier = [tx for tx in ordered if tx.date[:7] < month]
+    return {
+        "combined_gross_before_month_idr": _combined_gross(earlier),
+        "usaha_omzet_before_month_idr": sum(tx.amount for tx in earlier if tx.category == "usaha"),
+    }
 
 
 def _tax(taxable: int, ruleset: Ruleset) -> int:
@@ -400,11 +504,14 @@ def _input_hash(
 ) -> str:
     """Canonical SHA-256 digest over everything that can move a figure.
 
-    API v1.2.2 section 4 pins the payload: sorted keys, no separator
-    whitespace, UTF-8, pure integers, ISO-8601 dates, and a ``v1:`` version
-    prefix. A month hashes only that month's transactions. Fields that cannot
-    change a result, such as a computation timestamp or display-only
-    ``rate_str``, are absent by construction.
+    API v1.3.2 section 4 pins the payload: sorted keys, no separator
+    whitespace, UTF-8, pure integers, ISO-8601 dates, and a ``v2:`` version
+    prefix. A month hashes its own transactions plus ``carry_forward``, the
+    combined gross and the usaha omzet of the months before it. A month's
+    figures depend on earlier months (band use, combined gross), so the hash
+    covers them and an unchanged hash means unchanged figures (FR-22). Fields
+    that cannot change a result, such as a computation timestamp or
+    display-only ``rate_str``, are absent by construction.
     """
     _, prior_source = _prior_gross_revenue(profile)
     new_taxpayer = profile.is_new_taxpayer_current_year
@@ -415,6 +522,7 @@ def _input_hash(
         spouse_prior_usaha = profile.spouse_prior_year_omzet
     selected = ordered if month is None else tuple(tx for tx in ordered if tx.date[:7] == month)
     payload = {
+        "carry_forward": _carry_forward(ordered, month),
         "month": month,
         "profile_context": {
             "is_new_taxpayer_current_year": new_taxpayer,

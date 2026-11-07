@@ -6,10 +6,25 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.db import SessionLocal
-from app.models import ClassificationEvent, MonthSnapshot, Profile, QuotaCounter, User
+from app.engine import compute
+from app.engine.compute import month_input_hash
+from app.engine.ruleset import load_ruleset
+from app.models import (
+    ClassificationEvent,
+    MonthSnapshot,
+    Profile,
+    QuotaCounter,
+    Transaction,
+    User,
+)
 from app.security import now_utc
 from app.services.snapshot import DISCLAIMER
-from app.services.snapshots_store import freeze_today_jakarta, today_jakarta
+from app.services.snapshots_store import (
+    freeze_today_jakarta,
+    profile_to_engine,
+    today_jakarta,
+    transaction_to_engine,
+)
 
 AUTH = {
     "email": "taxlane@example.com",
@@ -187,6 +202,333 @@ def test_tc_4_3_42_put_moves_month_rebuilds_earlier_through_december(client):
             assert dec == []
         finally:
             db.close()
+
+
+def _put_tx(client, row, **overrides):
+    """PUT one row with its current fields and version, applying ``overrides``."""
+    payload = {
+        "amount_idr": row["amount_idr"],
+        "tx_date": row["tx_date"],
+        "client_name": row["client_name"],
+        "description": row["description"],
+        "invoice_no": row["invoice_no"],
+        "withheld_tax_amount_idr": row["withheld_tax_amount_idr"],
+        "source_channel": row["source_channel"],
+        "version": row["version"],
+    }
+    payload.update(overrides)
+    return client.put(f"/api/v1/transactions/{row['id']}", json=payload)
+
+
+def _add_tx(client, amount_idr, tx_date, invoice_no, **overrides):
+    response = _tx(
+        client,
+        amount_idr=amount_idr,
+        tx_date=tx_date,
+        invoice_no=invoice_no,
+        **overrides,
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def _stored_months(client) -> dict[str, dict]:
+    dashboard = client.get("/api/v1/tax/dashboard?tax_year=2026")
+    assert dashboard.status_code == 200, dashboard.text
+    return {row["month"]: row for row in dashboard.json()["monthly_summaries"]}
+
+
+def _assert_stored_months_match_fresh_compute(client, frozen: date):
+    """TC-ARITH-STALE: every stored month equals a fresh engine run (FR-22, FR-23a)."""
+    me = client.get("/api/v1/auth/me").json()
+    db = SessionLocal()
+    try:
+        profile = db.scalar(select(Profile).where(Profile.user_id == me["user_id"]))
+        rows = db.scalars(
+            select(Transaction).where(
+                Transaction.user_id == me["user_id"],
+                Transaction.tx_date >= date(2026, 1, 1),
+                Transaction.tx_date <= frozen,
+            )
+        ).all()
+        engine_rows = [transaction_to_engine(row) for row in rows]
+        engine_profile = profile_to_engine(profile)
+        ruleset = load_ruleset()
+        snapshot = compute(engine_rows, engine_profile, ruleset, frozen)
+    finally:
+        db.close()
+    engine_months = {month.month: month for month in snapshot.months}
+    stored = _stored_months(client)
+    assert stored
+    for month_key, row in stored.items():
+        engine_month = engine_months.get(month_key)
+        expected = (
+            (
+                engine_month.usaha_omzet,
+                engine_month.exempt,
+                engine_month.taxable,
+                engine_month.final_tax,
+            )
+            if engine_month
+            else (0, 0, 0, 0)
+        )
+        actual = (
+            row["usaha_omzet_idr"],
+            row["porsi_bebas_idr"],
+            row["porsi_kena_idr"],
+            row["tax_0_5_pct_idr"],
+        )
+        assert actual == expected, month_key
+        expected_reconciliation = (
+            (
+                engine_month.withheld,
+                engine_month.sisa_bayar_idr,
+                engine_month.overwithheld_excess_idr,
+                engine_month.withhold_status,
+            )
+            if engine_month
+            else (0, 0, 0, "nihil")
+        )
+        assert (
+            row["withheld_tax_idr"],
+            row["sisa_bayar_idr"],
+            row["overwithheld_excess_idr"],
+            row["overwithheld_status"],
+        ) == expected_reconciliation, month_key
+        assert row["input_hash"] == month_input_hash(
+            engine_rows, engine_profile, ruleset, month_key
+        ), month_key
+        for category in ("pekerjaan_bebas", "already_final", "non_object"):
+            assert row[f"{category}_omzet_idr"] == sum(
+                tx.amount
+                for tx in engine_rows
+                if tx.date[:7] == month_key and tx.category == category
+            ), (month_key, category)
+        through_month = [tx for tx in engine_rows if tx.date[:7] <= month_key]
+        fresh_month = compute(through_month, engine_profile, ruleset, frozen)
+        detail = client.get(f"/api/v1/tax/snapshots/2026/{month_key}")
+        assert detail.status_code == 200, detail.text
+        assert detail.json()["next_year_ineligible"] is fresh_month.next_year_at_risk, month_key
+
+
+def test_fr05_arrived_future_transaction_is_stored_on_later_write(client):
+    """FR-05, FR-08, FR-23a: a future row joins snapshots after its date arrives."""
+    with freeze_today_jakarta(date(2026, 9, 15)):
+        _auth(client)
+        assert _profile(client).status_code == 200
+        _add_tx(client, 200_000_000, "2026-10-10", "INV-ARRIVED-1")
+    frozen = date(2026, 11, 2)
+    with freeze_today_jakarta(frozen):
+        _add_tx(client, 1_000_000, "2026-11-01", "INV-ARRIVED-2")
+        months = _stored_months(client)
+        assert months["2026-10"]["usaha_omzet_idr"] == 200_000_000
+        assert months["2026-11"]["usaha_omzet_idr"] == 1_000_000
+        _assert_stored_months_match_fresh_compute(client, frozen)
+
+
+def test_fr08_write_stores_contiguous_months_through_today(client):
+    """FR-05, FR-08, FR-23a: writes cover every elapsed month in the tax year."""
+    with freeze_today_jakarta(date(2026, 9, 15)):
+        _auth(client)
+        assert _profile(client).status_code == 200
+        _add_tx(client, 200_000_000, "2026-10-10", "INV-CONTIGUOUS-1")
+    with freeze_today_jakarta(date(2026, 11, 2)):
+        _add_tx(client, 1_000_000, "2026-11-01", "INV-CONTIGUOUS-2")
+        assert sorted(_stored_months(client)) == [f"2026-{month:02d}" for month in range(1, 12)]
+
+
+def test_fr08_write_repairs_earlier_stale_hash_and_figures(client):
+    """FR-08, FR-18, FR-22: a later write repairs an earlier stale snapshot."""
+    frozen = date(2026, 6, 20)
+    with freeze_today_jakarta(frozen):
+        _auth(client)
+        assert _profile(client).status_code == 200
+        _add_tx(client, 450_000_000, "2026-03-10", "INV-REPAIR-1")
+        _add_tx(client, 100_000_000, "2026-04-10", "INV-REPAIR-2")
+        user_id = client.get("/api/v1/auth/me").json()["user_id"]
+        db = SessionLocal()
+        try:
+            profile = db.scalar(select(Profile).where(Profile.user_id == user_id))
+            april = db.scalar(
+                select(MonthSnapshot).where(
+                    MonthSnapshot.profile_id == profile.id,
+                    MonthSnapshot.month_key == "2026-04",
+                    MonthSnapshot.status == "berlaku",
+                )
+            )
+            old_version = april.version
+            april.input_hash = "v1:stale"
+            april.porsi_bebas_idr = 0
+            db.commit()
+        finally:
+            db.close()
+        _add_tx(client, 1_000_000, "2026-06-10", "INV-REPAIR-3")
+        april = _stored_months(client)["2026-04"]
+        assert april["version"] == old_version + 1
+        assert april["porsi_bebas_idr"] == 50_000_000
+        assert april["input_hash"] != "v1:stale"
+        _assert_stored_months_match_fresh_compute(client, frozen)
+
+
+def test_fr22_june_edit_preserves_unchanged_earlier_month_versions(client):
+    """FR-08, FR-22: unchanged monthly inputs retain their existing versions."""
+    with freeze_today_jakarta(date(2026, 6, 20)):
+        _auth(client)
+        assert _profile(client).status_code == 200
+        june = _add_tx(client, 1_000_000, "2026-06-10", "INV-UNCHANGED-1")
+        before = _stored_months(client)
+        result = _put_tx(client, june, amount_idr=2_000_000)
+        assert result.status_code == 200, result.text
+        after = _stored_months(client)
+        for month in (f"2026-{number:02d}" for number in range(1, 6)):
+            assert after[month]["input_hash"] == before[month]["input_hash"]
+            assert after[month]["version"] == before[month]["version"]
+        assert after["2026-06"]["version"] == before["2026-06"]["version"] + 1
+
+
+def test_tc_arith_stale_edit_crossing_the_band_updates_later_month(client):
+    """FR-08, FR-18, FR-23a: raising March past the band moves April into the taxed part."""
+    frozen = date(2026, 11, 2)
+    with freeze_today_jakarta(frozen):
+        _auth(client)
+        assert _profile(client).status_code == 200
+        march = _add_tx(client, 450_000_000, "2026-03-10", "INV-STALE-1A")
+        _add_tx(client, 100_000_000, "2026-04-10", "INV-STALE-1B")
+
+        before = _stored_months(client)
+        assert before["2026-04"]["porsi_bebas_idr"] == 50_000_000
+        assert before["2026-04"]["porsi_kena_idr"] == 50_000_000
+
+        edited = _put_tx(client, march, amount_idr=600_000_000)
+        assert edited.status_code == 200, edited.text
+
+        after = _stored_months(client)
+        assert after["2026-03"]["porsi_kena_idr"] == 100_000_000
+        assert after["2026-03"]["tax_0_5_pct_idr"] == 500_000
+        assert after["2026-04"]["porsi_bebas_idr"] == 0
+        assert after["2026-04"]["porsi_kena_idr"] == 100_000_000
+        assert after["2026-04"]["tax_0_5_pct_idr"] == 500_000
+        _assert_stored_months_match_fresh_compute(client, frozen)
+
+
+def test_tc_arith_stale_move_between_months_restates_every_month(client):
+    """FR-08, FR-18: moving October omzet to March re-fills the band in date order."""
+    frozen = date(2026, 11, 2)
+    with freeze_today_jakarta(frozen):
+        _auth(client)
+        assert _profile(client).status_code == 200
+        _add_tx(client, 400_000_000, "2026-05-10", "INV-STALE-2A")
+        october = _add_tx(client, 200_000_000, "2026-10-10", "INV-STALE-2B")
+        _add_tx(client, 100_000_000, "2026-11-01", "INV-STALE-2C")
+
+        moved = _put_tx(client, october, tx_date="2026-03-10")
+        assert moved.status_code == 200, moved.text
+
+        months = _stored_months(client)
+        assert months["2026-03"]["porsi_bebas_idr"] == 200_000_000
+        assert months["2026-03"]["porsi_kena_idr"] == 0
+        assert months["2026-05"]["porsi_bebas_idr"] == 300_000_000
+        assert months["2026-05"]["porsi_kena_idr"] == 100_000_000
+        assert months["2026-05"]["tax_0_5_pct_idr"] == 500_000
+        assert months["2026-10"]["usaha_omzet_idr"] == 0
+        assert months["2026-10"]["porsi_bebas_idr"] == 0
+        assert months["2026-10"]["porsi_kena_idr"] == 0
+        assert months["2026-10"]["tax_0_5_pct_idr"] == 0
+        assert months["2026-11"]["porsi_bebas_idr"] == 0
+        assert months["2026-11"]["porsi_kena_idr"] == 100_000_000
+        assert months["2026-11"]["tax_0_5_pct_idr"] == 500_000
+        assert sum(row["porsi_kena_idr"] for row in months.values()) == 200_000_000
+        assert sum(row["tax_0_5_pct_idr"] for row in months.values()) == 1_000_000
+        _assert_stored_months_match_fresh_compute(client, frozen)
+
+
+def test_tc_arith_stale_delete_frees_band_for_later_month(client):
+    """FR-09, FR-18: deleting February omzet returns the band to March."""
+    frozen = date(2026, 11, 2)
+    with freeze_today_jakarta(frozen):
+        _auth(client)
+        assert _profile(client).status_code == 200
+        february = _add_tx(client, 500_000_000, "2026-02-10", "INV-STALE-3A")
+        _add_tx(client, 100_000_000, "2026-03-10", "INV-STALE-3B")
+
+        before = _stored_months(client)
+        assert before["2026-03"]["porsi_kena_idr"] == 100_000_000
+
+        deleted = client.delete(f"/api/v1/transactions/{february['id']}")
+        assert deleted.status_code == 200, deleted.text
+
+        after = _stored_months(client)
+        assert after["2026-03"]["porsi_bebas_idr"] == 100_000_000
+        assert after["2026-03"]["porsi_kena_idr"] == 0
+        assert after["2026-03"]["tax_0_5_pct_idr"] == 0
+        _assert_stored_months_match_fresh_compute(client, frozen)
+
+
+def test_tc_arith_stale_next_year_flag_is_cumulative_per_month(client):
+    """FR-20: the next-year flag turns on in the month combined gross passes the cap."""
+    with freeze_today_jakarta(date(2026, 11, 2)):
+        _auth(client)
+        assert _profile(client).status_code == 200
+        october = _add_tx(
+            client, 1_000_000, "2026-10-10", "INV-STALE-4A", description="Honor narasumber"
+        )
+        _add_tx(client, 1_000_000, "2026-11-01", "INV-STALE-4B", description="Honor narasumber")
+
+        edited = _put_tx(client, october, amount_idr=5_000_000_000)
+        assert edited.status_code == 200, edited.text
+
+        dashboard = client.get("/api/v1/tax/dashboard?tax_year=2026").json()
+        assert dashboard["thresholds"]["monitoring_current_year_cap_4_8m"]["next_year_ineligible"]
+        flags = {}
+        for month_key in ("2026-09", "2026-10", "2026-11"):
+            snapshot = client.get(f"/api/v1/tax/snapshots/2026/{month_key}")
+            assert snapshot.status_code == 200, snapshot.text
+            flags[month_key] = snapshot.json()["next_year_ineligible"]
+        assert flags == {"2026-09": False, "2026-10": True, "2026-11": True}
+        _assert_stored_months_match_fresh_compute(client, date(2026, 11, 2))
+
+
+def test_tc_arith_stale_usaha_month_flags_preserve_history_after_cap_edit(client):
+    """FR-20, FR-22: an October cap edit updates November but preserves September history."""
+    frozen = date(2026, 11, 2)
+    with freeze_today_jakarta(frozen):
+        _auth(client)
+        assert _profile(client).status_code == 200
+        _add_tx(client, 1_000_000, "2026-09-10", "INV-STALE-5A")
+        october = _add_tx(client, 1_000_000, "2026-10-10", "INV-STALE-5B")
+        _add_tx(client, 1_000_000, "2026-11-01", "INV-STALE-5C")
+        before = _stored_months(client)
+
+        edited = _put_tx(client, october, amount_idr=5_000_000_000)
+        assert edited.status_code == 200, edited.text
+
+        after = _stored_months(client)
+        assert after["2026-09"]["version"] == before["2026-09"]["version"]
+        for month_key, expected in (
+            ("2026-09", False),
+            ("2026-10", True),
+            ("2026-11", True),
+        ):
+            detail = client.get(f"/api/v1/tax/snapshots/2026/{month_key}")
+            assert detail.status_code == 200, detail.text
+            assert detail.json()["next_year_ineligible"] is expected, month_key
+        _assert_stored_months_match_fresh_compute(client, frozen)
+
+
+def test_tc_arith_stale_description_only_edit_creates_no_version(client):
+    """FR-22, UC-05a A1: an edit that moves no figure leaves every month version alone."""
+    with freeze_today_jakarta(date(2026, 11, 2)):
+        _auth(client)
+        assert _profile(client).status_code == 200
+        march = _add_tx(client, 450_000_000, "2026-03-10", "INV-STALE-6A")
+        _add_tx(client, 100_000_000, "2026-04-10", "INV-STALE-6B")
+        before = {month: row["version"] for month, row in _stored_months(client).items()}
+
+        edited = _put_tx(client, march, description="Penjualan sembako grosir")
+        assert edited.status_code == 200, edited.text
+
+        after = {month: row["version"] for month, row in _stored_months(client).items()}
+        assert after == before
 
 
 def test_tc_4_3_43_put_stale_version_conflict(client):
@@ -1072,7 +1414,7 @@ def test_tc_4_6_29_fr47_month_jejak(client):
     body = snap.json()
     assert body["status"] == "berlaku"
     assert body["ruleset_id"]
-    assert body["input_hash"].startswith("v1:")
+    assert body["input_hash"].startswith("v2:")
     assert body["disclaimer"] == DISCLAIMER
 
 
@@ -1270,13 +1612,13 @@ def test_tc_4_6_31_snapshot_requires_session(client):
     assert bare.get("/api/v1/tax/snapshots/2026/2026-10").status_code == 401
 
 
-def test_tc_4_6_32_input_hash_is_v1_prefixed(client):
-    """TC-4.6-32 — month input_hash is the v1: digests used by NFR-02 goldens."""
+def test_tc_4_6_32_input_hash_is_v2_prefixed(client):
+    """TC-4.6-32: month input_hash is the v2: digests used by NFR-02 goldens."""
     _auth(client)
     assert _profile(client).status_code == 200
     assert _tx(client).status_code == 201
     body = client.get("/api/v1/tax/snapshots/2026/2026-10").json()
-    assert body["input_hash"].startswith("v1:")
+    assert body["input_hash"].startswith("v2:")
     assert len(body["input_hash"]) > 10
 
 
@@ -1757,3 +2099,53 @@ def test_tc_argon_quota_ensure_counter_race(client):
         assert len(rows) == 1
     finally:
         db.close()
+
+
+def test_fr08_write_waiting_on_profile_lock_sees_rows_committed_meanwhile(client):
+    """FR-08, FR-23a: a write that read before a peer committed still rebuilds with the peer's row.
+
+    Session A opens its read view first. Session B then commits a Rp 450 juta
+    March row. A's own write (April, Rp 100 juta) must rebuild from the rows
+    committed by then, so the stored April month reflects the band B used up.
+    """
+    from app.schemas.transaction import TransactionCreate
+    from app.services import transactions as tx_svc
+
+    frozen = date(2026, 11, 2)
+    with freeze_today_jakarta(frozen):
+        _auth(client)
+        assert _profile(client).status_code == 200
+        user_id = client.get("/api/v1/auth/me").json()["user_id"]
+        ruleset = load_ruleset()
+
+        def payload(amount: int, tx_date: date, invoice: str) -> TransactionCreate:
+            return TransactionCreate(
+                amount_idr=amount,
+                tx_date=tx_date,
+                client_name="PT Sumber Makmur",
+                description="Penjualan sembako",
+                invoice_no=invoice,
+                source_channel="corporate_client",
+            )
+
+        db_a = SessionLocal()
+        db_b = SessionLocal()
+        try:
+            user_a = db_a.scalar(select(User).where(User.id == user_id))
+            user_b = db_b.scalar(select(User).where(User.id == user_id))
+            assert user_a is not None and user_b is not None
+            # A's first consistent read has happened: its read view is fixed.
+            tx_svc.create_transaction(
+                db_b, user_b, payload(450_000_000, date(2026, 3, 10), "INV-PEER-1"), ruleset
+            )
+            tx_svc.create_transaction(
+                db_a, user_a, payload(100_000_000, date(2026, 4, 10), "INV-LATE-1"), ruleset
+            )
+        finally:
+            db_a.close()
+            db_b.close()
+
+        months = _stored_months(client)
+        assert months["2026-04"]["porsi_bebas_idr"] == 50_000_000
+        assert months["2026-04"]["porsi_kena_idr"] == 50_000_000
+        _assert_stored_months_match_fresh_compute(client, frozen)

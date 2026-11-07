@@ -16,7 +16,7 @@ Not a filed return. Not authorized DJP software.
 | Artefact | Version                                 | Where                                                                                                  |
 | -------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------ |
 | SRS      | **v2.7**                                | Outside this repository (`SPEC/`); course SRS is never pushed here                                     |
-| API      | **v1.3.1**                              | Mirrored at [`docs/api/KlasifiPajak_API_Specification.md`](docs/api/KlasifiPajak_API_Specification.md) |
+| API      | **v1.3.2**                              | Mirrored at [`docs/api/KlasifiPajak_API_Specification.md`](docs/api/KlasifiPajak_API_Specification.md) |
 | ERD      | **r3** (D-11 `month_snapshots.version`) | Outside this repository (`SPEC/`); Alembic `76fcdbc4af30` matches r3                                   |
 
 Prior API text in this repo was v1.2.2; treat the mirror above as normative.
@@ -80,7 +80,7 @@ npm --prefix frontend run test:unit   # Vitest (happy-dom); no backend required
 FastAPI over the deterministic engine, plus an authenticated application
 surface backed by MySQL 8. Engine endpoints are unauthenticated and bound to
 loopback. See the [API specification](docs/api/KlasifiPajak_API_Specification.md)
-(v1.3.1).
+(v1.3.2).
 
 | Endpoint                                                   | Purpose                                                 |
 | ---------------------------------------------------------- | ------------------------------------------------------- |
@@ -159,7 +159,7 @@ The workflow does not publish or deploy anything.
 - `backend/alembic/` — migrations (initial head = ERD r3 / D-11)
 - `backend/tests/` — engine tests, API tests, and `TC-GOLDEN-*`
 - `frontend/` — Vue 3 + Vite
-- `docs/api/` — API specification mirror (v1.3.1)
+- `docs/api/`: API specification mirror (v1.3.2)
 - `docs/agile/` — backlog, roadmap, open decisions
 
 Layering rules: [backend/README.md](backend/README.md).
@@ -173,7 +173,8 @@ Layering rules: [backend/README.md](backend/README.md).
 - [docs/agile/backlog.md](docs/agile/backlog.md) — sprint / M50 status
 - [docs/agile/roadmap.md](docs/agile/roadmap.md) — sequence, risks, open decisions
 - [docs/agile/open-decisions.md](docs/agile/open-decisions.md) — OD-* and D-01…D-11
-- [docs/api/KlasifiPajak_API_Specification.md](docs/api/KlasifiPajak_API_Specification.md) — API contract **v1.3.1**
+- [docs/api/KlasifiPajak_API_Specification.md](docs/api/KlasifiPajak_API_Specification.md): API contract **v1.3.2**
 
 The course SRS stays outside this repository and is never pushed. The SRS of
-record is **v2.7** (aligned with API v1.3.1 and ERD r3).
+record is **v2.7**; API v1.3.2 supersedes FR-20 and FR-22 until SRS v2.8 is
+approved. The ERD of record is r3.

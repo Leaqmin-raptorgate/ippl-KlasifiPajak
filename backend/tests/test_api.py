@@ -1,4 +1,4 @@
-"""HTTP checks for Bagian A against KlasifiPajak API v1.2.2.
+"""HTTP checks for Bagian A against KlasifiPajak API v1.3.2.
 
 The point of these is section 3.3: the served figure equals the engine result
 field for field, and the January digest equals the document's normative vector.
@@ -19,7 +19,7 @@ from app.main import app  # noqa: E402
 from app.schemas.snapshot import TransactionIn  # noqa: E402
 
 BAND = 500_000_000
-NORMATIVE_HASH = "v1:1d31077627dffd7d9e13276931a34e482a36f60fe1984f120f8dac28253d0090"
+NORMATIVE_HASH = "v2:7737310876e2cf5a1421f459652437b9e781b18b18b7c7b8d00eabdb7c71378d"
 
 client = TestClient(app)
 
@@ -130,6 +130,22 @@ def test_snapshot_matches_the_engine_field_for_field():
     assert body["months"][6]["porsi_kena_idr"] == expected.taxable_omzet == 700_000_000
 
 
+def test_empty_month_hash_changes_when_earlier_month_amount_changes():
+    """FR-22: Bagian A hashes carry-forward inputs even for months without usaha."""
+    request = _body()
+    request["as_of_date"] = "2026-08-31"
+    before = client.post("/snapshot", json=request)
+    assert before.status_code == 200, before.text
+    request["transactions"][0]["amount_idr"] += 1
+    after = client.post("/snapshot", json=request)
+    assert after.status_code == 200, after.text
+    before_months = {row["month"]: row for row in before.json()["months"]}
+    after_months = {row["month"]: row for row in after.json()["months"]}
+    assert before_months["2026-06"]["input_hash"] == after_months["2026-06"]["input_hash"]
+    assert before_months["2026-08"]["usaha_omzet_idr"] == 0
+    assert before_months["2026-08"]["input_hash"] != after_months["2026-08"]["input_hash"]
+
+
 def test_every_month_through_as_of_exists_and_has_its_own_hash():
     body = client.post(
         "/snapshot",
@@ -155,7 +171,7 @@ def test_every_month_through_as_of_exists_and_has_its_own_hash():
     ).json()
     months = body["months"]
     assert [month["month"] for month in months] == ["2026-01", "2026-02", "2026-03"]
-    assert all(month["input_hash"].startswith("v1:") for month in months)
+    assert all(month["input_hash"].startswith("v2:") for month in months)
     assert months[0]["input_hash"] != months[1]["input_hash"]
     assert months[2]["tax_0_5_pct_idr"] == 0
 

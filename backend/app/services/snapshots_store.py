@@ -4,12 +4,11 @@ The engine remains the only calculator. This module maps stored rows onto engine
 inputs, runs it once, and writes one *berlaku* row per month in the requested
 range.
 
-D-11 / HB-16 / API §5.22: input-changing paths call ``mark_usang`` for affected
-months; ``rebuild`` (and POST recalculate) recompute only ``usang`` months (or
-missing months in a range). A write never overwrites a berlaku row in place:
-the prior berlaku is marked ``usang`` and a new row is inserted with
-``version + 1``, unless the recomputed ``input_hash`` equals the current
-berlaku hash (no-op, no bump).
+Profile changes that affect figures call ``mark_usang`` and then rebuild.
+Transaction writes rebuild directly, retaining months whose hashes are unchanged.
+POST recalculate handles only ``usang`` months. Changed months receive a new
+version; the hash covers earlier months and the risk flag is cumulative
+(FR-20, FR-22, FR-23a).
 
 Race safety: ``rebuild`` takes ``SELECT … FOR UPDATE`` on the profile row as
 its first statement, before any snapshot / max(version) read. MySQL ``1062``
@@ -33,7 +32,7 @@ from app.api.errors import ApiError
 from app.engine import Profile as EngineProfile
 from app.engine import Ruleset, compute
 from app.engine import Transaction as EngineTransaction
-from app.engine.compute import month_input_hash
+from app.engine.compute import month_contexts
 from app.models import MonthSnapshot
 from app.models import Profile as ProfileRow
 from app.models import Transaction as TransactionRow
@@ -297,8 +296,8 @@ def rebuild(
     month_keys:
         When set, only these months are candidates (still filtered by
         ``only_usang`` when that flag is true). When ``None`` and
-        ``only_usang`` is false, rebuilds January through December of the
-        ruleset tax year for any missing/usang month in that band.
+        ``only_usang`` is false, checks January through the Jakarta as-of
+        month. Months whose current hashes match are retained (FR-22, FR-23a).
     only_usang:
         When true (POST recalculate / API §5.22), only months whose current
         status is ``usang`` are recomputed. Untouched ``berlaku`` rows stay.
@@ -347,12 +346,18 @@ def _rebuild_locked(
 
     # Load every stored row for the tax year (including future-dated); the
     # engine and category totals below only see tx_date <= as_of (§2.4/§5.11).
+    # A locking read returns the latest committed rows. A plain read would use
+    # the REPEATABLE READ view fixed before this call waited on the profile lock,
+    # and miss a row a concurrent write committed meanwhile (FR-08, FR-23a).
     rows = db.scalars(
-        select(TransactionRow).where(
+        select(TransactionRow)
+        .where(
             TransactionRow.user_id == profile.user_id,
             TransactionRow.tx_date >= date(ruleset.tax_year, 1, 1),
             TransactionRow.tx_date <= date(ruleset.tax_year, 12, 31),
         )
+        .with_for_update()
+        .execution_options(populate_existing=True)
     ).all()
 
     if as_of is None or default_end == 0:
@@ -393,8 +398,7 @@ def _rebuild_locked(
     if month_keys is None:
         candidate_keys = month_keys_through(ruleset.tax_year, 1, end_month=default_end)
     else:
-        # §5.12 "through December" is the ordered band, still capped by as_of
-        # (API §2.4): never materialise months past the current Jakarta month.
+        # Never materialize months beyond the current Jakarta cutoff.
         candidate_keys = [key for key in month_keys if key <= end_key]
 
     if only_usang:
@@ -424,6 +428,7 @@ def _rebuild_locked(
         # berlaku untouched (hash no-op).
         target_keys = candidate_keys
 
+    contexts = month_contexts(engine_rows, engine_profile, ruleset, target_keys)
     written: list[MonthSnapshot] = []
     for month_key in target_keys:
         engine_month = engine_months.get(month_key)
@@ -433,16 +438,9 @@ def _rebuild_locked(
             if row.category in categories:
                 categories[row.category] += row.amount_idr
 
-        input_hash = (
-            engine_month.input_hash
-            if engine_month
-            else month_input_hash(
-                [transaction_to_engine(row) for row in month_rows],
-                engine_profile,
-                ruleset,
-                month_key,
-            )
-        )
+        context = contexts[month_key]
+        input_hash = context.input_hash
+        month_next_year = context.next_year_at_risk
 
         current_berlaku = db.scalar(
             select(MonthSnapshot)
@@ -467,7 +465,7 @@ def _rebuild_locked(
             ruleset=ruleset,
             scheme_status=scheme_status,
             annotation=annotation,
-            next_year_ineligible=snapshot.next_year_at_risk,
+            next_year_ineligible=month_next_year,
             prior_year_resolution_source=snapshot.prior_year_resolution_source,
             input_hash=input_hash,
             engine_month=engine_month,

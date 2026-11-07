@@ -11,7 +11,7 @@ Done on `main` (M50 PRs #1–#4 merged; tip `3d5ced0`):
 
 - Tax engine at `backend/app/engine/`, pure Python, no framework, no model.
 - Ruleset as data at `backend/app/engine/ruleset/pp20_2026.json`.
-- **SRS v2.7 / API v1.3.1 / ERD r3** are the artefacts of record (SRS + ERD
+- **SRS v2.7 / API v1.3.2 / ERD r3** are the artefacts of record (SRS + ERD
   outside the repo; API mirrored under `docs/api/`).
 - Bagian A aligned to the API contract (`/health`, `/ruleset`, `POST /snapshot`).
 - Authenticated Bagian B: register/login/logout/me, password reset, sessions,
@@ -67,9 +67,10 @@ Done on `main` (M50 PRs #1–#4 merged; tip `3d5ced0`):
 
 ## Why payments is sequenced carefully
 
-Payments is a lecturer requirement (D-08), so it is in scope. API v1.3.1 §5.30
-fixes the webhook contract. D-10 allows building against placeholders first;
-live sandbox keys come before demo freeze. Never run against production keys.
+Payments is a lecturer requirement (D-08), so it is in scope. API v1.3.2 §5.30
+defines the current webhook contract, which must be rewritten for real Midtrans.
+D-10 allows building against placeholders first; live sandbox keys come before
+demo freeze. Never run against production keys.
 
 ## Sprint order and why
 
