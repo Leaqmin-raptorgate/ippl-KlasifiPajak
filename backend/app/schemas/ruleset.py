@@ -1,6 +1,6 @@
 """Response shape for the active ruleset.
 
-Field names follow KlasifiPajak API v1.2.2 section 3.2. The frontend never
+Field names follow KlasifiPajak API v1.3.2 section 3.2. The frontend never
 inlines a rate or a ceiling.
 """
 

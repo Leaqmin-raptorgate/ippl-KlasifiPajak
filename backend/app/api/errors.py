@@ -1,6 +1,6 @@
 """One error shape for every endpoint.
 
-API v1.2.2 section 2.5 pins ``{"error": {"code", "message"}}``. Messages are
+API v1.3.2 section 2.5 pins ``{"error": {"code", "message"}}``. Messages are
 Indonesian because the frontend keys its text on the code and shows the
 message as written.
 """

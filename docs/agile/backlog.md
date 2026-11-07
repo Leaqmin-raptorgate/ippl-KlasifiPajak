@@ -11,7 +11,7 @@ does not exist yet.
 Requirement provenance: the SRS of record is **v2.7**, with `FR-01` to
 `FR-47`, `FR-23a`, `FR-PAY-01` to `FR-PAY-09`, `NFR-01` to `NFR-15` (and
 related), and `UC-01` to `UC-26`. It lives outside this repository under
-`SPEC/`, beside **ERD r3** and **API v1.3.1**. The API contract is mirrored at
+`SPEC/`, beside **ERD r3** and **API v1.3.2**. The API contract is mirrored at
 `docs/api/KlasifiPajak_API_Specification.md`.
 
 Ids such as `FR-17`, `FR-23a`, `UC-20`, `NFR-12` and `NFR-13` are defined in
@@ -76,7 +76,11 @@ Done in code: `backend/tests/test_golden.py`, `backend/app/engine/compute.py`,
       -COMPOSITION-FAIL, -COMPOSITION-PASS, -SPOUSE.
 - [x] FR-21 / UC-13b: `spouse_in_band` / `spouse_in_cap` ruleset defaults.
 - [x] FR-23 / UC-13c: `sisa_bayar_idr` and `overwithheld_excess_idr`.
-- [x] FR-22 / UC-11a / NFR-02: canonical `input_hash` prefixed `v1:`.
+- [x] FR-22 / UC-11a / NFR-02: canonical `input_hash` prefixed `v2:`.
+- [x] FR-08 / FR-09 / FR-23a: editing or deleting a transaction recomputes later
+      months. A month's hash includes `carry_forward` (earlier months' combined
+      gross and usaha omzet), and each stored month carries its own cumulative
+      `next_year_ineligible` (FR-20).
 - [x] FR-03: prior-year empty vs zero (`UNSET`).
 - [x] Versioned month snapshots (D-11 / ERD r3) + dashboard `as_of` = today WIB.
 - [ ] Still open: L3-B Bagian A columns (FR-31) and live KAP/KJS values.
@@ -93,8 +97,8 @@ These are **required for graded v1** (D-08) and must not be marked done:
 ## Payments — Midtrans Snap (not started)
 
 Held until D-10 placeholders are wired into an adapter. Contract is API
-**v1.3.1** §5.30 (HMAC over `order_id`, status, `amount_str`; monotonic status;
-30-day renewal). Never use production keys.
+**v1.3.2** §5.30 (HMAC over `order_id`, status, `amount_str`; monotonic status;
+30-day renewal) (to be rewritten for real Midtrans). Never use production keys.
 
 - [ ] `GatewayAdapter` plus `FakeGatewayAdapter`
 - [ ] Signature verification with `hmac.compare_digest`

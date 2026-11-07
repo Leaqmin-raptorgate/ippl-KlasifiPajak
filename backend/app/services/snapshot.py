@@ -7,7 +7,7 @@ storage release; the Bagian A functions run no SQL.
 from datetime import date
 
 from app.engine import Profile, Ruleset, Snapshot, Transaction, compute
-from app.engine.compute import month_input_hash
+from app.engine.compute import month_contexts
 from app.engine.ruleset import load_ruleset
 from app.schemas.snapshot import MonthOut, ProfileIn, SnapshotIn, SnapshotOut, TransactionIn
 
@@ -20,7 +20,7 @@ __all__ = [
     "to_wire",
 ]
 
-#: Exact workpaper disclaimer from API v1.2.2 section 3.3.
+#: Exact workpaper disclaimer from API v1.3.2 section 3.3.
 DISCLAIMER = "DOKUMEN KERJA (WORKPAPER) — BUKAN SPT RESMI DAN BUKAN PRODUK DJP/CORETAX."
 
 
@@ -110,8 +110,14 @@ def to_wire(
     profile: Profile,
     ruleset: Ruleset,
 ) -> SnapshotOut:
-    """Render every month from January through the as-of month."""
+    """Render every month from January through the as-of month.
+
+    A month with no usaha rows still gets a real digest, computed from every
+    request row because a month's hash covers the months before it (FR-22).
+    The top-level ``next_year_ineligible`` keeps its whole-period meaning.
+    """
     status = _eligibility_status(snapshot)
+    all_transactions = engine_transactions(request.transactions)
     as_of_month = request.as_of_date.strftime("%Y-%m")
     existing = {month.month: month for month in snapshot.months}
 
@@ -129,26 +135,22 @@ def to_wire(
         if row.category in bucket:
             bucket[row.category] += row.amount_idr
 
+    month_keys = _month_range(request.tax_year, as_of_month)
+    empty_contexts = month_contexts(
+        all_transactions,
+        profile,
+        ruleset,
+        [month for month in month_keys if month not in existing],
+    )
     months: list[MonthOut] = []
-    for month in _month_range(request.tax_year, as_of_month):
+    for month in month_keys:
         engine_month = existing.get(month)
         bucket = by_month.get(month, {})
         months.append(
             MonthOut(
                 month=month,
                 input_hash=(
-                    engine_month.input_hash
-                    if engine_month
-                    else month_input_hash(
-                        [
-                            tx
-                            for tx in engine_transactions(request.transactions)
-                            if tx.date[:7] == month
-                        ],
-                        profile,
-                        ruleset,
-                        month,
-                    )
+                    engine_month.input_hash if engine_month else empty_contexts[month].input_hash
                 ),
                 scheme_eligibility_status=status,
                 usaha_omzet_idr=engine_month.usaha_omzet if engine_month else 0,

@@ -1,8 +1,8 @@
 # KlasifiPajak API Specification
 
-**Version:** 1.3.1
+**Version:** 1.3.2
 **Status:** Normative contract
-**Aligned with:** KlasifiPajak SRS v2.7 and SDD v1.1 (2 November 2026)
+**Aligned with:** KlasifiPajak SRS v2.7 and SDD v1.1 (2 November 2026), except FR-20 and FR-22, which this version supersedes until SRS v2.8.
 **Author:** 11241050 - Muhammad Aditya Putra
 
 SRS §2.7.f points here. Endpoint paths, JSON fields, error codes, and session rules in this file are the contract. The SRS states product behavior and does not lock a framework name.
@@ -14,6 +14,7 @@ SRS §2.7.f points here. Endpoint paths, JSON fields, error codes, and session r
 | 1.2.2   | 2026-10-18 | Baseline aligned with SRS v2.6.                                                                                                                                                                                                                                                                                                                    |
 | 1.3.0   | 2026-10-28 | D-01: local receipt storage + `GET /transactions/receipt-images/{image_id}`; D-02: quota column names, reclassify quota note, profile field map; D-04: Google OIDC endpoints designed and deferred; D-05: prompt envelope §2.8, test-support fail-closed, argon2id, webhook edge cases, email validation, rate limits, session `created_at` alias. |
 | 1.3.1   | 2026-11-02 | D-11 + wire alignment: §5.16 example adds `provisional_category`; §5.17 optional `version` → `409` `VERSION_CONFLICT`; §5.20 lists `provisional_omzet_idr` / `provisional_usaha_omzet_idr`; §5.14 note that OCR extraction may use the same OpenAI-compatible `AI_BASE_URL` gateway (provider-agnostic).                                           |
+| 1.3.2   | 2026-11-07 | Month `input_hash` becomes `v2:`: a month hashes its own rows plus `carry_forward` (§4). `next_year_ineligible` on a stored month is cumulative through that month (§2.3, §5.21). Transaction writes check every month from January through the Jakarta `as_of` month; only months whose hash changes receive a new version (§5.12).               |
 
 ---
 
@@ -82,6 +83,7 @@ Cap comparison is strict. Combined gross `>` `4_800_000_000` fails. Equality sta
 
 - `prior_combined > 4_800_000_000` sets `scheme_eligibility_status` to `scheme_ineligible` for the whole current year. Every month has `tax_0_5_pct_idr` `0` and annotation `Fasilitas PPh Final 0,5% tidak berlaku (peredaran bruto tahun lalu melebihi Rp 4,8 miliar).`
 - `current_combined > 4_800_000_000` sets only `next_year_ineligible` to `true`. The current-year 0,5% rate stays.
+- On a stored month, `next_year_ineligible` is cumulative: it compares the combined gross through the end of that month (plus the spouse current-year figure when it joins the cap) with the cap. January can be `false` while a later month is `true`. A Bagian A response keeps one whole-period top-level `next_year_ineligible`, and the dashboard shows the value of the latest month, so both reflect the latest period.
 
 `prior_year_resolution_source` is one of `manual_profile`, `first_year_taxpayer`, `unverifiable`. This release accepts only tax year 2026, so no 2025 snapshot exists and a prior-year snapshot is not a source.
 
@@ -291,7 +293,7 @@ Request:
   "months": [
     {
       "month": "2026-01",
-      "input_hash": "v1:1d31077627dffd7d9e13276931a34e482a36f60fe1984f120f8dac28253d0090",
+      "input_hash": "v2:7737310876e2cf5a1421f459652437b9e781b18b18b7c7b8d00eabdb7c71378d",
       "scheme_eligibility_status": "scheme_eligible",
       "usaha_omzet_idr": 1200000000,
       "porsi_bebas_idr": 500000000,
@@ -318,12 +320,13 @@ Request:
 
 ---
 
-## 4. Canonical `input_hash` (`v1:`)
+## 4. Canonical `input_hash` (`v2:`)
 
-Each month hashes its own inputs. Serialize one JSON object with recursively sorted keys, UTF-8, no whitespace, integers as integers, booleans as `true`/`false`, and dates as `YYYY-MM-DD`. Do not include `computed_at` or `rate_str`.
+Each month hashes its own rows plus `carry_forward`. Free-band use and combined gross build up month by month, so a month's figures depend on the months before it. An edit to an earlier month therefore changes the hash of every later month whose totals it moves, and an unchanged hash means unchanged figures. Serialize one JSON object with recursively sorted keys, UTF-8, no whitespace, integers as integers, booleans as `true`/`false`, and dates as `YYYY-MM-DD`. Do not include `computed_at` or `rate_str`.
 
 Object keys:
 
+- `carry_forward`: `combined_gross_before_month_idr` and `usaha_omzet_before_month_idr`. Both sum the `amount_idr` of rows dated in months before `month`. The first counts `usaha`, `pekerjaan_bebas` and `already_final`; the second counts `usaha` only. `non_object` rows count in neither. Both are `0` when `month` is `null` or has no earlier rows.
 - `month`
 - `profile_context`: `is_new_taxpayer_current_year`, `prior_year_gross_spouse`, `prior_year_gross_user`, `prior_year_resolution_source`, `spouse_aggregation_active`, `spouse_current_year_already_final_omzet_idr`, `spouse_current_year_pekerjaan_bebas_omzet_idr`, `spouse_current_year_usaha_omzet_idr`
 - Each prior-year object has sorted keys `already_final_idr`, `pekerjaan_bebas_idr`, `usaha_idr`
@@ -331,15 +334,15 @@ Object keys:
 - `tax_year`
 - `transactions` sorted by `(tx_date, id)`, each with sorted keys `amount_idr`, `category`, `id`, `tx_date`, `withheld_tax_amount_idr`
 
-SHA-256 those bytes. The field value is `v1:` plus 64 lowercase hex characters.
+SHA-256 those bytes. The field value is `v2:` plus 64 lowercase hex characters.
 
 Normative input for January 2026 of the section 3.3 example:
 
 ```
-{"month":"2026-01","profile_context":{"is_new_taxpayer_current_year":false,"prior_year_gross_spouse":{"already_final_idr":0,"pekerjaan_bebas_idr":0,"usaha_idr":750000000},"prior_year_gross_user":{"already_final_idr":0,"pekerjaan_bebas_idr":0,"usaha_idr":1200000000},"prior_year_resolution_source":"manual_profile","spouse_aggregation_active":true,"spouse_current_year_already_final_omzet_idr":0,"spouse_current_year_pekerjaan_bebas_omzet_idr":0,"spouse_current_year_usaha_omzet_idr":400000000},"ruleset":{"effective_date":"2026-09-26","free_band_idr":500000000,"gross_cap_idr":4800000000,"rate_denominator":200,"rate_numerator":1,"rounding_rule":"floor","ruleset_id":"pp20-2026-academic-1","spouse_in_band":false,"spouse_in_cap":true},"tax_year":2026,"transactions":[{"amount_idr":1200000000,"category":"usaha","id":"tx-001","tx_date":"2026-01-15","withheld_tax_amount_idr":0}]}
+{"carry_forward":{"combined_gross_before_month_idr":0,"usaha_omzet_before_month_idr":0},"month":"2026-01","profile_context":{"is_new_taxpayer_current_year":false,"prior_year_gross_spouse":{"already_final_idr":0,"pekerjaan_bebas_idr":0,"usaha_idr":750000000},"prior_year_gross_user":{"already_final_idr":0,"pekerjaan_bebas_idr":0,"usaha_idr":1200000000},"prior_year_resolution_source":"manual_profile","spouse_aggregation_active":true,"spouse_current_year_already_final_omzet_idr":0,"spouse_current_year_pekerjaan_bebas_omzet_idr":0,"spouse_current_year_usaha_omzet_idr":400000000},"ruleset":{"effective_date":"2026-09-26","free_band_idr":500000000,"gross_cap_idr":4800000000,"rate_denominator":200,"rate_numerator":1,"rounding_rule":"floor","ruleset_id":"pp20-2026-academic-1","spouse_in_band":false,"spouse_in_cap":true},"tax_year":2026,"transactions":[{"amount_idr":1200000000,"category":"usaha","id":"tx-001","tx_date":"2026-01-15","withheld_tax_amount_idr":0}]}
 ```
 
-Normative digest: `v1:1d31077627dffd7d9e13276931a34e482a36f60fe1984f120f8dac28253d0090`
+Normative digest: `v2:7737310876e2cf5a1421f459652437b9e781b18b18b7c7b8d00eabdb7c71378d`
 
 ---
 
@@ -583,6 +586,8 @@ The call is atomic. One unknown id fails the whole request with no writes. Each 
 
 `404` `TRANSACTION_NOT_FOUND`: "Satu atau lebih transaksi tidak ditemukan pada akun Anda."
 
+After reclassification, every month from January through the Jakarta `as_of` month is checked under the same rule as §5.12.
+
 ### 5.10 `GET /transactions`
 
 Query: `page` (default 1), `per_page` (default 20, max 100), `tax_year`, `month` (`YYYY-MM`), `client_name` (partial), `invoice_no` (exact on the normalized value).
@@ -605,7 +610,7 @@ Query: `page` (default 1), `per_page` (default 20, max 100), `tax_year`, `month`
 
 Requires a profile for that tax year with `nib_status` set. Runs normalization, the duplicate key, and classification. Spending the AI quota still returns `201` and sets the classification path to clarification.
 
-`201` includes `id`, the stored fields, and `classification` (`category`, `source`, `confidence`, `rule_id`, `requires_clarification`). A `tx_date` through 31 December 2026 is accepted even when it is after today in Jakarta. It stays out of snapshots until that date is today or earlier.
+`201` includes `id`, the stored fields, and `classification` (`category`, `source`, `confidence`, `rule_id`, `requires_clarification`). A `tx_date` through 31 December 2026 is accepted even when it is after today in Jakarta. It stays out of snapshots until that date is today or earlier. After the write, every month from January through the Jakarta `as_of` month is checked under the same rule as §5.12.
 
 - `409` `DUPLICATE_INVOICE_TRANSACTION`: "Nomor faktur ini sudah tercatat untuk klien, nominal, dan tanggal yang sama."
 - `422` `NIB_STATUS_NOT_CONFIGURED`: "Status NIB untuk tahun pajak berjalan harus diisi sebelum mencatat transaksi pertama."
@@ -614,7 +619,7 @@ Requires a profile for that tax year with `nib_status` set. Runs normalization, 
 
 ### 5.12 `PUT /transactions/{id}`
 
-Same body shape as create, plus `version`. Recalculation starts at the earlier of the old `tx_date` month and the new `tx_date` month, and continues through December, inside the user-row lock. Moving a row from October to March therefore rebuilds March through December, because the free band is consumed in order. The update matches `version` and then increments it.
+Same body shape as create, plus `version`. Inside the user-row lock, the write checks every month from January through the Jakarta `as_of` month. A month whose input hash is unchanged is left alone and receives no new version; a month whose hash changed is rebuilt. This also repairs an earlier month when a future-dated row becomes current. The update matches `version` and then increments it.
 
 `409` `VERSION_CONFLICT`: "Data ini sudah diubah di perangkat lain. Muat ulang, lalu simpan lagi."
 
@@ -631,7 +636,7 @@ Same body shape as create, plus `version`. Recalculation starts at the earlier o
 { "deleted": true, "id": "tx_01J9X3A9B2" }
 ```
 
-`404` `TRANSACTION_NOT_FOUND` when the id is missing or belongs to another account. Related classification rows are deleted and snapshots from that month are recalculated. If the transaction has an `image_id`, the linked `receipt_images` row and its filesystem bytes are deleted as well.
+`404` `TRANSACTION_NOT_FOUND` when the id is missing or belongs to another account. Related classification rows are deleted and every month from January through the Jakarta `as_of` month is checked under the same rule as §5.12. If the transaction has an `image_id`, the linked `receipt_images` row and its filesystem bytes are deleted as well.
 
 ### 5.14 `POST /transactions/ocr-upload`
 
@@ -705,7 +710,7 @@ Paid gate. Body contains `image_id` and the confirmed fields (`confirmed_amount_
 
 `category` is required. `version` is optional: when sent, it must match the current row `version`; a mismatch is `409` rather than a silent overwrite. Omitting `version` skips that check (clients that already hold a fresh row may still send it).
 
-`200` returns `id`, `category`, `source` `user_clarification`, `version`, and `updated_at`, then recalculates snapshots. The write increments `version`.
+`200` returns `id`, `category`, `source` `user_clarification`, `version`, and `updated_at`, then checks every month from January through the Jakarta `as_of` month under the same rule as §5.12. The write increments `version`.
 
 `409` `VERSION_CONFLICT`: "Baris sudah berubah di tempat lain. Muat ulang sebelum menjawab."
 
@@ -720,7 +725,7 @@ Paid gate. Body contains `image_id` and the confirmed fields (`confirmed_amount_
 }
 ```
 
-`note` is optional. No model call. `source` is `user_override`. `200` returns the updated category, source, and `version`. The write increments `version`. `404` if the id is not owned.
+`note` is optional. No model call. `source` is `user_override`. `200` returns the updated category, source, and `version`. The write increments `version`, then checks every month from January through the Jakarta `as_of` month under the same rule as §5.12. `404` if the id is not owned.
 
 ### 5.19 `GET /transactions/{id}/audit-trail`
 
@@ -747,7 +752,7 @@ The `input_hash` in any dashboard example other than section 4 is not a test vec
 
 ### 5.21 `GET /tax/snapshots/{tax_year}/{month}`
 
-`200` returns one month: `status` `berlaku` or `usang`, `ruleset_id`, `effective_date`, `rounding_rule`, `scheme_eligibility_status`, `input_hash`, the money fields, `pekerjaan_bebas_omzet_idr`, `already_final_omzet_idr`, `non_object_omzet_idr`, and `overwithheld_status`.
+`200` returns one month: `status` `berlaku` or `usang`, `ruleset_id`, `effective_date`, `rounding_rule`, `scheme_eligibility_status`, `input_hash`, the money fields, `pekerjaan_bebas_omzet_idr`, `already_final_omzet_idr`, `non_object_omzet_idr`, `overwithheld_status`, and `next_year_ineligible`. The flag is cumulative through that month (section 2.3).
 
 `404` `SNAPSHOT_NOT_FOUND`: "Cuplikan bulan yang diminta tidak ada."
 

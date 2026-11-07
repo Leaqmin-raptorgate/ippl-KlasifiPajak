@@ -1,6 +1,6 @@
 """Request and response shapes for a tax snapshot.
 
-Field names follow KlasifiPajak API v1.2.2 sections 3.3 and 2.4. Money is a
+Field names follow KlasifiPajak API v1.3.2 sections 3.3 and 2.4. Money is a
 strict integer rupiah; a date is a Jakarta calendar date, never a timestamp.
 """
 

@@ -4,7 +4,7 @@ Decisions that are **not** ours to make stay in the OD-* table below. Approved
 product decisions D-01…D-11 are recorded here for agents working in this repo;
 the Lead's full ADR log lives outside the repository.
 
-Spec of record: **SRS v2.7**, **API v1.3.1** (mirrored under `docs/api/`),
+Spec of record: **SRS v2.7**, **API v1.3.2** (mirrored under `docs/api/`),
 **ERD r3**.
 
 ## Approved decisions (D-01…D-11)
@@ -35,8 +35,8 @@ Spelling is **WORKPAPER** (work + paper), not WORKOBER.
 
 | #    | Question                                                             | State                                                                                                             |
 | ---- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| OD-1 | `effective_date` or `as_of_date`?                                    | **Closed.** Both exist: `effective_date` = ruleset stamp; `as_of_date` = calculation cutoff. API v1.3.1 / engine. |
-| OD-2 | Is the SRS a committed artefact?                                     | **Closed.** SRS **v2.7** is the SoT outside this repo; API mirror is v1.3.1; ERD is **r3**.                       |
+| OD-1 | `effective_date` or `as_of_date`?                                    | **Closed.** Both exist: `effective_date` = ruleset stamp; `as_of_date` = calculation cutoff. API v1.3.2 / engine. |
+| OD-2 | Is the SRS a committed artefact?                                     | **Closed.** SRS **v2.7** is the SoT outside this repo; API mirror is v1.3.2; ERD is **r3**.                       |
 | OD-3 | KAP/KJS live value. `pp20_2026.json` carries `ACADEMIC-PLACEHOLDER`. | **Open.** Printed text only in v1; no Coretax API call.                                                           |
 | OD-4 | Prior-year fields: empty vs `0`?                                     | **Closed in code.** FR-03 / `UNSET` sentinel in `types.py`.                                                       |
 
@@ -51,7 +51,7 @@ Spelling is **WORKPAPER** (work + paper), not WORKOBER.
 | OD-9  | Free trial period.                                          | **Closed.** No trial; free tier is permanent and quota-limited.                                                                                                                                                        |
 | OD-10 | Typed decision model behind the classifier interface.       | **Open.**                                                                                                                                                                                                              |
 | OD-11 | Test coverage target.                                       | **Partially closed.** NFR-14: branch coverage ≥ 80% on `backend/app/engine` only.                                                                                                                                      |
-| OD-12 | API contract location.                                      | **Closed.** Normative contract mirrored at `docs/api/KlasifiPajak_API_Specification.md` (**v1.3.1**).                                                                                                                  |
+| OD-12 | API contract location.                                      | **Closed.** Normative contract mirrored at `docs/api/KlasifiPajak_API_Specification.md` (**v1.3.2**).                                                                                                                  |
 
 ## How to use this file
 
