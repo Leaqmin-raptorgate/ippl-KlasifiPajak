@@ -1,7 +1,7 @@
 {
   "name": "klasifipajak",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.5.0",
   "type": "module",
   "description": "Dev tooling for KlasifiPajak: commitlint, Husky hooks, Prettier, and the npm script surface.",
   "scripts": {

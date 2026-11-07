@@ -27,7 +27,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title=settings.app_name,
-    version="0.2.0",
+    version="0.5.0",
     description=(
         "Deterministic Final PPh engine over classified transactions. "
         "A workpaper computation, not a filed return."

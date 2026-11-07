@@ -12,6 +12,7 @@ know before opening a pull request.
 - [Code Style & Quality Gates](#code-style--quality-gates)
 - [Architecture Notes](#architecture-notes)
 - [Keeping Docs in Sync](#keeping-docs-in-sync)
+- [Releases and Versioning](#releases-and-versioning)
 - [Pull Requests](#pull-requests)
 - [Reporting Bugs & Requesting Features](#reporting-bugs--requesting-features)
 
@@ -127,6 +128,36 @@ All documentation (`README.md`, `AGENTS.md`, `docs/agile/*`, and any future
 docs) MUST be kept up to date as the code changes. If your change affects a
 documented command, architecture, or behavior, update the relevant doc in the
 **same** change.
+
+## Releases and Versioning
+
+The app version follows [Semantic Versioning](https://semver.org/). It is
+separate from the SRS, API and ERD versions, which are stated in each
+`CHANGELOG.md` entry.
+
+While the project is below 1.0.0:
+
+- **Minor** (`0.5.0` to `0.6.0`): a new feature, or a change to the API
+  contract or stored data that is not backward compatible.
+- **Patch** (`0.5.0` to `0.5.1`): a fix with no contract change.
+- **1.0.0** is the final demo build.
+
+Every PR that changes behavior adds a line under `## [Unreleased]` in
+[CHANGELOG.md](CHANGELOG.md), grouped as Added, Changed, Fixed, Removed,
+Security or Documentation. Commit types map to sections: `feat` to Added,
+`fix` to Fixed, a breaking change to Changed marked **Breaking**. `test`, `ci`,
+`style` and `chore` are listed only when they matter to a user of the repo.
+
+To release:
+
+1. Rename `[Unreleased]` to the new version with its date, and add an empty
+   `[Unreleased]` above it. Add the contract versions it was built against.
+2. Set the same version in `package.json`, `frontend/package.json`,
+   `pyproject.toml` and `backend/app/main.py`. The lockfiles follow
+   (`npm version <x.y.z> --no-git-tag-version`, also with `--prefix frontend`).
+   A backend test fails if `pyproject.toml` and `main.py` differ.
+3. Merge to `main`, then tag the merge commit: `git tag -a vX.Y.Z -m "vX.Y.Z"`
+   and `git push origin vX.Y.Z`.
 
 ## Pull Requests
 

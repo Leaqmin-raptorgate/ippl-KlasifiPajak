@@ -1,7 +1,7 @@
 {
   "name": "klasifipajak-frontend",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.5.0",
   "type": "module",
   "description": "KlasifiPajak demo frontend. Vue 3 + Vite + TypeScript, no UI framework.",
   "scripts": {
