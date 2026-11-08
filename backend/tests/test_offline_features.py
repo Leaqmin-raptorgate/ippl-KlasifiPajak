@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import logging
 from datetime import timedelta
 from fractions import Fraction
@@ -376,6 +377,61 @@ def test_tc_assistant_consent_and_success_quota_are_fail_closed(client, monkeypa
     assert failed.status_code == 200, failed.text
     assert _quota_chat_used(user_id) == initial
     assert len(fake.calls) == 2
+
+
+def test_tc_assistant_payload_masks_private_name_email_and_phone(client, monkeypatch):
+    """FR-27, FR-43: outbound assistant text drops private names, emails, and phones."""
+    from app.classify.model_client import FakeModelClient
+    from app.services import assistant
+
+    raw_client = "Sari Wulandari"
+    raw_profile = "Budi Santoso"
+    email = "user@example.test"
+    phone = "081234567890"
+    answer = "Ringkasan data tersimpan tanpa angka."
+    _register_login(client, email="assistant-redact@example.test", username="assistantredact")
+    profile = client.put(
+        f"{API}/profiles/2026",
+        json={
+            "version": 1,
+            "name": raw_profile,
+            "entity_type": "orang_pribadi",
+            "nib_status": "no_nib",
+            "nib_last_4": None,
+            "kbli_code": "47111",
+            "business_description": "Penjualan barang",
+            "marital_status": "no",
+            "spouse_tax_status": "unmarried",
+            "spouse_aggregation_active": False,
+            "is_new_taxpayer_current_year": True,
+            "prior_user_usaha_idr": 0,
+            "prior_user_pekerjaan_bebas_idr": 0,
+            "prior_user_already_final_idr": 0,
+        },
+    )
+    assert profile.status_code == 200, profile.text
+    created = _transaction(
+        client,
+        client_name=raw_client,
+        description=f"Penjualan ke {email} telepon {phone}",
+        invoice_no=phone,
+    )
+    assert created["client_name"] == raw_client
+    _set_ai_consent(client)
+    fake = FakeModelClient([answer])
+    monkeypatch.setattr(assistant, "get_model_client", lambda: fake)
+
+    response = client.post(f"{API}/assistant/query", json={"question": "Ringkas data saya"})
+    assert response.status_code == 200, response.text
+    assert response.json()["answer"] == answer
+    assert len(fake.calls) == 1
+    rendered = json.dumps(fake.calls, ensure_ascii=False)
+    assert raw_client not in rendered
+    assert raw_profile not in rendered
+    assert email not in rendered
+    assert phone not in rendered
+    assert "[KLIEN]" in rendered
+    assert "[REDACTED]" in rendered
 
 
 def test_tc_assistant_quota_exhaustion_skips_model_call(client, monkeypatch):

@@ -96,12 +96,21 @@ def validate_classification(
 
 # Mask long digit sequences even when separators are used, before building any prompt.
 _LONG_NUMBER = re.compile(r"(?<!\d)(?:\d[\s.\-]?){12,}\d(?!\d)")
+_EMAIL = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
+# 0812 and +62 812 forms are shorter than the 13-digit run above.
+_ID_MOBILE = re.compile(r"(?<!\d)(?:\+?62[\s.\-]?|0)8(?:[\s.\-]?\d){8,11}(?!\d)")
 _BUSINESS_NAME = re.compile(r"^\s*(?:PT|CV|UD|Toko|Koperasi)\b", re.IGNORECASE)
+
+
+def _redact_text(text: str) -> str:
+    text = _EMAIL.sub("[REDACTED]", text)
+    text = _LONG_NUMBER.sub("[REDACTED]", text)
+    return _ID_MOBILE.sub("[REDACTED]", text)
 
 
 def _redact(value: Any) -> Any:
     if isinstance(value, str):
-        return _LONG_NUMBER.sub("[REDACTED]", value)
+        return _redact_text(value)
     if isinstance(value, dict):
         return {
             str(key): _redact(item)
@@ -111,6 +120,13 @@ def _redact(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [_redact(item) for item in value]
     return value
+
+
+def mask_party_name(value: str) -> str:
+    """Keep a business-style name after redaction; replace any other name (FR-43)."""
+    if isinstance(value, str) and _BUSINESS_NAME.match(value):
+        return _redact_text(value)
+    return "[KLIEN]"
 
 
 def build_classification_messages(
@@ -124,7 +140,7 @@ def build_classification_messages(
     context: dict[str, Any] | None = None,
 ) -> list[dict[str, str]]:
     """Build a fixed system instruction and JSON-encoded, privacy-filtered data (FR-43)."""
-    safe_client = _redact(client_name) if _BUSINESS_NAME.match(client_name) else "[KLIEN]"
+    safe_client = mask_party_name(client_name)
     fields = {
         "DATA_CLIENT_NAME": safe_client,
         "DATA_DESCRIPTION": _redact(description),
