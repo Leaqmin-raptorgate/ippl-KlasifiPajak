@@ -1,5 +1,9 @@
 """Keep an unanswered new-taxpayer flag null, and one receipt per transaction.
 
+Rows stored before this revision stay 0, an explicit false. They do not
+become unanswered, so they never receive new_taxpayer_unknown guidance.
+Downgrade writes a NULL answer back to 0 before the column is NOT NULL again.
+
 Revision ID: d8f0a1c64e27
 Revises: c45af872b930
 """
