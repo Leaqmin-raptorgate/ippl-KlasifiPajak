@@ -31,7 +31,11 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from app.classify.rules import RULES, classify
+backend_dir = Path(__file__).resolve().parent.parent
+if str(backend_dir) not in sys.path:
+    sys.path.insert(0, str(backend_dir))
+
+from app.classify.rules import RULES, classify  # noqa: E402
 
 CATEGORIES = ("usaha", "pekerjaan_bebas", "already_final", "non_object")
 CLARIFY = "clarify"
