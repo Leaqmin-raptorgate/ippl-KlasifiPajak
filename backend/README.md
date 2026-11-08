@@ -87,3 +87,23 @@ tax rates and bands do not.
 Workpaper disclaimer (D-07), exact string:
 
 `DOKUMEN KERJA (WORKPAPER) — BUKAN SPT RESMI DAN BUKAN PRODUK DJP/CORETAX.`
+
+## Classifier evaluation
+
+The offline scorer is `backend/scripts/evaluate_classifier.py`. It scores the rule table in `app.classify.rules` only. It does not call a model.
+
+From `Project/`:
+
+```bash
+PYTHONPATH=backend .venv/bin/python backend/scripts/evaluate_classifier.py REVIEW.xlsx --split dev
+PYTHONPATH=backend .venv/bin/python backend/scripts/evaluate_classifier.py HELD.xlsx --split heldout
+```
+
+The workbook `Review` sheet has a header row that starts with `id`. Row meaning:
+
+- `approved` or `corrected`, with `final_label` and a reviewer: labelled, and scored.
+- `needs_clarification` with a reviewer: the classifier should ask (FR-14), not pick a category.
+- `exclude` with a reviewer and a `review_note`: listed, not scored.
+- No reviewer: unreviewed. Scoring refuses unless `--allow-partial`.
+
+Measured on 2026-11-08 for the rules-only tier: dev accuracy 0.93 and coverage 0.94; held-out accuracy 0.47, coverage 0.55, and accuracy on decided rows 0.85. The labels were drafted by the same author who tuned the rules, and the developer has not checked them. The held-out figure is indicative. Further tuning needs a new held-out set (v2). Do not tune these rules against `heldout_v1`.
