@@ -252,6 +252,7 @@ def create_transaction(
 
     client_norm = normalize_text(payload.client_name)
     invoice_norm = normalize_text(payload.invoice_no) if payload.invoice_no else None
+    invoice_norm = invoice_norm or None
     if invoice_norm:
         duplicate = db.scalar(
             select(TransactionRow.id).where(
@@ -281,7 +282,7 @@ def create_transaction(
         client_name=payload.client_name.strip(),
         client_name_norm=client_norm,
         description=payload.description.strip(),
-        invoice_no=payload.invoice_no or None,
+        invoice_no=payload.invoice_no if invoice_norm else None,
         invoice_no_norm=invoice_norm,
         source_channel=payload.source_channel,
         category=category,
@@ -297,7 +298,11 @@ def create_transaction(
     before = _usaha_total(
         db, user.id, tax_year=ruleset.tax_year, as_of=today_jakarta(), exclude_id=row.id
     )
-    after = before + payload.amount_idr if category == "usaha" else before
+    after = (
+        before + payload.amount_idr
+        if category == "usaha" and not requires_clarification and row.tx_date <= today_jakarta()
+        else before
+    )
     db.add(
         ClassificationEvent(
             id=new_id("evt_"),
@@ -416,13 +421,18 @@ def answer_clarification(
         row.version += 1
 
     old_category = row.category
+    old_requires_clarification = row.requires_clarification
     before = _usaha_total(db, user.id, tax_year=ruleset.tax_year, as_of=today_jakarta())
     row.category = payload.category
     row.source = "user_clarification"
     row.requires_clarification = False
     row.confidence = 1.0
     after = before
-    if old_category == "usaha" and row.tx_date <= today_jakarta():
+    if (
+        old_category == "usaha"
+        and not old_requires_clarification
+        and row.tx_date <= today_jakarta()
+    ):
         after -= row.amount_idr
     if payload.category == "usaha" and row.tx_date <= today_jakarta():
         after += row.amount_idr
@@ -482,6 +492,7 @@ def update_transaction(
 
     client_norm = normalize_text(payload.client_name)
     invoice_norm = normalize_text(payload.invoice_no) if payload.invoice_no else None
+    invoice_norm = invoice_norm or None
     if invoice_norm:
         duplicate = db.scalar(
             select(TransactionRow.id).where(
@@ -508,7 +519,7 @@ def update_transaction(
     row.client_name = payload.client_name.strip()
     row.client_name_norm = client_norm
     row.description = payload.description.strip()
-    row.invoice_no = payload.invoice_no or None
+    row.invoice_no = payload.invoice_no if invoice_norm else None
     row.invoice_no_norm = invoice_norm
     row.source_channel = payload.source_channel
     row.version = payload.version + 1
@@ -559,6 +570,7 @@ def override_category(
     row = get_transaction_for_update(db, user, transaction_id)
 
     old_category = row.category
+    old_requires_clarification = row.requires_clarification
     before = _usaha_total(db, user.id, tax_year=ruleset.tax_year, as_of=today_jakarta())
     row.category = payload.new_category
     row.source = "user_override"
@@ -566,7 +578,11 @@ def override_category(
     row.confidence = 1.0
     row.version += 1
     after = before
-    if old_category == "usaha" and row.tx_date <= today_jakarta():
+    if (
+        old_category == "usaha"
+        and not old_requires_clarification
+        and row.tx_date <= today_jakarta()
+    ):
         after -= row.amount_idr
     if payload.new_category == "usaha" and row.tx_date <= today_jakarta():
         after += row.amount_idr
@@ -633,6 +649,7 @@ def reclassify_transactions(
     results = []
     for row in rows:
         old_category = row.category
+        old_requires_clarification = row.requires_clarification
         category, rule_id, confidence, requires_clarification, citation = classify(
             f"{row.description} {row.client_name}"
         )
@@ -645,9 +662,9 @@ def reclassify_transactions(
         row.requires_clarification = requires_clarification
         row.version += 1
         after = before
-        if old_was == "usaha" and row.tx_date <= today_jakarta():
+        if old_was == "usaha" and not old_requires_clarification and row.tx_date <= today_jakarta():
             after -= row.amount_idr
-        if category == "usaha" and row.tx_date <= today_jakarta():
+        if category == "usaha" and not requires_clarification and row.tx_date <= today_jakarta():
             after += row.amount_idr
         db.add(
             ClassificationEvent(
@@ -839,6 +856,7 @@ def _usaha_total(
     conditions = [
         TransactionRow.user_id == user_id,
         TransactionRow.category == "usaha",
+        TransactionRow.requires_clarification.is_(False),
         TransactionRow.tx_date >= date(tax_year, 1, 1),
         TransactionRow.tx_date <= as_of,
     ]
