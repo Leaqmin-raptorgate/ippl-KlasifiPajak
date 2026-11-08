@@ -3,9 +3,12 @@
 from datetime import date
 
 import pytest
+from sqlalchemy import select
 from test_tax_crud_trace_quota import _auth, _profile, _tx
 
 from app.classify.rules import RULES, classify
+from app.db import SessionLocal
+from app.models import MonthSnapshot, Profile
 from app.services.snapshots_store import freeze_today_jakarta
 
 
@@ -199,6 +202,38 @@ def test_reclassify_reads_rule_threshold_once(client, monkeypatch):
     assert response.status_code == 200, response.text
     assert response.json()["reclassified_count"] == 2
     assert calls["n"] == 1
+
+
+def _stored_snapshot_state(user_id: str):
+    db = SessionLocal()
+    try:
+        profile = db.scalar(select(Profile).where(Profile.user_id == user_id))
+        rows = db.scalars(
+            select(MonthSnapshot)
+            .where(MonthSnapshot.profile_id == profile.id)
+            .order_by(MonthSnapshot.month_key, MonthSnapshot.version)
+        ).all()
+        stored = tuple((row.id, row.month_key, row.version, row.status) for row in rows)
+        return profile.snapshot_checked_through, stored
+    finally:
+        db.close()
+
+
+def test_fr49_guidance_does_not_persist_snapshot_refresh(client):
+    """FR-49: GET /guidance must not advance snapshot_checked_through or write snapshots."""
+    with freeze_today_jakarta(date(2026, 11, 2)):
+        _auth(client)
+        assert _profile(client).status_code == 200
+        user_id = client.get("/api/v1/auth/me").json()["user_id"]
+    before_through, before_rows = _stored_snapshot_state(user_id)
+    assert before_through == date(2026, 11, 2)
+    assert before_rows
+    with freeze_today_jakarta(date(2026, 11, 3)):
+        response = client.get("/api/v1/guidance")
+        assert response.status_code == 200, response.text
+    after_through, after_rows = _stored_snapshot_state(user_id)
+    assert after_through == before_through
+    assert after_rows == before_rows
 
 
 @pytest.mark.parametrize(("amount", "warning"), [(3_839_999_999, False), (3_840_000_000, True)])

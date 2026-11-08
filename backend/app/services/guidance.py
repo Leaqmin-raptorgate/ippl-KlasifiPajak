@@ -25,14 +25,17 @@ def _load_guidance_items(ruleset_id: str) -> list[dict]:
 
 
 def guidance(db: Session, user: User, ruleset: Ruleset) -> dict:
-    """Return the applicable ruleset guidance and disclaimer."""
+    """Return the applicable ruleset guidance and disclaimer.
+
+    Does not refresh snapshots. The dashboard route owns that write.
+    """
     profile = find_profile(db, user, ruleset.tax_year)
     if profile is None:
         raise ApiError(
             404, "PROFILE_NOT_FOUND", "Profil untuk tahun pajak yang dipilih belum dibuat."
         )
     items = _load_guidance_items(ruleset.ruleset_id)
-    monitoring = dashboard(db, user, ruleset.tax_year, ruleset)["thresholds"][
+    monitoring = dashboard(db, user, ruleset.tax_year, ruleset, refresh=False)["thresholds"][
         "monitoring_current_year_cap_4_8m"
     ]
     conditions = {"always", profile.spouse_tax_status}

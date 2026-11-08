@@ -14,7 +14,15 @@ from app.services.snapshots_store import profile_to_engine, rebuild, today_jakar
 from app.services.transactions import provisional_usaha_total
 
 
-def dashboard(db: Session, user: User, tax_year: int, ruleset: Ruleset) -> dict:
+def dashboard(
+    db: Session,
+    user: User,
+    tax_year: int,
+    ruleset: Ruleset,
+    *,
+    refresh: bool = True,
+) -> dict:
+    """Return stored dashboard figures. ``refresh`` is false for read-only callers."""
     profile = find_profile(db, user, tax_year)
     if profile is None:
         raise ApiError(
@@ -22,7 +30,8 @@ def dashboard(db: Session, user: User, tax_year: int, ruleset: Ruleset) -> dict:
             "PROFILE_NOT_FOUND",
             "Profil untuk tahun pajak yang dipilih belum dibuat.",
         )
-    refresh_if_due(db, profile, ruleset)
+    if refresh:
+        refresh_if_due(db, profile, ruleset)
     rows = db.scalars(
         select(MonthSnapshot)
         .where(
