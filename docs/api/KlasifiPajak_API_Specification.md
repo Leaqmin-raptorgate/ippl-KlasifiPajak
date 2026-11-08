@@ -1,6 +1,6 @@
 # KlasifiPajak API Specification
 
-**Version:** 1.3.2
+**Version:** 1.3.3
 **Status:** Normative contract
 **Aligned with:** KlasifiPajak SRS v2.7 and SDD v1.1 (2 November 2026), except FR-20 and FR-22, which this version supersedes until SRS v2.8.
 **Author:** 11241050 - Muhammad Aditya Putra
@@ -14,6 +14,7 @@ SRS §2.7.f points here. Endpoint paths, JSON fields, error codes, and session r
 | 1.2.2   | 2026-10-18 | Baseline aligned with SRS v2.6.                                                                                                                                                                                                                                                                                                                    |
 | 1.3.0   | 2026-10-28 | D-01: local receipt storage + `GET /transactions/receipt-images/{image_id}`; D-02: quota column names, reclassify quota note, profile field map; D-04: Google OIDC endpoints designed and deferred; D-05: prompt envelope §2.8, test-support fail-closed, argon2id, webhook edge cases, email validation, rate limits, session `created_at` alias. |
 | 1.3.1   | 2026-11-02 | D-11 + wire alignment: §5.16 example adds `provisional_category`; §5.17 optional `version` → `409` `VERSION_CONFLICT`; §5.20 lists `provisional_omzet_idr` / `provisional_usaha_omzet_idr`; §5.14 note that OCR extraction may use the same OpenAI-compatible `AI_BASE_URL` gateway (provider-agnostic).                                           |
+| 1.3.3   | 2026-11-07 | Align prior-year eligibility, provisional rows, workpaper, onboarding and Midtrans with the proposed SRS v2.8 changes. These changes await integration into the source SRS. §5.23 and §5.24 add `409` `STALE_SNAPSHOT` when a month stays `usang` without a `berlaku` row.                                                                         |
 | 1.3.2   | 2026-11-07 | Month `input_hash` becomes `v2:`: a month hashes its own rows plus `carry_forward` (§4). `next_year_ineligible` on a stored month is cumulative through that month (§2.3, §5.21). Transaction writes check every month from January through the Jakarta `as_of` month; only months whose hash changes receive a new version (§5.12).               |
 
 ---
@@ -105,18 +106,22 @@ Cap comparison is strict. Combined gross `>` `4_800_000_000` fails. Equality sta
 
 `prior_year_resolution_source` is one of `manual_profile`, `first_year_taxpayer`, `unverifiable`. This release accepts only tax year 2026, so no 2025 snapshot exists and a prior-year snapshot is not a source.
 
-1. `is_new_taxpayer_current_year` true forces `first_year_taxpayer`, treats prior combined as `0`, and yields `scheme_eligible` even if prior-year numbers were sent.
-2. Otherwise, six prior-year integers supplied by the client yield `manual_profile`.
-3. Missing prior-year data with the new-taxpayer flag false yields `unverifiable`. The engine does not guess the cap. `scheme_eligibility_status` is `unverifiable` and `tax_0_5_pct_idr` is `0` with annotation that the prior-year gross is not on file.
+1. A new taxpayer without spouse aggregation has source `first_year_taxpayer`, prior combined `0`, and is eligible; submitted prior-year figures are ignored.
+2. A new taxpayer with aggregation ignores the user's figures but requires all three spouse figures. A complete set uses `manual_profile` and compares the spouse sum; any blank yields `unverifiable`. The over-cap outcome is a product assumption.
+3. An existing taxpayer requires all three user figures, and all three spouse figures when aggregation is active. Complete relevant figures use `manual_profile`; any relevant blank yields `unverifiable` and tax `0` with an annotation. Explicit zero is a supplied value.
+4. A `scheme_ineligible` or `unverifiable` result is shown as "tidak dihitung di sini" with its reason.
 
 Excess withholding stays on that month. `overwithheld_excess_idr` does not reduce tax in a later month.
 
 Withholding:
 
 ```
-withheld <= tax → sisa_bayar_idr = tax - withheld, overwithheld_excess_idr = 0, overwithheld_status = nihil
+withheld < tax  → sisa_bayar_idr = tax - withheld, overwithheld_excess_idr = 0, overwithheld_status = kurang_potong
+withheld = tax  → sisa_bayar_idr = 0, overwithheld_excess_idr = 0, overwithheld_status = nihil
 withheld > tax  → sisa_bayar_idr = 0, overwithheld_excess_idr = withheld - tax, overwithheld_status = belum_diperhitungkan
 ```
+
+An affirmative `has_selected_article_17` suppresses the 0,5% calculation and yields `scheme_ineligible` with a reason identifying the election. Unknown is retained as unknown.
 
 `withheld_tax_amount_idr` is `>= 0`. The engine does not assume a marketplace withholding rate.
 
@@ -347,7 +352,7 @@ Object keys:
 
 - `carry_forward`: `combined_gross_before_month_idr` and `usaha_omzet_before_month_idr`. Both sum the `amount_idr` of rows dated in months before `month`. The first counts `usaha`, `pekerjaan_bebas` and `already_final`; the second counts `usaha` only. `non_object` rows count in neither. Both are `0` when `month` is `null` or has no earlier rows.
 - `month`
-- `profile_context`: `is_new_taxpayer_current_year`, `prior_year_gross_spouse`, `prior_year_gross_user`, `prior_year_resolution_source`, `spouse_aggregation_active`, `spouse_current_year_already_final_omzet_idr`, `spouse_current_year_pekerjaan_bebas_omzet_idr`, `spouse_current_year_usaha_omzet_idr`
+- `profile_context`: when `has_selected_article_17` is true, include `has_selected_article_17: true`; omit it when false or unknown to preserve existing v2 vectors. Other fields: `is_new_taxpayer_current_year`, `prior_year_gross_spouse`, `prior_year_gross_user`, `prior_year_resolution_source`, `spouse_aggregation_active`, `spouse_current_year_already_final_omzet_idr`, `spouse_current_year_pekerjaan_bebas_omzet_idr`, `spouse_current_year_usaha_omzet_idr`
 - Each prior-year object has sorted keys `already_final_idr`, `pekerjaan_bebas_idr`, `usaha_idr`
 - `ruleset`: `effective_date`, `free_band_idr`, `gross_cap_idr`, `rate_denominator`, `rate_numerator`, `rounding_rule`, `ruleset_id`, `spouse_in_band`, `spouse_in_cap`
 - `tax_year`
@@ -569,6 +574,8 @@ The confirmation string is exact. Order of writes: set `user_id` and other perso
 
 Accepts the same business fields as the GET body, plus `version`, with `nib_last_4` instead of `nib_masked`. Rejects `entity_type` other than `orang_pribadi` and a `nib_last_4` that is not four digits. The update matches `version` and then increments it.
 
+The six prior-year amounts are nullable; `null` means unanswered and `0` is an explicit amount. FR-48 onboarding also records `spouse_tax_status` and nullable yes/no answers `has_selected_article_17`, `has_sole_proprietor_company`, and `receives_salary`; the existing `is_new_taxpayer_current_year` records the fourth answer. Null means unknown. These profile fields are implemented; integration of the proposed requirements into the source SRS remains pending.
+
 `200` returns the saved profile, including the new `version`. Changing spouse aggregation, prior-year totals, spouse current-year totals, or the new-taxpayer flag marks year snapshots stale and recalculates them inside the user-row lock. A name-only change records an audit row and leaves snapshot hashes unchanged.
 
 Tax year 2026 only. A different tax year needs its own ruleset rule. This section does not change `spouse_aggregation_active` beyond the save rule below, and it does not change `spouse_in_cap`, `spouse_in_band`, or the Rp 500.000.000 band.
@@ -643,7 +650,7 @@ Query: `page` (default 1), `per_page` (default 20, max 100), `tax_year`, `month`
 }
 ```
 
-Requires a profile for that tax year with `nib_status` set. Runs normalization, the duplicate key, and classification. Spending the AI quota still returns `201` and sets the classification path to clarification.
+Requires nonblank `client_name` and `description` as well as `amount_idr` and `tx_date` (FR-05). `source_channel` is optional and defaults to `other` when omitted. A supplied value must be `marketplace`, `corporate_client`, `retail`, or `other`; invalid values return `422`. Requires a profile for that tax year with `nib_status` set. Runs normalization, the duplicate key, and classification. Spending the AI quota still returns `201` and sets the classification path to clarification.
 
 `201` includes `id`, the stored fields, and `classification` (`category`, `source`, `confidence`, `rule_id`, `requires_clarification`). A `tx_date` through 31 December 2026 is accepted even when it is after today in Jakarta. It stays out of snapshots until that date is today or earlier. After the write, every month from January through the Jakarta `as_of` month is checked under the same rule as §5.12.
 
@@ -694,6 +701,7 @@ Candidate-field extraction may be served through the same OpenAI-compatible mode
 ```
 
 - `403` `PAID_SUBSCRIPTION_REQUIRED`: "Fitur unggah struk OCR hanya tersedia bagi pengguna berbayar aktif."
+- `403` `AI_CONSENT_REQUIRED`: "Persetujuan pemrosesan AI diperlukan sebelum fitur ini digunakan."
 - `422` `IMAGE_EXCEEDS_SIZE_LIMIT`: "Ukuran berkas melebihi batas maksimum 8 MB."
 - `422` `IMAGE_TYPE_NOT_SUPPORTED`: "Berkas harus berupa JPEG atau PNG."
 
@@ -777,7 +785,7 @@ Thresholds include:
 - `monitoring_current_year_cap_4_8m`: `limit_idr`, `ytd_usaha_omzet_idr`, `provisional_usaha_omzet_idr`, `ytd_pekerjaan_bebas_omzet_idr`, `ytd_already_final_omzet_idr`, `spouse_current_year_usaha_omzet_idr`, `spouse_current_year_pekerjaan_bebas_omzet_idr`, `spouse_current_year_already_final_omzet_idr`, `ytd_combined_gross_idr`, `next_year_ineligible`
 - `pasal_58`: `spouse_aggregation_active`, `badge_label`
 
-`provisional_omzet_idr` (under `pita_500_juta`) and `provisional_usaha_omzet_idr` (under `monitoring_current_year_cap_4_8m`) are the sum of amounts on provisional rows still waiting on clarification for that tax year. They are reported next to the band / YTD figures and are **not** netted out of `ytd_usaha_omzet_idr` or `remaining_free_band_idr` (the engine totals stay the numbers already computed).
+`provisional_omzet_idr` (under `pita_500_juta`) and `provisional_usaha_omzet_idr` (under `monitoring_current_year_cap_4_8m`) are the sum of amounts on provisional rows still waiting on clarification for that tax year. They are reported next to the band / YTD figures and are excluded from tax, category totals, YTD gross and band use. They appear as a warning until clarified.
 
 `ytd_combined_gross_idr` equals the section 2.3 current-year formula. An illustration with usaha YTD `520000000`, pekerjaan bebas YTD `25000000`, already-final YTD `0`, and spouse current usaha `150000000` has combined `695000000`.
 
@@ -807,13 +815,17 @@ Only months marked `usang` are recomputed.
 
 ### 5.23 `GET /recap/{tax_year}`
 
-`200` returns L3-B Bagian A totals for usaha (`total_usaha_omzet_idr`, `total_porsi_bebas_idr`, `total_porsi_kena_idr`, `total_tax_0_5_pct_idr`, `total_withheld_tax_idr`, `total_sisa_bayar_idr`), `total_pekerjaan_bebas_omzet_idr`, `kap_kjs`, `scheme_eligibility_status`, `next_year_ineligible`, and the workpaper disclaimer. There is no Pasal 17 amount.
+`200` returns monthly January through December and annual totals in PMK 164/2023 Lampiran D order: gross turnover, accumulated turnover, non-taxable turnover, taxable turnover, PPh final due, PPh final paid by the taxpayer (blank for user entry), PPh final withheld by others, and difference. It also returns L3-B Bagian A totals for usaha (`total_usaha_omzet_idr`, `total_porsi_bebas_idr`, `total_porsi_kena_idr`, `total_tax_0_5_pct_idr`, `total_withheld_tax_idr`, `total_sisa_bayar_idr`), `total_pekerjaan_bebas_omzet_idr`, `kap_kjs`, `scheme_eligibility_status`, `next_year_ineligible`, and the workpaper disclaimer. There is no Pasal 17 amount.
+
+Months marked `usang` are rebuilt before the totals are read. `409` `STALE_SNAPSHOT`: "Masih ada cuplikan berstatus usang tanpa baris berlaku, jadi rekap tidak disusun."
 
 ### 5.24 `POST /recap/{tax_year}/pdf`
 
-Paid gate. `200` streams `application/pdf` with `Content-Disposition: attachment; filename="Workpaper_PPh_Final_2026.pdf"`. The file is not stored as a download archive. The words `WORKPAPER` / `DOKUMEN KERJA` and the not-an-SPT statement are at least 10 pt.
+Paid gate. `200` streams `application/pdf` with `Content-Disposition: attachment; filename="Workpaper_PPh_Final_2026.pdf"`. The file is not stored as a download archive. The words `WORKPAPER` / `DOKUMEN KERJA` and the not-an-SPT statement are at least 10 pt. The PDF uses the same stored totals as `GET /recap/{tax_year}`, including the same `409` `STALE_SNAPSHOT` when a month stays `usang` without a `berlaku` row.
 
 `403` `PAID_SUBSCRIPTION_REQUIRED`: "Fitur unduh berkas workpaper PDF hanya tersedia bagi pengguna berbayar aktif."
+
+`409` `STALE_SNAPSHOT`: "Masih ada cuplikan berstatus usang tanpa baris berlaku, jadi rekap tidak disusun."
 
 ### 5.25 `POST /assistant/query`
 
@@ -835,6 +847,7 @@ Read-only tools. No conversation archive. Refusal of general tax-avoidance advic
 }
 ```
 
+- `403` `AI_CONSENT_REQUIRED`: "Persetujuan pemrosesan AI diperlukan sebelum fitur ini digunakan."
 - `429` `FREE_CHAT_QUOTA_EXHAUSTED`: "Batas kuota asisten gratis Anda untuk bulan ini telah tercapai (15 jawaban). Silakan berlangganan untuk menambah kuota."
 - `429` `PAID_CHAT_CEILING_EXHAUSTED`: "Plafon wajar asisten akun berbayar Anda untuk bulan ini telah tercapai (200 jawaban)."
 
@@ -884,52 +897,28 @@ At most one `pending` row exists per user and plan. The call locks that row. If 
 
 ### 5.30 `POST /webhooks/payment`
 
-Header `X-Webhook-Signature` is lowercase hex HMAC-SHA256. The signed bytes are UTF-8:
+Midtrans sends `signature_key` in the JSON body. Compute SHA512 of the exact UTF-8 concatenation `order_id + status_code + gross_amount + ServerKey` with no separators, then compare its hexadecimal digest in constant time before any order lookup. Preserve `status_code` and `gross_amount` exactly as received for hashing; `gross_amount` is a string, for example `"25000.00"`. After signature verification parse the amount as integer rupiah and compare it to the order.
 
-```
-order_id || 0x0A || status || 0x0A || amount_str
-```
-
-`amount_str` is the decimal digits of `gross_amount_idr` with no separators and no decimal point. The newline is the single byte `0x0A`, not the two characters `\` and `n`.
-
-Example secret `example-webhook-secret`, canonical text `ord_20261018_01`, newline, `settlement`, newline, `25000`.
-
-Signature: `595fe79b13dd2969fcc8497196333e356b23d811b638be78412c221f51625d1d`
-
-Body:
+Example with ServerKey `example-server-key`:
 
 ```json
 {
   "order_id": "ord_20261018_01",
-  "status": "settlement",
-  "gross_amount_idr": 25000,
-  "transaction_time": "2026-10-18T10:30:00Z"
+  "status_code": "200",
+  "gross_amount": "25000.00",
+  "transaction_status": "settlement",
+  "fraud_status": "accept",
+  "signature_key": "8d2cfdb02615318b9558b05c096c7dc59309e399e8ac2f3bcf847bdae4e0100d9714f5536a599b8c4755482b6bfb10d5ae72443218afc40c9fb6b16a9162f3bc"
 }
 ```
 
-Transitions:
+The signature above is SHA512 over `ord_20261018_0120025000.00example-server-key`.
 
-- `pending` may become `settlement`, `expire`, or `fail`.
-- `settlement` may also follow `expire` or `fail`. A late payment still activates.
-- `expire` and `fail` do not follow `settlement`, and they do not replace each other. The first of those two statuses stays.
-- A later `pending` does not change `orders.status` and does not clear `paid_flag`.
-- `orders.status` does not move backward. An ignored notification still returns `200`.
-- The same `(order_id, status)` returns `200` with `idempotent_duplicate` true and does not add days again.
-- A valid new `settlement` sets `valid_until = max(now_utc, current_valid_until_utc) + 30 days`.
-- `gross_amount_idr` must equal the order amount.
+Map `settlement`, and `capture` with `fraud_status=accept`, to settlement. Map `pending`, `authorize`, and `capture` with `challenge` to pending; map `deny`, `cancel`, and `failure` to fail; map `expire` to expire. Record refunds, partial refunds, chargebacks, partial chargebacks and unknown statuses, acknowledge them with 200, and leave entitlement unchanged. Exact challenge semantics require sandbox verification.
 
-`200`:
+Transitions are idempotent: a duplicate adds no days; a pending or terminal failure cannot reverse a settlement; late settlement after expiry or failure activates. A new settlement sets `valid_until = max(now_utc, current_valid_until_utc) + 30 days`. Record the raw status. Verify signature first, then find the order and compare amount; store the event and update the order and entitlement in one transaction. A deleted account is not revived.
 
-```json
-{ "acknowledged": true, "idempotent_duplicate": false }
-```
-
-Verify the signature **first** (constant-time compare of HMAC digests) before any order lookup. Do not use `transaction_time` for paid entitlement math; only signature, amount, and the status matrix matter.
-
-- `401` `INVALID_WEBHOOK_SIGNATURE`: "Tanda tangan webhook pembayaran tidak sah."
-- `400` `ORDER_AMOUNT_MISMATCH`: "Nominal pembayaran pada notifikasi tidak cocok dengan pesanan."
-- `404` `ORDER_NOT_FOUND`: "Pesanan tidak ditemukan." (unknown `order_id` after a valid signature)
-- `400` `INVALID_WEBHOOK_STATUS`: "Status webhook tidak dikenali." (status outside `{pending, settlement, expire, fail}`)
+`200`: `{ "acknowledged": true, "idempotent_duplicate": false }`. Invalid signatures return `401 INVALID_WEBHOOK_SIGNATURE`; amount mismatch returns `400 ORDER_AMOUNT_MISMATCH`; unknown order after valid signature returns `404 ORDER_NOT_FOUND`. Configure the HTTPS Payment Notification URL in Midtrans MAP settings. The sandbox notification behavior still needs verification.
 
 ### 5.31 `POST /test-support/subscription-override`
 
@@ -938,6 +927,10 @@ Bound to `127.0.0.1` and `APP_ENV=test` only. Any other environment or interface
 ### 5.32 `POST /test-support/password-reset-token`
 
 Same bind, fail-closed startup, and `404` rule as 5.31. Body: `email`. `200` returns `reset_token` and `expires_at_utc` without sending mail. The token is stored as SHA-256 and is single-use through 5.5.
+
+### 5.33 `GET /guidance`
+
+Session required. Returns `{ruleset_id, effective_date, disclaimer, items: [{id, text, citation}]}` with versioned static FR-49 guidance applicable to the profile and totals, with legal references and the workpaper disclaimer. The guide is not generated by a model. This endpoint is implemented; integration of the proposed requirements into the source SRS remains pending.
 
 ### 5.34 `GET /ai-consent` and `PUT /ai-consent`
 
@@ -966,3 +959,5 @@ Saya dapat mencabut persetujuan kapan saja di Profil. Fitur AI tidak dapat dipak
 ```
 
 The assistant lines match the allowlist. A transaction row sent to the assistant is `id`, `tx_date`, `amount_idr`, `category`, `requires_clarification`, `source`, and `citation`. The profile omits `name` and `business_description` and still includes spouse status and the prior-year and spouse amount fields. The sentence has to change if that allowlist changes.
+
+FR-50 adds `cap_warning_percent` to configuration (default 80); dashboard `monitoring_current_year_cap_4_8m` includes `cap_warning_percent` and boolean `cap_warning`, true when combined current-year gross reaches that percentage of the cap. The warning does not change eligibility or tax.
