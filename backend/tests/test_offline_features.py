@@ -15,7 +15,14 @@ from pypdf import PdfReader
 from sqlalchemy import select
 
 from app.db import SessionLocal
-from app.models import MonthSnapshot, PasswordResetToken, QuotaCounter, User
+from app.models import (
+    MonthSnapshot,
+    PasswordResetToken,
+    QuotaCounter,
+    ReceiptImage,
+    Transaction,
+    User,
+)
 from app.security import hash_reset_token, now_utc
 from app.services.snapshot import DISCLAIMER
 
@@ -341,6 +348,69 @@ def test_tc_ocr_strips_gps_owner_get_is_private_and_confirm_uses_user_values(
     )
     assert reconfirm.status_code == 409
     assert reconfirm.json()["error"]["code"] == "RECEIPT_ALREADY_CONFIRMED"
+
+
+def test_tc_ocr_confirm_rejects_expired_receipt_without_transaction(client, tmp_path, monkeypatch):
+    """FR-06b: an expired receipt is not found and creates no transaction."""
+    from app.classify.model_client import FakeModelClient
+    from app.services import receipts
+
+    monkeypatch.setattr(receipts, "RECEIPT_STORAGE_ROOT", tmp_path, raising=False)
+    monkeypatch.setattr(
+        receipts,
+        "get_ocr_client",
+        lambda: FakeModelClient(
+            [
+                {
+                    "amount_idr": 12345,
+                    "tx_date": "2026-10-15",
+                    "client_name": "Toko Kandidat",
+                    "invoice_no": "OCR-EXP",
+                }
+            ]
+        ),
+    )
+    user_id = _register_login(client, email="ocr-expired@example.test", username="ocrexpired")
+    _profile(client)
+    _set_paid(user_id)
+    _set_ai_consent(client)
+    uploaded = client.post(
+        f"{API}/transactions/ocr-upload",
+        files={"file": ("receipt.jpg", _jpeg_with_gps(), "image/jpeg")},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    image_id = uploaded.json()["image_id"]
+    db = SessionLocal()
+    try:
+        image = db.get(ReceiptImage, image_id)
+        assert image is not None
+        image.expires_at_utc = now_utc() - timedelta(seconds=1)
+        db.commit()
+    finally:
+        db.close()
+
+    confirmed = client.post(
+        f"{API}/transactions/ocr-confirm",
+        json={
+            "image_id": image_id,
+            "confirmed_amount_idr": 54321,
+            "confirmed_tx_date": "2026-10-16",
+            "confirmed_client_name": "PT Nilai Pengguna",
+            "confirmed_description": "Penjualan barang dikonfirmasi",
+            "confirmed_invoice_no": "USER-EXP-1",
+            "withheld_tax_amount_idr": 0,
+            "source_channel": "corporate_client",
+        },
+    )
+    assert confirmed.status_code == 404, confirmed.text
+    assert confirmed.json()["error"]["code"] == "TRANSACTION_NOT_FOUND"
+    db = SessionLocal()
+    try:
+        rows = db.scalars(select(Transaction).where(Transaction.user_id == user_id)).all()
+        assert rows == []
+        assert db.get(ReceiptImage, image_id) is not None
+    finally:
+        db.close()
 
 
 def test_tc_assistant_consent_and_success_quota_are_fail_closed(client, monkeypatch):
