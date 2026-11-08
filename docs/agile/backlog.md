@@ -11,7 +11,7 @@ does not exist yet.
 Requirement provenance: the SRS of record is **v2.7**, with `FR-01` to
 `FR-47`, `FR-23a`, `FR-PAY-01` to `FR-PAY-09`, `NFR-01` to `NFR-15` (and
 related), and `UC-01` to `UC-26`. It lives outside this repository under
-`SPEC/`, beside **ERD r3** and **API v1.3.2**. The API contract is mirrored at
+`SPEC/`, beside **ERD r3** and **API v1.3.3**. The API contract is mirrored at
 `docs/api/KlasifiPajak_API_Specification.md`.
 
 Ids such as `FR-17`, `FR-23a`, `UC-20`, `NFR-12` and `NFR-13` are defined in
@@ -97,7 +97,7 @@ These are **required for graded v1** (D-08) and must not be marked done:
 ## Payments — Midtrans Snap (not started)
 
 Held until D-10 placeholders are wired into an adapter. Contract is API
-**v1.3.2** §5.30 (HMAC over `order_id`, status, `amount_str`; monotonic status;
+**v1.3.3** §5.30 (SHA512 over Midtrans body fields and ServerKey; monotonic status;
 30-day renewal) (to be rewritten for real Midtrans). Never use production keys.
 
 - [ ] `GatewayAdapter` plus `FakeGatewayAdapter`

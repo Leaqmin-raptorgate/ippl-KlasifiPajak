@@ -16,7 +16,7 @@ Not a filed return. Not authorized DJP software.
 | Artefact | Version                                 | Where                                                                                                  |
 | -------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------ |
 | SRS      | **v2.7**                                | Outside this repository (`SPEC/`); course SRS is never pushed here                                     |
-| API      | **v1.3.2**                              | Mirrored at [`docs/api/KlasifiPajak_API_Specification.md`](docs/api/KlasifiPajak_API_Specification.md) |
+| API      | **v1.3.3**                              | Mirrored at [`docs/api/KlasifiPajak_API_Specification.md`](docs/api/KlasifiPajak_API_Specification.md) |
 | ERD      | **r3** (D-11 `month_snapshots.version`) | Outside this repository (`SPEC/`); Alembic `76fcdbc4af30` matches r3                                   |
 
 Prior API text in this repo was v1.2.2; treat the mirror above as normative.
@@ -47,18 +47,21 @@ npm ci   # ALWAYS npm ci, never npm install (lockfile-locked)
 | `TRUSTED_PROXY_COUNT`  | How many rightmost XFF hops to peel when the peer is trusted (default `0`).                                                   |
 | `AI_*` / `MIDTRANS_*`  | Placeholders for later rubric work (D-09 / D-10). Leave empty until those features are built.                                 |
 
-### Docker Compose (MySQL + migrate + API)
+### Docker Compose (MySQL + migrate + API + frontend)
 
 Compose boots MySQL, runs a **one-shot `migrate` service** (`alembic upgrade head`
-as `klasifipajak_migrate`), then starts the API as `klasifipajak_app`. The API
-depends on migrate completing successfully. Schema is **not** created via
-`create_all` at runtime.
+as `klasifipajak_migrate`), then starts the API as `klasifipajak_app` and the
+Vite frontend. The API depends on migrate completing successfully. Schema is
+**not** created via `create_all` at runtime.
 
 ```bash
-docker compose up mysql migrate api   # migrate is one-shot; api on http://127.0.0.1:8000
+docker compose up mysql migrate api frontend
 # or simply:
-docker compose up api                 # pulls mysql + migrate via depends_on
+docker compose up frontend            # pulls mysql + migrate + api via depends_on
 ```
+
+- API: http://127.0.0.1:8000
+- Frontend: http://127.0.0.1:5173 (Vite proxies `/api` to the `api` service)
 
 Against a virtualenv (MySQL already migrated):
 
@@ -80,7 +83,7 @@ npm --prefix frontend run test:unit   # Vitest (happy-dom); no backend required
 FastAPI over the deterministic engine, plus an authenticated application
 surface backed by MySQL 8. Engine endpoints are unauthenticated and bound to
 loopback. See the [API specification](docs/api/KlasifiPajak_API_Specification.md)
-(v1.3.2).
+(v1.3.3).
 
 | Endpoint                                                   | Purpose                                                 |
 | ---------------------------------------------------------- | ------------------------------------------------------- |
@@ -159,7 +162,7 @@ The workflow does not publish or deploy anything.
 - `backend/alembic/` — migrations (initial head = ERD r3 / D-11)
 - `backend/tests/` — engine tests, API tests, and `TC-GOLDEN-*`
 - `frontend/` — Vue 3 + Vite
-- `docs/api/`: API specification mirror (v1.3.2)
+- `docs/api/`: API specification mirror (v1.3.3)
 - `docs/agile/` — backlog, roadmap, open decisions
 
 Layering rules: [backend/README.md](backend/README.md).
@@ -173,8 +176,7 @@ Layering rules: [backend/README.md](backend/README.md).
 - [docs/agile/backlog.md](docs/agile/backlog.md) — sprint / M50 status
 - [docs/agile/roadmap.md](docs/agile/roadmap.md) — sequence, risks, open decisions
 - [docs/agile/open-decisions.md](docs/agile/open-decisions.md) — OD-* and D-01…D-11
-- [docs/api/KlasifiPajak_API_Specification.md](docs/api/KlasifiPajak_API_Specification.md): API contract **v1.3.2**
+- [docs/api/KlasifiPajak_API_Specification.md](docs/api/KlasifiPajak_API_Specification.md): API contract **v1.3.3**
 
 The course SRS stays outside this repository and is never pushed. The SRS of
-record is **v2.7**; API v1.3.2 supersedes FR-20 and FR-22 until SRS v2.8 is
-approved. The ERD of record is r3.
+record is **v2.7**; API v1.3.3 includes draft SRS v2.8 changes pending integration into the course SRS. The ERD of record is r3.

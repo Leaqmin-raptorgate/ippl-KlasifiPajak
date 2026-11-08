@@ -53,10 +53,10 @@ Putra. It supersedes v1.0, v2.5 and v2.6. Its ids include `FR-01` through
 
 > **Provenance.** SRS **v2.7** lives on disk outside this repository at
 > `SPEC/KlasifiPajak/` (course SRS is never committed here). The HTTP contract
-> of record is API **v1.3.2**, mirrored at
+> of record is API **v1.3.3**, mirrored at
 > `docs/api/KlasifiPajak_API_Specification.md`. The schema of record is ERD
 > **r3** (D-11 `month_snapshots.version`); Alembic head `76fcdbc4af30` matches
-> r3. Do not add `TODO(SRS-COMMIT)` markers; every id cited here has a source
+> r3. API v1.3.3 includes proposed SRS v2.8 changes pending integration into the source SRS; proposed ERD r4 is not yet the schema of record. Do not add `TODO(SRS-COMMIT)` markers; every id cited here has a source
 > of record. Disclaimer lock (D-07):
 > `DOKUMEN KERJA (WORKPAPER) — BUKAN SPT RESMI DAN BUKAN PRODUK DJP/CORETAX.`
 

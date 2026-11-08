@@ -7,7 +7,7 @@ This file exists only as a pointer, so the two cannot drift apart.
 Quick reference:
 
 - Requirements come from `SPEC/`, which lives beside this repository. The SRS of
-  record is **v2.7**, with ERD **r3** and API **v1.3.2** (API mirrored under
+  record is **v2.7**, with ERD **r3** and API **v1.3.3** (API mirrored under
   `docs/api/`). See `AGENTS.md` for provenance.
 - Never invent a requirement, threshold, tax figure, or expected test value.
   Leave a `TODO` instead.
