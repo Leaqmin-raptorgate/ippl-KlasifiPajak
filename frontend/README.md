@@ -28,7 +28,7 @@ Nine screens, all Indonesian copy, all responsive at phone / tablet / desktop:
 | `/profil`         | Business data, preferences, security                    |
 
 Signed-in screens call `/api/v1` with the session cookie. Vite proxies `/api`
-to `http://127.0.0.1:8000`. The browser does not call Bagian A (`/ruleset`,
+to `http://127.0.0.1:8000`, or to `VITE_PROXY_TARGET` when Compose sets it. The browser does not call Bagian A (`/ruleset`,
 `/snapshot`). A missing route fails closed and does not fall back to sample rows.
 
 ## Ground rules this UI holds to
