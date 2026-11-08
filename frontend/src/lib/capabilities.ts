@@ -12,13 +12,13 @@
  */
 export const CAPABILITIES = Object.freeze({
   /** `POST /recap/{tax_year}/pdf`. The "Unduh workpaper" button. */
-  workpaperExport: false,
+  workpaperExport: true,
   /** `POST /transactions/reclassify`. Re-classify a list of rows on the ledger. */
   reclassifyAll: true,
   /** `POST /assistant/query`. The ask form, its quota chip, and its suggestions. */
-  assistantChat: false,
+  assistantChat: true,
   /** `POST /transactions/ocr-upload`, then `POST /transactions/ocr-confirm`. */
-  ocrUpload: false,
+  ocrUpload: true,
   /** `POST /auth/password-reset/request`, then `POST /auth/password-reset/confirm`. */
   passwordReset: true,
   /** `GET /auth/sessions`, and the revoke calls on the same path. */

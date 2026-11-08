@@ -6,6 +6,7 @@ import AppCard from "@/components/ui/AppCard.vue";
 import AppField from "@/components/ui/AppField.vue";
 import AppIcon from "@/components/ui/AppIcon.vue";
 import AppPill from "@/components/ui/AppPill.vue";
+import AiConsentNote from "@/components/app/AiConsentNote.vue";
 import WorkpaperNote from "@/components/app/WorkpaperNote.vue";
 import { ApiFailure, api } from "@/lib/api";
 import { CAPABILITIES } from "@/lib/capabilities";
@@ -39,6 +40,10 @@ onMounted(() => {
 async function kirim() {
   const teks = tanya.value.trim();
   if (!teks || berpikir.value || habis.value) return;
+  if (!session.persetujuanAi) {
+    galat.value = "Persetujuan pemrosesan AI diperlukan sebelum fitur ini digunakan.";
+    return;
+  }
   berpikir.value = true;
   galat.value = "";
   jawaban.value = null;
@@ -89,6 +94,7 @@ function isiPertanyaan(teks: string) {
         subtitle="Jawabannya disusun dari baris yang tersimpan, lalu ditampilkan di halaman ini."
       >
         <div class="form">
+          <AiConsentNote />
           <AppField
             label="Pertanyaan Anda"
             for-id="tanya-asisten"

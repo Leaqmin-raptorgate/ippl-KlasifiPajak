@@ -9,6 +9,7 @@ import AppIcon from "@/components/ui/AppIcon.vue";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppPill from "@/components/ui/AppPill.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
+import AiConsentNote from "@/components/app/AiConsentNote.vue";
 import SourceTag from "@/components/app/SourceTag.vue";
 import WorkpaperNote from "@/components/app/WorkpaperNote.vue";
 import { ApiFailure, isAbortError, terapkanFieldErrors } from "@/lib/api";
@@ -25,12 +26,14 @@ import {
 } from "@/lib/domain";
 import { parseRupiah, rupiah } from "@/lib/format";
 import { useKuotaStore } from "@/stores/kuota";
+import { useSessionStore } from "@/stores/session";
 import { useProfilStore } from "@/stores/profil";
 import { useTransaksiStore } from "@/stores/transaksi";
 
 const store = useTransaksiStore();
 const profil = useProfilStore();
 const kuota = useKuotaStore();
+const session = useSessionStore();
 const router = useRouter();
 
 const tanggalTransaksi = ref(hariIni());
@@ -174,6 +177,11 @@ function pilihBukti() {
 async function unggah() {
   if (!berkas.value) return;
   galatSimpan.value = "";
+  if (!session.persetujuanAi) {
+    berkas.value = null;
+    galatSimpan.value = "Persetujuan pemrosesan AI diperlukan sebelum fitur ini digunakan.";
+    return;
+  }
   try {
     const hasil = await store.unggahStruk(berkas.value);
     imageId.value = hasil.image_id;
@@ -389,6 +397,7 @@ async function simpan() {
           </AppField>
 
           <AppField v-if="CAPABILITIES.ocrUpload" label="Bukti pendukung">
+            <AiConsentNote />
             <div
               class="drop"
               role="button"
