@@ -13,11 +13,11 @@ Not a filed return. Not authorized DJP software.
 
 ## Spec versions (source of truth)
 
-| Artefact | Version                                 | Where                                                                                                                                     |
-| -------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| SRS      | **v2.7**                                | Outside this repository (`SPEC/`); course SRS is never pushed here                                                                        |
-| API      | **v1.3.3**                              | Mirrored at [`docs/api/KlasifiPajak_API_Specification.md`](docs/api/KlasifiPajak_API_Specification.md)                                    |
-| ERD      | **r3** (D-11 `month_snapshots.version`) | Outside this repository (`SPEC/`); initial revision `76fcdbc4af30` matches r3; head `c45af872b930` incorporates proposed ERD r4 revisions |
+| Artefact | Version                                 | Where                                                                                                                                       |
+| -------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| SRS      | **v2.7**                                | Outside this repository (`SPEC/`); course SRS is never pushed here                                                                          |
+| API      | **v1.3.3**                              | Mirrored at [`docs/api/KlasifiPajak_API_Specification.md`](docs/api/KlasifiPajak_API_Specification.md)                                      |
+| ERD      | **r3** (D-11 `month_snapshots.version`) | Outside this repository (`SPEC/`); r3 was `76fcdbc4af30`; later revisions are proposed r4 changes; run `alembic heads` for the current head |
 
 Prior API text in this repo was v1.2.2; treat the mirror above as normative.
 
@@ -160,7 +160,7 @@ The workflow does not publish or deploy anything.
 - `backend/app/models/` — SQLAlchemy tables (ERD r3)
 - `backend/app/classify/` — keyword/rules path and fallback AI classifier
 - `backend/app/payments/` — Midtrans Snap gateway adapter and notification handling
-- `backend/alembic/` — migrations (initial revision `76fcdbc4af30` = ERD r3; head `c45af872b930` = ERD r4 draft)
+- `backend/alembic/` — migrations (r3 was `76fcdbc4af30`; later revisions are proposed r4 changes; run `alembic heads` for the current head)
 - `backend/tests/` — engine tests, API tests, and `TC-GOLDEN-*`
 - `frontend/` — Vue 3 + Vite
 - `docs/api/`: API specification mirror (v1.3.3)
