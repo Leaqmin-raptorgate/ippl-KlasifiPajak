@@ -90,7 +90,7 @@ def create_order(db: Session, user: User, plan_id: str) -> tuple[dict, bool]:
                     503, "PAYMENT_GATEWAY_UNAVAILABLE", "Pembayaran sedang disiapkan. Coba lagi."
                 )
             return result, False
-    if pending is not None:
+    elif pending is not None:
         pending.status = "expire"
         db.flush()
     order = SubscriptionOrder(

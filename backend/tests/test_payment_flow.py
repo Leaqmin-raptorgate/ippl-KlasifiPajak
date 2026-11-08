@@ -8,7 +8,7 @@ from sqlalchemy import select
 from test_tax_crud_trace_quota import _auth
 
 from app.db import SessionLocal
-from app.models import PaymentEvent, User
+from app.models import PaymentEvent, SubscriptionOrder, User
 from app.security import now_utc
 
 SERVER_KEY = "SB-Mid-server-offline-test"
@@ -192,3 +192,21 @@ def test_fr_pay03_rejected_settlement_does_not_block_later_success(client, fake_
     assert duplicate.status_code == 200, duplicate.text
     assert duplicate.json()["idempotent_duplicate"] is True
     assert _user(user_id).valid_until_utc == first_until
+
+
+def test_fr_pay01_stuck_pending_without_url_becomes_fail_not_expire(client, fake_gateway):
+    """FR-PAY-01: an unexpired empty payment URL older than a minute is failed, not expired."""
+    _auth(client)
+    order = _order(client)
+    with SessionLocal() as db:
+        row = db.scalar(select(SubscriptionOrder).where(SubscriptionOrder.id == order["order_id"]))
+        row.payment_url = ""
+        row.created_at = now_utc() - timedelta(minutes=2)
+        assert row.expires_at_utc > now_utc()
+        db.commit()
+    again = client.post("/api/v1/subscriptions/orders", json={"plan_id": "monthly_25k"})
+    assert again.status_code == 201, again.text
+    assert again.json()["order_id"] != order["order_id"]
+    with SessionLocal() as db:
+        old = db.scalar(select(SubscriptionOrder).where(SubscriptionOrder.id == order["order_id"]))
+        assert old.status == "fail"
