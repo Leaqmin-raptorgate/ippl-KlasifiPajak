@@ -8,7 +8,7 @@ import ProfilPage from "@/pages/ProfilPage.vue";
 import { useKuotaStore } from "@/stores/kuota";
 import { useProfilStore } from "@/stores/profil";
 
-async function mountProfile(existing = false) {
+async function mountProfile(existing = false, newTaxpayer: boolean | null = false) {
   const pinia = createPinia();
   setActivePinia(pinia);
   const profil = useProfilStore();
@@ -27,7 +27,7 @@ async function mountProfile(existing = false) {
       marital_status: "unknown",
       spouse_tax_status: "unknown",
       spouse_aggregation_active: false,
-      is_new_taxpayer_current_year: false,
+      is_new_taxpayer_current_year: newTaxpayer,
       spouse_current_usaha_idr: 0,
       spouse_current_pekerjaan_bebas_idr: 0,
       spouse_current_already_final_idr: 0,
@@ -109,6 +109,7 @@ describe("FR-48 spouse and prior-year answers", () => {
     expect(save).toHaveBeenCalledOnce();
     const payload = save.mock.calls[0]![0] as unknown as Record<string, unknown>;
     expect(payload.spouse_tax_status).toBe("unknown");
+    expect(payload.is_new_taxpayer_current_year).toBe(false);
     for (const owner of ["user", "spouse"]) {
       for (const category of ["usaha", "pekerjaan_bebas", "already_final"]) {
         expect(payload[`prior_${owner}_${category}_idr`]).toBeNull();
@@ -130,5 +131,17 @@ describe("FR-48 spouse and prior-year answers", () => {
     const alert = wrapper.find("[role='alert']");
     expect(alert.exists()).toBe(true);
     expect(alert.text()).toContain("tidak valid");
+  });
+
+  it("keeps a loaded unanswered new-taxpayer answer null on save", async () => {
+    const { wrapper, save } = await mountProfile(true, null);
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text() === "Simpan")!
+      .trigger("click");
+    await flushPromises();
+    expect(save).toHaveBeenCalledOnce();
+    const payload = save.mock.calls[0]![0] as unknown as Record<string, unknown>;
+    expect(payload.is_new_taxpayer_current_year).toBeNull();
   });
 });
