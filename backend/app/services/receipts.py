@@ -37,6 +37,7 @@ RECEIPT_STORAGE_ROOT = os.environ.get("RECEIPT_STORAGE_ROOT", "/var/lib/klasifip
 _MAX_BYTES = 8 * 1024 * 1024
 _DUPLICATE_INVOICE = "Nomor faktur ini sudah tercatat untuk klien, nominal, dan tanggal yang sama."
 _DUPLICATE_INVOICE_KEY = "uq_transactions_duplicate_key"
+_MYSQL_DUP_ENTRY = 1062
 # Set before every decode. Matches Pillow's default bomb ceiling so a
 # process-wide None cannot turn the check off. The SRS names no pixel cap.
 _MAX_IMAGE_PIXELS = 89_478_485
@@ -184,6 +185,22 @@ def receipt_bytes(db: Session, user: User, image_id: str) -> tuple[bytes, str]:
     return data, image.mime_type
 
 
+def _is_duplicate_invoice_integrity(exc: IntegrityError) -> bool:
+    """True for the invoice unique key, not for every MySQL duplicate.
+
+    The driver text is still matched as a substring. Error 1062 counts only
+    when that message also cites ``uq_transactions_duplicate_key``.
+    """
+    orig = getattr(exc, "orig", exc)
+    if _DUPLICATE_INVOICE_KEY in str(orig):
+        return True
+    args = getattr(orig, "args", ()) or ()
+    if not args or args[0] != _MYSQL_DUP_ENTRY:
+        return False
+    message = args[1] if len(args) > 1 else ""
+    return _DUPLICATE_INVOICE_KEY in str(message)
+
+
 def confirm_receipt(
     db: Session,
     user: User,
@@ -238,7 +255,7 @@ def confirm_receipt(
         )
         if taken_after is not None:
             raise ApiError(409, "RECEIPT_ALREADY_CONFIRMED", _ALREADY_CONFIRMED) from None
-        if _DUPLICATE_INVOICE_KEY in str(getattr(exc, "orig", exc)):
+        if _is_duplicate_invoice_integrity(exc):
             raise ApiError(409, "DUPLICATE_INVOICE_TRANSACTION", _DUPLICATE_INVOICE) from None
         raise
     return {"image_id": image.id, "transaction": created.model_dump(mode="json")}

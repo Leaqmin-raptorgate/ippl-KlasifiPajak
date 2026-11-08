@@ -526,6 +526,55 @@ def test_tc_ocr_confirm_race_past_invoice_precheck_is_duplicate_invoice(
         db.close()
 
 
+def test_duplicate_invoice_integrity_keeps_other_1062s():
+    """1062 maps to the invoice code only when the constraint name is cited."""
+    import pymysql
+    from sqlalchemy.exc import IntegrityError
+
+    from app.services.receipts import _is_duplicate_invoice_integrity
+
+    cited = IntegrityError(
+        "INSERT",
+        {},
+        pymysql.err.IntegrityError(
+            1062,
+            "Duplicate entry 'abc' for key 'transactions.uq_transactions_duplicate_key'",
+        ),
+    )
+    other_key = IntegrityError(
+        "INSERT",
+        {},
+        pymysql.err.IntegrityError(
+            1062, "Duplicate entry 'abc' for key 'uq_transactions_image_id'"
+        ),
+    )
+    bare = IntegrityError(
+        "INSERT",
+        {},
+        pymysql.err.IntegrityError(1062, "Duplicate entry 'abc'"),
+    )
+
+    class _TextOnly(Exception):
+        def __str__(self) -> str:
+            return "rejected uq_transactions_duplicate_key"
+
+    class _HiddenText(Exception):
+        def __init__(self) -> None:
+            super().__init__(
+                1062,
+                "Duplicate entry 'abc' for key 'uq_transactions_duplicate_key'",
+            )
+
+        def __str__(self) -> str:
+            return "duplicate"
+
+    assert _is_duplicate_invoice_integrity(cited) is True
+    assert _is_duplicate_invoice_integrity(other_key) is False
+    assert _is_duplicate_invoice_integrity(bare) is False
+    assert _is_duplicate_invoice_integrity(IntegrityError("INSERT", {}, _TextOnly())) is True
+    assert _is_duplicate_invoice_integrity(IntegrityError("INSERT", {}, _HiddenText())) is True
+
+
 def test_tc_assistant_consent_and_success_quota_are_fail_closed(client, monkeypatch):
     """TC-OFFLINE-ASSISTANT, FR-27/FR-28: consent and safe fallback consume no quota."""
     from app.classify.model_client import FakeModelClient, ModelUnavailable
