@@ -1335,7 +1335,9 @@ def test_argon4_test_support_password_reset_token_loopback_and_fail_closed(clien
     """ARGON-4 / TC-4.10-41 / TC-SEC-TS-01: §5.32 loopback-only; 404 outside test."""
     assert _register(client).status_code == 201
 
-    loopback = TestClient(app, client=("127.0.0.1", 50000))
+    # Starlette's default virtual host is "testserver". Model a loopback listener
+    # so the server-host check sees 127.0.0.1, matching the peer.
+    loopback = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
     ok = loopback.post(
         "/api/v1/test-support/password-reset-token",
         json={"email": AUTH["email"]},
@@ -1346,7 +1348,7 @@ def test_argon4_test_support_password_reset_token_loopback_and_fail_closed(clien
     assert "expires_at_utc" in body
 
     # Non-loopback peer → empty 404 (XFF must not count)
-    remote = TestClient(app, client=("203.0.113.10", 50000))
+    remote = TestClient(app, base_url="http://127.0.0.1", client=("203.0.113.10", 50000))
     denied = remote.post(
         "/api/v1/test-support/password-reset-token",
         json={"email": AUTH["email"]},
@@ -1358,7 +1360,7 @@ def test_argon4_test_support_password_reset_token_loopback_and_fail_closed(clien
     # Outside test mode → 404 even from loopback
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("JWT_SECRET", "production-secret-at-least-32-bytes-long")
-    outside = TestClient(app, client=("127.0.0.1", 50000))
+    outside = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
     prod = outside.post(
         "/api/v1/test-support/password-reset-token",
         json={"email": AUTH["email"]},
