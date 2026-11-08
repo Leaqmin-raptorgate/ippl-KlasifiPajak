@@ -31,16 +31,19 @@ FREE_ASSISTANT_LIMIT = 15
 def _is_paid_active(user: User, now: datetime | None = None) -> bool:
     instant = now or now_utc()
     return bool(
-        user.paid_flag and user.valid_until_utc is not None and user.valid_until_utc > instant
+        user.paid_flag and user.valid_until_utc is not None and user.valid_until_utc >= instant
     )
 
 
-def subscription_status(user: User) -> dict:
+def subscription_status(user: User, has_pending_order: bool = False) -> dict:
     """FR-35: derive the tier from paid_flag and the validity instant."""
     now = now_utc()
     if _is_paid_active(user, now):
         tier = "berbayar"
         active = True
+    elif has_pending_order:
+        tier = "pending"
+        active = False
     elif user.paid_flag:
         tier = "kedaluwarsa"
         active = False
