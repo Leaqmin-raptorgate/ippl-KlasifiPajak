@@ -477,9 +477,7 @@ Session cookie. `200`:
 }
 ```
 
-`ai_consent_at` is UTC `YYYY-MM-DDTHH:mm:ssZ`, or null when no consent is stored. The browser reads this field. See §5.34.
-
-`401` means there is no usable session. The browser calls this on load. There is no refresh endpoint.
+`ai_consent_at` is the UTC consent timestamp (`YYYY-MM-DDTHH:mm:ssZ`) or `null` when consent has not been recorded or has been withdrawn (§5.34). This response has no separate `consent` boolean. The browser reads this field. `401` means there is no usable session. The browser calls this on load. There is no refresh endpoint.
 
 ### 5.3.2 `GET /auth/sessions`
 
@@ -899,7 +897,7 @@ At most one `pending` row exists per user and plan. The call locks that row. If 
 
 Midtrans sends `signature_key` in the JSON body. Compute SHA512 of the exact UTF-8 concatenation `order_id + status_code + gross_amount + ServerKey` with no separators, then compare its hexadecimal digest in constant time before any order lookup. Preserve `status_code` and `gross_amount` exactly as received for hashing; `gross_amount` is a string, for example `"25000.00"`. After signature verification parse the amount as integer rupiah and compare it to the order.
 
-Because Midtrans's `signature_key` covers `order_id + status_code + gross_amount + ServerKey` but does NOT sign `transaction_status` or `fraud_status`, settlement transitions require verifying that `status_code == "200"` in addition to signature validity and matching order amount. In production deployments, live status can be verified against the Midtrans Status API.
+Because Midtrans's `signature_key` covers `order_id + status_code + gross_amount + ServerKey` but does NOT sign `transaction_status` or `fraud_status`, settlement transitions require verifying that `status_code == "200"` in addition to signature validity and matching order amount. This build does not call the Midtrans Status API.
 
 Example with ServerKey `example-server-key`:
 
@@ -920,7 +918,7 @@ Map `settlement`, and `capture` with `fraud_status=accept`, to settlement. Map `
 
 Transitions are idempotent: a duplicate adds no days; a pending or terminal failure cannot reverse a settlement; late settlement after expiry or failure activates. A new settlement sets `valid_until = max(now_utc, current_valid_until_utc) + 30 days`. Record the raw status. Verify signature first, then find the order and compare amount; store the event and update the order and entitlement in one transaction. A deleted account is not revived.
 
-`200`: `{ "acknowledged": true, "idempotent_duplicate": false }`. Invalid signatures return `401 INVALID_WEBHOOK_SIGNATURE`; amount mismatch returns `400 ORDER_AMOUNT_MISMATCH`; unknown order after valid signature returns `404 ORDER_NOT_FOUND`. Configure the HTTPS Payment Notification URL in Midtrans MAP settings. The sandbox notification behavior still needs verification.
+`200`: `{ "acknowledged": true, "idempotent_duplicate": false }`. Invalid signatures return `401 INVALID_WEBHOOK_SIGNATURE`. A missing, empty, or non-string `transaction_status`, a `transaction_status` longer than 255 characters, or a non-string `fraud_status` returns `400 INVALID_WEBHOOK_STATUS`. Amount mismatch returns `400 ORDER_AMOUNT_MISMATCH`. Unknown order after a valid signature returns `404 ORDER_NOT_FOUND`. Configure the HTTPS Payment Notification URL in Midtrans MAP settings. The sandbox notification behavior still needs verification.
 
 ### 5.31 `POST /test-support/subscription-override`
 
