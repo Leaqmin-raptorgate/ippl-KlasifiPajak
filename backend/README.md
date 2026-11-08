@@ -64,9 +64,11 @@ Environment-derived settings currently read by the API process: `APP_ENV`,
 `DATABASE_URL`, `JWT_SECRET`, `CORS_ORIGINS`, `RULESET_PATH`, plus
 `TRUSTED_PROXY_IPS` / `TRUSTED_PROXY_COUNT` (read in the auth routes).
 `MIGRATE_DATABASE_URL` is used by Alembic (`backend/alembic/env.py`), not by
-`Settings`. AI (`AI_BASE_URL`, `AI_API_KEY`, `AI_MODEL_*`, `AI_TIMEOUT_S`) and
-Midtrans (`MIDTRANS_*`) keys in `.env.example` are **planned / not yet read**
-(D-09 / D-10). Thresholds and quotas that are product-configurable live here;
+`Settings`. AI (`AI_BASE_URL`, `AI_API_KEY`, `AI_MODEL_*`, `AI_TIMEOUT_S`) is
+read by `Settings` and the OCR, classifier, and assistant clients (D-09).
+Midtrans `MIDTRANS_SERVER_KEY` and `MIDTRANS_IS_PRODUCTION` are read when the
+Snap adapter is built (D-10). `MIDTRANS_CLIENT_KEY` is only in `.env.example`
+and is not read. Thresholds and quotas that are product-configurable live here;
 tax rates and bands do not.
 
 ## Status vs empty placeholders

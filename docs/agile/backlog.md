@@ -87,24 +87,26 @@ Done in code: `backend/tests/test_golden.py`, `backend/app/engine/compute.py`,
 
 ## Rubric features — not yet implemented
 
-These are **required for graded v1** (D-08) and must not be marked done:
+These are **required for graded v1** (D-08). Mark a box only when this branch implements it:
 
 - [ ] OCR receipt upload (FR-06, FR-06a, FR-06b) — DB stub / D-01 design only
-- [ ] Real Midtrans Snap + webhook (FR-PAY-01…05; FR-PAY-09 Should)
+- [x] Real Midtrans Snap + webhook (FR-PAY-01…05; FR-PAY-09 Should) — orders and webhook; settlement requires `status_code` `"200"`
 - [ ] AI classifier **or** assistant (FR-12/13 or FR-27…30) via 9router (D-09)
 - [ ] Annual recap PDF (FR-31…33); library locked to `fpdf2` (D-11)
 
-## Payments — Midtrans Snap (not started)
+## Payments — Midtrans Snap
 
-Held until D-10 placeholders are wired into an adapter. Contract is API
-**v1.3.3** §5.30 (SHA512 over Midtrans body fields and ServerKey; monotonic status;
-30-day renewal) (to be rewritten for real Midtrans). Never use production keys.
+Orders and the payment webhook are implemented. Settlement requires
+`status_code` `"200"` in addition to a valid signature and a matching amount.
+Contract is API **v1.3.3** §5.30 (SHA512 over Midtrans body fields and ServerKey;
+a later pending, expire, or fail does not reverse settlement; 30-day renewal
+from `max(now_utc, valid_until_utc)`). Never use production keys.
 
-- [ ] `GatewayAdapter` plus `FakeGatewayAdapter`
-- [ ] Signature verification with `hmac.compare_digest`
-- [ ] Reject a tampered `gross_amount_idr`
-- [ ] Webhook idempotency, monotonic status, renewal arithmetic
-- [ ] Map Snap `redirect_url` → API `payment_url` (D-11)
+- [x] `GatewayAdapter` plus `FakeGatewayAdapter`
+- [x] Signature verification with `hmac.compare_digest`
+- [x] Reject a tampered `gross_amount_idr`
+- [x] Webhook idempotency; settlement is not reversed; 30-day renewal
+- [x] Map Snap `redirect_url` → API `payment_url` (D-11)
 
 ## Sprint 1 — docs and stack
 
