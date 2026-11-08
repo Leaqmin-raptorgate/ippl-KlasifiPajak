@@ -15,12 +15,8 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.alter_column(
-        "profiles",
-        "is_new_taxpayer_current_year",
-        existing_type=sa.Boolean(),
-        nullable=True,
-    )
+    # Refuse before any DDL. MySQL commits each ALTER, so a later failure
+    # would leave the new-taxpayer column nullable.
     duplicates = (
         op.get_bind()
         .execute(
@@ -35,6 +31,12 @@ def upgrade() -> None:
     if duplicates:
         named = ", ".join(str(row[0]) for row in duplicates)
         raise RuntimeError(f"duplicate transaction image_id values: {named}")
+    op.alter_column(
+        "profiles",
+        "is_new_taxpayer_current_year",
+        existing_type=sa.Boolean(),
+        nullable=True,
+    )
     # The foreign key may be using the old index. Create the unique one first.
     op.create_index("uq_transactions_image_id", "transactions", ["image_id"], unique=True)
     op.drop_index("ix_transactions_image_id", table_name="transactions")
