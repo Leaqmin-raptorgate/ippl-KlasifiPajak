@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import AuthContext, current_session
 from app.db import get_db
+from app.security import iso_utc
 from app.services import assistant
 
 router = APIRouter()
@@ -17,6 +18,18 @@ class AiConsentIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     consent: bool
+
+
+@router.get("/ai-consent")
+def get_ai_consent(
+    context: AuthContext = Depends(current_session),
+) -> dict:
+    """Return the current consent status and timestamp (FR-27)."""
+    stamp = context.user.ai_consent_at
+    return {
+        "consent": stamp is not None,
+        "ai_consent_at": iso_utc(stamp) if stamp is not None else None,
+    }
 
 
 @router.put("/ai-consent")

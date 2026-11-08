@@ -56,6 +56,7 @@ class MeOut(BaseModel):
     user_id: str
     email: str
     username: str
+    ai_consent_at: str | None = None
 
 
 class RevokedOut(BaseModel):

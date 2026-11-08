@@ -6,6 +6,7 @@ export interface Me {
   user_id: string;
   email: string;
   username: string;
+  ai_consent_at?: string | null;
 }
 
 export interface SessionItem {
