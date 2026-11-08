@@ -440,6 +440,18 @@ def test_receipt_unique_upgrade_refuses_duplicate_image_ids(monkeypatch):
             text("SELECT COUNT(*) FROM transactions WHERE image_id = 'img-dup'")
         ).scalar()
         assert count == 2
+        nullable = conn.execute(
+            text(
+                """
+                SELECT IS_NULLABLE
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = 'profiles'
+                  AND COLUMN_NAME = 'is_new_taxpayer_current_year'
+                """
+            )
+        ).scalar()
+        assert nullable == "NO"
     engine.dispose()
 
 
