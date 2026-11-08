@@ -34,18 +34,22 @@ export interface Profile {
   kbli_code: string;
   business_description: string;
   marital_status: "yes" | "no" | "unknown" | string;
+  spouse_tax_status: "unmarried" | "separate" | "joint" | "unknown";
   spouse_aggregation_active: boolean;
+  has_selected_article_17: boolean | null;
+  has_sole_proprietor_company: boolean | null;
+  receives_salary: boolean | null;
   is_new_taxpayer_current_year: boolean;
   version: number;
   spouse_current_usaha_idr: number;
   spouse_current_pekerjaan_bebas_idr: number;
   spouse_current_already_final_idr: number;
-  prior_user_usaha_idr: number;
-  prior_user_pekerjaan_bebas_idr: number;
-  prior_user_already_final_idr: number;
-  prior_spouse_usaha_idr: number;
-  prior_spouse_pekerjaan_bebas_idr: number;
-  prior_spouse_already_final_idr: number;
+  prior_user_usaha_idr: number | null;
+  prior_user_pekerjaan_bebas_idr: number | null;
+  prior_user_already_final_idr: number | null;
+  prior_spouse_usaha_idr: number | null;
+  prior_spouse_pekerjaan_bebas_idr: number | null;
+  prior_spouse_already_final_idr: number | null;
   audit_trail: AuditEntry[];
 }
 
@@ -58,17 +62,21 @@ export interface ProfileUpdate {
   kbli_code: string;
   business_description: string;
   marital_status: string;
+  spouse_tax_status: "unmarried" | "separate" | "joint" | "unknown";
   spouse_aggregation_active: boolean;
+  has_selected_article_17: boolean | null;
+  has_sole_proprietor_company: boolean | null;
+  receives_salary: boolean | null;
   is_new_taxpayer_current_year: boolean;
   spouse_current_usaha_idr: number;
   spouse_current_pekerjaan_bebas_idr: number;
   spouse_current_already_final_idr: number;
-  prior_user_usaha_idr: number;
-  prior_user_pekerjaan_bebas_idr: number;
-  prior_user_already_final_idr: number;
-  prior_spouse_usaha_idr: number;
-  prior_spouse_pekerjaan_bebas_idr: number;
-  prior_spouse_already_final_idr: number;
+  prior_user_usaha_idr: number | null;
+  prior_user_pekerjaan_bebas_idr: number | null;
+  prior_user_already_final_idr: number | null;
+  prior_spouse_usaha_idr: number | null;
+  prior_spouse_pekerjaan_bebas_idr: number | null;
+  prior_spouse_already_final_idr: number | null;
 }
 
 export interface Classification {
@@ -163,6 +171,8 @@ export interface Dashboard {
     };
     monitoring_current_year_cap_4_8m: {
       limit_idr: number;
+      cap_warning_percent: number;
+      cap_warning: boolean;
       ytd_usaha_omzet_idr: number;
       ytd_pekerjaan_bebas_omzet_idr: number;
       ytd_already_final_omzet_idr: number;
@@ -198,6 +208,13 @@ export interface MonthSummary {
   non_object_omzet_idr: number;
   input_hash: string;
   annotation?: string;
+}
+
+export interface Guidance {
+  ruleset_id: string;
+  effective_date: string;
+  disclaimer: string;
+  items: { id: string; text: string; citation: string }[];
 }
 
 export interface Recap {
