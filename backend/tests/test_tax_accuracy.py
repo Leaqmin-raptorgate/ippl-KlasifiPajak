@@ -8,6 +8,7 @@ from test_tax_crud_trace_quota import _auth, _profile, _tx
 
 from app.db import SessionLocal
 from app.engine import Profile, Transaction, compute
+from app.models import ClassificationEvent
 from app.models import Transaction as TransactionRow
 from app.services.snapshots_store import freeze_today_jakarta
 
@@ -164,3 +165,75 @@ def test_fr_pay07_test_support_rejects_non_loopback_server_address():
     with TestClient(app, base_url="http://0.0.0.0:8000", client=("127.0.0.1", 50000)) as public:
         response = public.post("/api/v1/test-support/subscription-override", json={})
     assert response.status_code == 404
+
+
+def _ytd_ledger(transaction_id: str) -> list[tuple[int, int, str]]:
+    """Stored ``ytd_usaha_before_idr`` / ``ytd_usaha_after_idr`` pairs, oldest first."""
+    with SessionLocal() as db:
+        rows = db.scalars(
+            select(ClassificationEvent)
+            .where(ClassificationEvent.transaction_id == transaction_id)
+            .order_by(ClassificationEvent.recorded_at.asc(), ClassificationEvent.id.asc())
+        ).all()
+        return [(row.ytd_usaha_before_idr, row.ytd_usaha_after_idr, row.source) for row in rows]
+
+
+def test_provisional_usaha_is_excluded_from_band_and_ledger(client):
+    """FR-10 / FR-16a: a provisional row is outside the usaha band until answered.
+
+    Answering it as usaha records before = X and after = X + amount.
+    Overriding that answer away from usaha records the reverse pair.
+    """
+    prior = 12_500_000
+    amount = 7_000_000
+    with freeze_today_jakarta(date(2026, 11, 2)):
+        _auth(client)
+        assert _profile(client).status_code == 200
+        confirmed = _tx(client, amount_idr=prior, invoice_no="INV-CONFIRMED")
+        assert confirmed.status_code == 201, confirmed.text
+        assert confirmed.json()["category"] == "usaha"
+        assert confirmed.json()["classification"]["requires_clarification"] is False
+
+        provisional = _tx(
+            client,
+            amount_idr=amount,
+            description="Tidak jelas",
+            invoice_no="INV-PROVISIONAL",
+            client_name="Pembayar Tidak Dikenal",
+        )
+        assert provisional.status_code == 201, provisional.text
+        body = provisional.json()
+        assert body["classification"]["requires_clarification"] is True
+        tx_id = body["id"]
+
+        waiting = client.get("/api/v1/tax/dashboard?tax_year=2026").json()["thresholds"][
+            "pita_500_juta"
+        ]
+        assert waiting["ytd_usaha_omzet_idr"] == prior
+        assert waiting["provisional_omzet_idr"] == amount
+        assert _ytd_ledger(tx_id) == [(prior, prior, "rule")]
+
+        answered = client.post(
+            f"/api/v1/transactions/{tx_id}/clarification",
+            json={"category": "usaha", "version": 1},
+        )
+        assert answered.status_code == 200, answered.text
+        assert _ytd_ledger(tx_id)[-1] == (prior, prior + amount, "user_clarification")
+        trail = client.get(f"/api/v1/transactions/{tx_id}/audit-trail").json()["events"][-1]
+        assert trail["ytd_usaha_omzet_before_idr"] == prior
+        assert trail["ytd_usaha_omzet_after_idr"] == prior + amount
+
+        overridden = client.post(
+            f"/api/v1/transactions/{tx_id}/override",
+            json={"new_category": "non_object", "note": "Bukan omzet usaha"},
+        )
+        assert overridden.status_code == 200, overridden.text
+        assert _ytd_ledger(tx_id)[-1] == (prior + amount, prior, "user_override")
+        trail = client.get(f"/api/v1/transactions/{tx_id}/audit-trail").json()["events"][-1]
+        assert trail["ytd_usaha_omzet_before_idr"] == prior + amount
+        assert trail["ytd_usaha_omzet_after_idr"] == prior
+        band = client.get("/api/v1/tax/dashboard?tax_year=2026").json()["thresholds"][
+            "pita_500_juta"
+        ]
+        assert band["ytd_usaha_omzet_idr"] == prior
+        assert band["provisional_omzet_idr"] == 0
