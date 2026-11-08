@@ -58,7 +58,12 @@ depends on migrate completing successfully. Schema is **not** created via
 docker compose up mysql migrate api   # migrate is one-shot; api on http://127.0.0.1:8000
 # or simply:
 docker compose up api                 # pulls mysql + migrate via depends_on
+docker compose up frontend            # vite dev server on http://127.0.0.1:5173
 ```
+
+If `frontend/package-lock.json` changes, refresh the `frontend_node_modules`
+volume with `docker compose down -v` or
+`docker compose run --rm frontend npm ci`.
 
 Against a virtualenv (MySQL already migrated):
 

@@ -1,14 +1,12 @@
 FROM node:20-bookworm-slim
 
+USER node
 WORKDIR /app
 
-COPY package.json package-lock.json ./
-RUN npm ci && chown -R node:node /app
+COPY --chown=node:node package.json package-lock.json ./
+RUN npm ci
 
-COPY . .
-RUN chown -R node:node /app
-
-USER node
+COPY --chown=node:node . .
 
 EXPOSE 5173
 

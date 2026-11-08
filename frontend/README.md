@@ -11,6 +11,11 @@ npm run build      # typecheck, then bundle to dist/
 npm run typecheck  # vue-tsc, strict
 ```
 
+When running via Docker Compose (`docker compose up frontend`), dependencies
+are cached in the `frontend_node_modules` volume. If `package-lock.json` changes,
+run `docker compose down -v` or `docker compose run --rm frontend npm ci` to
+refresh the volume.
+
 ## What it is
 
 Nine screens, all Indonesian copy, all responsive at phone / tablet / desktop:
@@ -28,8 +33,9 @@ Nine screens, all Indonesian copy, all responsive at phone / tablet / desktop:
 | `/profil`         | Business data, preferences, security                    |
 
 Signed-in screens call `/api/v1` with the session cookie. Vite proxies `/api`
-to `http://127.0.0.1:8000`, or to `VITE_PROXY_TARGET` when Compose sets it. The browser does not call Bagian A (`/ruleset`,
-`/snapshot`). A missing route fails closed and does not fall back to sample rows.
+to `http://127.0.0.1:8000`, or to `API_PROXY_TARGET` when Compose sets it. The
+browser does not call Bagian A (`/ruleset`, `/snapshot`). A missing route fails
+closed and does not fall back to sample rows.
 
 ## Ground rules this UI holds to
 
