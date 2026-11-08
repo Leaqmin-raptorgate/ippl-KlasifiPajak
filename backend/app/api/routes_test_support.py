@@ -1,8 +1,8 @@
 """Test-support routes (API §5.32). Mounted only when APP_ENV=test.
 
-Fail-closed: each handler also refuses non-loopback callers using
-``request.client.host`` only — never ``X-Forwarded-For`` (ARGON-4 / G-28).
-API §5.31 (subscription-override) is intentionally not implemented here.
+Fail-closed: each handler refuses unless both the TCP peer and the local
+server host are loopback. ``X-Forwarded-For`` is ignored (ARGON-4).
+Subscription overrides are available only to local test clients.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.security import iso_utc
 from app.services import auth as auth_service
+from app.services import subscription as subscription_service
 
 router = APIRouter()
 
@@ -44,9 +45,27 @@ def _is_test_env() -> bool:
 
 
 def _is_loopback(request: Request) -> bool:
-    """Judge loopback from the peer address only — never from XFF."""
+    """Require a loopback peer and a loopback server host. Never trust XFF."""
     host = request.client.host if request.client else None
-    return host in _LOOPBACK_HOSTS
+    server = request.scope.get("server")
+    server_host = server[0] if server else None
+    return host in _LOOPBACK_HOSTS and server_host in _LOOPBACK_HOSTS
+
+
+def refuse_non_loopback_test_bind(host: str | None) -> None:
+    """Refuse a non-loopback listen host taken from the environment (API §5.31).
+
+    Docker and local launches set ``BIND_HOST`` to the address the process
+    binds. ``APP_ENV=test`` with any other host stops startup. An empty value
+    is ignored: TestClient does not listen, and the development Compose
+    service is ``APP_ENV=development`` with test routes unmounted.
+    """
+    if os.environ.get("APP_ENV") != "test":
+        return
+    if host is None or not str(host).strip():
+        return
+    if str(host).strip() not in _LOOPBACK_HOSTS:
+        raise RuntimeError("APP_ENV=test refuses a non-loopback listen host.")
 
 
 @router.post(
@@ -66,4 +85,27 @@ def password_reset_token(
     return PasswordResetTokenOut(
         reset_token=plaintext,
         expires_at_utc=iso_utc(expires),
+    )
+
+
+@router.post("/test-support/subscription-override", response_model=None)
+def subscription_override(payload: dict, request: Request, db: Session = Depends(get_db)):
+    """Override a subscription for a local test client."""
+    if not _is_test_env() or not _is_loopback(request):
+        return _empty_404()
+    from datetime import datetime
+
+    from app.api.errors import ApiError
+
+    user_id = payload.get("user_id")
+    if not user_id:
+        raise ApiError(404, "USER_NOT_FOUND", "Pengguna tidak ditemukan.")
+    raw = payload.get("valid_until")
+    valid_until = (
+        datetime.fromisoformat(str(raw).replace("Z", "+00:00")).replace(tzinfo=None)
+        if raw
+        else None
+    )
+    return subscription_service.set_subscription_override(
+        db, user_id=str(user_id), paid_flag=bool(payload.get("paid_flag")), valid_until=valid_until
     )

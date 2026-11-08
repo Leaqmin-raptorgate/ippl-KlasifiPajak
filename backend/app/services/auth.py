@@ -309,10 +309,21 @@ def token_for(user: User, session: SessionRow, settings: Settings) -> str:
     )
 
 
+def get_email_sender():
+    """Build the password-reset mail sender (FR-41)."""
+    from app.services.email import build_email_sender
+
+    return build_email_sender()
+
+
 def request_password_reset(
     db: Session, payload: PasswordResetRequestIn, client_ip: str = "0.0.0.0"
 ) -> str:
-    """Always return the generic message; never reveal whether the email exists."""
+    """Always return the generic message; never reveal whether the email exists.
+
+    After a known user's token row is committed, the plaintext is handed to the
+    mail sender (FR-41). It is not logged and is not placed in the HTTP body.
+    """
     # N2 / HB-04: shape check before rate limit so 422 does not leak existence.
     validate_email_shape(payload.email)
     # ARGON-2a/c: per-endpoint IP bucket first, then identity (user_id when known).
@@ -346,6 +357,10 @@ def request_password_reset(
         # Plaintext is returned only to the caller that can deliver mail / tests.
         # Routes discard it and respond with the generic message only.
         log.info("password reset token issued user_id=%s", user.id)
+        try:
+            get_email_sender().send_password_reset(user.email, plaintext)
+        except Exception:
+            log.info("password reset mail failed user_id=%s", user.id)
         return plaintext
     # Unknown email: mint+hash already done; touch the DB with a no-op UPDATE so
     # known/unknown pay a similar round-trip (B2) without inserting a fake row.
@@ -571,7 +586,9 @@ def delete_account(db: Session, user: User, payload: DeleteAccountIn) -> None:
     db.flush()
 
     if _table_exists(db, "receipt_images"):
-        # Filesystem purge is Storage's concern when the table exists; null-safe delete.
+        from app.services.receipts import delete_user_files
+
+        delete_user_files(db, user_id)
         db.execute(text("DELETE FROM receipt_images WHERE user_id = :uid"), {"uid": user_id})
 
     if _table_exists(db, "quota_counters"):
