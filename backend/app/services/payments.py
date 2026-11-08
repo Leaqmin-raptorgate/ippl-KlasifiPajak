@@ -188,6 +188,10 @@ def process_notification(db: Session, payload: dict[str, Any]) -> dict:
         raise ApiError(
             400, "ORDER_AMOUNT_MISMATCH", "Nominal pembayaran tidak cocok dengan pesanan."
         )
+    # Reject before insert so a non-200 settlement cannot duplicate-match a later 200.
+    status_code = str(payload.get("status_code", ""))
+    if normalized == "settlement" and status_code != "200":
+        raise ApiError(400, "INVALID_WEBHOOK_STATUS", "Status pembayaran tidak sah.")
     existing = db.scalar(
         select(PaymentEvent.id)
         .where(
@@ -214,7 +218,6 @@ def process_notification(db: Session, payload: dict[str, Any]) -> dict:
                 received_at=instant,
             )
         )
-        status_code = str(payload.get("status_code", ""))
         if normalized == "settlement" and status_code == "200" and order.status != "settlement":
             order.status = "settlement"
             if owner is not None and order.user_id == owner.id:

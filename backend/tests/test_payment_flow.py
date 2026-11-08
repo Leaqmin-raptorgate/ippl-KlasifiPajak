@@ -32,17 +32,24 @@ def _order(client):
     return response.json()
 
 
-def _notice(order_id, status="settlement", amount="25000.00", fraud="accept"):
+def _notice(
+    order_id,
+    status="settlement",
+    amount="25000.00",
+    fraud="accept",
+    status_code="200",
+    server_key=SERVER_KEY,
+):
     """FR-PAY-03: independently compute the exact signed text."""
     payload = {
         "order_id": order_id,
-        "status_code": "200",
+        "status_code": status_code,
         "gross_amount": amount,
         "transaction_status": status,
         "fraud_status": fraud,
     }
     payload["signature_key"] = hashlib.sha512(
-        (order_id + "200" + amount + SERVER_KEY).encode()
+        (order_id + status_code + amount + server_key).encode()
     ).hexdigest()
     return payload
 
@@ -132,3 +139,56 @@ def test_fr_pay03_late_settlement_after_expiry_activates(client, fake_gateway):
         client.post("/api/v1/webhooks/payment", json=_notice(order["order_id"])).status_code == 200
     )
     assert client.get("/api/v1/subscriptions/status").json()["paid_flag"] is True
+
+
+def test_fr_pay07_production_webhook_unknown_order_is_not_found(client, monkeypatch):
+    """FR-PAY-07: a production-shaped key must not turn a signed unknown order into 500."""
+    key = "Mid-server-test-not-real"
+    monkeypatch.setenv("MIDTRANS_SERVER_KEY", key)
+    monkeypatch.setenv("MIDTRANS_IS_PRODUCTION", "true")
+    response = client.post(
+        "/api/v1/webhooks/payment", json=_notice("missing-order", server_key=key)
+    )
+    assert response.status_code == 404, response.text
+    assert response.json()["error"]["code"] == "ORDER_NOT_FOUND"
+
+
+def test_fr_pay03_settlement_with_non_200_status_code_is_refused(client, fake_gateway):
+    """FR-PAY-03: a signed settlement whose status code is not 200 is not stored."""
+    _auth(client)
+    user_id = client.get("/api/v1/auth/me").json()["user_id"]
+    order = _order(client)
+    response = client.post(
+        "/api/v1/webhooks/payment", json=_notice(order["order_id"], status_code="201")
+    )
+    assert response.status_code == 400, response.text
+    assert _user(user_id).paid_flag is False
+    with SessionLocal() as db:
+        events = db.scalars(
+            select(PaymentEvent).where(PaymentEvent.order_id == order["order_id"])
+        ).all()
+        assert events == []
+
+
+def test_fr_pay03_rejected_settlement_does_not_block_later_success(client, fake_gateway):
+    """FR-PAY-03: refusing a non-200 settlement leaves a later 200 settlement able to activate."""
+    _auth(client)
+    user_id = client.get("/api/v1/auth/me").json()["user_id"]
+    order = _order(client)
+    refused = client.post(
+        "/api/v1/webhooks/payment", json=_notice(order["order_id"], status_code="201")
+    )
+    assert refused.status_code == 400, refused.text
+    assert _user(user_id).paid_flag is False
+    before = now_utc()
+    accepted = client.post("/api/v1/webhooks/payment", json=_notice(order["order_id"]))
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["idempotent_duplicate"] is False
+    user = _user(user_id)
+    assert user.paid_flag is True
+    first_until = user.valid_until_utc
+    assert before + timedelta(days=30) <= first_until <= now_utc() + timedelta(days=30)
+    duplicate = client.post("/api/v1/webhooks/payment", json=_notice(order["order_id"]))
+    assert duplicate.status_code == 200, duplicate.text
+    assert duplicate.json()["idempotent_duplicate"] is True
+    assert _user(user_id).valid_until_utc == first_until
