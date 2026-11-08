@@ -153,3 +153,14 @@ def test_fr03_profile_audit_masks_nib(client):
     assert trail
     assert trail[-1]["old_value"] == "*********4321"
     assert trail[-1]["new_value"] == "*********1234"
+
+
+def test_fr_pay07_test_support_rejects_non_loopback_server_address():
+    """FR-PAY-07: a non-loopback server cannot expose the override."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    with TestClient(app, base_url="http://0.0.0.0:8000", client=("127.0.0.1", 50000)) as public:
+        response = public.post("/api/v1/test-support/subscription-override", json={})
+    assert response.status_code == 404
