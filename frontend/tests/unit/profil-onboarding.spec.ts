@@ -144,4 +144,28 @@ describe("FR-48 spouse and prior-year answers", () => {
     const payload = save.mock.calls[0]![0] as unknown as Record<string, unknown>;
     expect(payload.is_new_taxpayer_current_year).toBeNull();
   });
+
+  it("sends true when the loaded new-taxpayer answer is yes", async () => {
+    const { wrapper, save } = await mountProfile(true, true);
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text() === "Simpan")!
+      .trigger("click");
+    await flushPromises();
+    expect(save).toHaveBeenCalledOnce();
+    const payload = save.mock.calls[0]![0] as unknown as Record<string, unknown>;
+    expect(payload.is_new_taxpayer_current_year).toBe(true);
+  });
+
+  it("sends null when a first profile leaves the new-taxpayer answer blank", async () => {
+    const { wrapper, save } = await mountProfile(false);
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text() === "Simpan")!
+      .trigger("click");
+    await flushPromises();
+    expect(save).toHaveBeenCalledOnce();
+    const payload = save.mock.calls[0]![0] as unknown as Record<string, unknown>;
+    expect(payload.is_new_taxpayer_current_year).toBeNull();
+  });
 });
