@@ -32,6 +32,7 @@ from app.schemas.transaction import (
 from app.security import iso_utc, new_id, now_utc
 from app.services.config import get_config
 from app.services.profile import find_profile
+from app.services.receipts import delete_receipt_for_transaction
 from app.services.snapshot import DISCLAIMER
 from app.services.snapshots_store import (
     get_berlaku,
@@ -49,10 +50,10 @@ _SOURCE_CHANNELS = frozenset({"marketplace", "corporate_client", "retail", "othe
 #: The four engine categories. A clarification resolves to exactly one of them
 #: (AGENTS.md invariant 2), so the options list is this list, in this order.
 _CATEGORIES: tuple[tuple[str, str], ...] = (
-    ("usaha", "Usaha"),
-    ("pekerjaan_bebas", "Pekerjaan bebas"),
-    ("already_final", "Final tersendiri"),
-    ("non_object", "Bukan objek"),
+    ("usaha", "Penjualan barang atau usaha"),
+    ("pekerjaan_bebas", "Jasa atau karya pribadi"),
+    ("already_final", "Sewa tanah atau bangunan"),
+    ("non_object", "Bukan omzet, misalnya gaji atau pinjaman"),
 )
 
 #: Asked once, in one form, for every row the keyword table could not place.
@@ -227,13 +228,18 @@ def list_transactions(
 
 
 def create_transaction(
-    db: Session, user: User, payload: TransactionCreate, ruleset: Ruleset
+    db: Session,
+    user: User,
+    payload: TransactionCreate,
+    ruleset: Ruleset,
+    background=None,
 ) -> TransactionOut:
     """Store one row, classify it with the keyword table, and rebuild snapshots.
 
     A row no rule recognizes is stored as provisional ``usaha`` with
-    ``requires_clarification`` set and zero confidence. This slice has no model
-    fallback, so the closed question is the next step instead of a guess.
+    ``requires_clarification`` set and zero confidence. When ``background`` is
+    provided, an AI fallback is scheduled only after commit and only for that
+    provisional row (FR-12).
     """
     if payload.source_channel not in _SOURCE_CHANNELS:
         raise ApiError(422, "INVALID_SOURCE_CHANNEL", "Saluran sumber tidak dikenal.")
@@ -323,6 +329,10 @@ def create_transaction(
     )
     _stale_and_rebuild(db, profile, ruleset)
     db.commit()
+    if background is not None and row.requires_clarification:
+        from app.services.classification_fallback import run_fallback
+
+        background.add_task(run_fallback, row.id, user.id, row.version)
 
     return row_out(row)
 
@@ -544,6 +554,8 @@ def delete_transaction(db: Session, user: User, transaction_id: str, ruleset: Ru
     profile = _require_profile(db, user, ruleset.tax_year)
     lock_profile(db, profile)
     row = get_transaction_for_update(db, user, transaction_id)
+    if row.image_id:
+        delete_receipt_for_transaction(db, row)
 
     for event in db.scalars(
         select(ClassificationEvent).where(ClassificationEvent.transaction_id == row.id)
@@ -875,14 +887,7 @@ def _usaha_total(
 
 
 def provisional_usaha_total(db: Session, user: User, tax_year: int) -> int:
-    """Omzet that is sitting in ``usaha`` only as a placeholder.
-
-    A row the keyword table could not place is stored provisionally as ``usaha``
-    so it has a column value, not because that is the answer. It still lands in
-    the exemption band until the user clarifies it, so the read model has to be
-    able to say how much of the band is unconfirmed rather than let it pass as a
-    classified figure.
-    """
+    """Return provisional placeholder turnover excluded from tax and totals."""
     total = db.scalar(
         select(func.coalesce(func.sum(TransactionRow.amount_idr), 0)).where(
             TransactionRow.user_id == user.id,

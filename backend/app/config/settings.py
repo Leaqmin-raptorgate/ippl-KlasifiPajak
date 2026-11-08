@@ -42,6 +42,26 @@ def _app_env() -> str:
     return os.environ.get("APP_ENV", "development")
 
 
+def _env_str(name: str, default: str = "") -> str:
+    return os.environ.get(name, default).strip()
+
+
+def _ai_timeout_s() -> float:
+    raw = _env_str("AI_TIMEOUT_S", "30") or "30"
+    try:
+        return float(raw)
+    except ValueError:
+        return 30.0
+
+
+def _smtp_port() -> int:
+    raw = _env_str("SMTP_PORT", "587") or "587"
+    try:
+        return int(raw)
+    except ValueError:
+        return 587
+
+
 def _jwt_secret() -> str:
     """Resolve the HS256 secret, refusing unsafe values outside development/test.
 
@@ -78,6 +98,17 @@ class Settings:
     ruleset_path: Path | None = field(default_factory=_ruleset_path)
     database_url: str = field(default_factory=_database_url)
     jwt_secret: str = field(default_factory=_jwt_secret)
+    ai_base_url: str = field(default_factory=lambda: _env_str("AI_BASE_URL"))
+    ai_api_key: str = field(default_factory=lambda: _env_str("AI_API_KEY"))
+    ai_model_classifier: str = field(default_factory=lambda: _env_str("AI_MODEL_CLASSIFIER"))
+    ai_model_ocr: str = field(default_factory=lambda: _env_str("AI_MODEL_OCR"))
+    ai_model_assistant: str = field(default_factory=lambda: _env_str("AI_MODEL_ASSISTANT"))
+    ai_timeout_s: float = field(default_factory=_ai_timeout_s)
+    smtp_host: str = field(default_factory=lambda: _env_str("SMTP_HOST"))
+    smtp_port: int = field(default_factory=_smtp_port)
+    smtp_username: str = field(default_factory=lambda: _env_str("SMTP_USERNAME"))
+    smtp_password: str = field(default_factory=lambda: _env_str("SMTP_PASSWORD"))
+    smtp_from: str = field(default_factory=lambda: _env_str("SMTP_FROM"))
     session_hours: int = 12
     session_idle_minutes: int = 30
     max_sessions: int = 5
