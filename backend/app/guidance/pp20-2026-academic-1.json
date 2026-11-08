@@ -1,0 +1,74 @@
+[
+  {
+    "id": "separate",
+    "condition": "separate",
+    "text": "Pasangan PH/MT memakai akun dan pita Rp 500 juta masing-masing. Isi peredaran bruto pasangan untuk uji batas Rp 4,8 miliar.",
+    "citation": "PMK 164/2023 Pasal 6(5); PP 20/2026 Pasal 58(2)"
+  },
+  {
+    "id": "joint",
+    "condition": "joint",
+    "text": "Pasangan yang melapor bersama mencatat seluruh penghasilan usaha berdua dalam satu akun dengan satu pita Rp 500 juta. Ini asumsi produk; pastikan keadaan Anda dengan konsultan.",
+    "citation": "PMK 164/2023 Pasal 6(3), (5)"
+  },
+  {
+    "id": "unknown",
+    "condition": "unknown",
+    "text": "Pastikan apakah pasangan melapor terpisah (PH/MT) atau bersama. Hasil dapat tidak tepat sampai status diketahui.",
+    "citation": "PMK 164/2023 Pasal 6(3), (5); PP 20/2026 Pasal 58(2)"
+  },
+  {
+    "id": "business_freelance",
+    "condition": "always",
+    "text": "Usaha dan pekerjaan bebas dilaporkan oleh satu wajib pajak. Aplikasi menghitung bagian usaha; pajak pekerjaan bebas ditangani di luar aplikasi.",
+    "citation": "PP 20/2026 Pasal 56(3)(a)"
+  },
+  {
+    "id": "foreign",
+    "condition": "always",
+    "text": "Penghasilan dari luar negeri termasuk dalam uji peredaran bruto Rp 4,8 miliar. Nominal rupiah diisi pengguna; saran kurs pajak pada tanggal transaksi merupakan asumsi produk.",
+    "citation": "PP 20/2026 Pasal 58(1)(a)"
+  },
+  {
+    "id": "payment",
+    "condition": "always",
+    "text": "Setoran bulanan dilakukan paling lambat tanggal 15 bulan berikutnya per tempat usaha.",
+    "citation": "PMK 164/2023 Pasal 7(2)"
+  },
+  {
+    "id": "withholding",
+    "condition": "always",
+    "text": "Kelebihan potongan tidak dipindahkan ke bulan lain oleh aplikasi. Pengembalian memerlukan permohonan tersendiri.",
+    "citation": "PMK 164/2023 Lampiran D"
+  },
+  {
+    "id": "article17",
+    "condition": "article17",
+    "text": "Pilihan tarif Pasal 17 memengaruhi penggunaan fasilitas final 0,5%; bicarakan keadaan pribadi dengan konsultan.",
+    "citation": "PP 20/2026 Pasal 57(2)(a), (4)"
+  },
+  {
+    "id": "company",
+    "condition": "company",
+    "text": "Peredaran perseroan perorangan digabung dalam uji Rp 4,8 miliar dan tidak dicakup aplikasi.",
+    "citation": "PP 20/2026 Pasal 57(2)(e)"
+  },
+  {
+    "id": "approaching",
+    "condition": "cap_warning",
+    "text": "Peredaran mendekati batas Rp 4,8 miliar. Melewati batas berdampak pada penggunaan fasilitas tahun berikutnya; konsultasikan keadaan Anda.",
+    "citation": "PP 20/2026 Pasal 57(4); PP 55/2022 Pasal 61(1)"
+  },
+  {
+    "id": "article17_unknown",
+    "condition": "article17_unknown",
+    "text": "Pilihan tarif Pasal 17 belum diketahui. Pastikan pilihan Anda; hasil fasilitas 0,5% dapat tidak tepat sebelum diketahui.",
+    "citation": "PP 20/2026 Pasal 57(2)(a), (4)"
+  },
+  {
+    "id": "company_unknown",
+    "condition": "company_unknown",
+    "text": "Status perseroan perorangan belum diketahui. Pastikan apakah peredarannya perlu digabung untuk uji batas.",
+    "citation": "PP 20/2026 Pasal 57(2)(e)"
+  }
+]
