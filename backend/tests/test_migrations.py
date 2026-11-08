@@ -885,7 +885,8 @@ def test_payment_event_downgrade_refuses_duplicate_normalized_status(monkeypatch
     old = os.getcwd()
     try:
         os.chdir(BACKEND_ROOT)
-        command.upgrade(cfg, "head")
+        # Pinned: the test is about c45af872b930, and later revisions move head.
+        command.upgrade(cfg, "c45af872b930")
     finally:
         os.chdir(old)
 

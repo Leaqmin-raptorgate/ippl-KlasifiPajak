@@ -300,6 +300,8 @@ def _prior_gross_revenue(profile: Profile, spouse_in_cap: bool) -> tuple[int, st
     ``None`` on the new-taxpayer flag is the legacy engine-fixture form and
     infers the source: any supplied figure means a manually reported profile,
     no figures at all means a first-year taxpayer.
+    ``new_taxpayer_unknown`` is not that form. It is read as not new, so a
+    missing figure stays unverifiable instead of becoming a first year.
     """
     user_values = (
         profile.prior_year_usaha_omzet,
@@ -311,7 +313,7 @@ def _prior_gross_revenue(profile: Profile, spouse_in_cap: bool) -> tuple[int, st
         profile.prior_spouse_pekerjaan_bebas_omzet,
         profile.prior_spouse_already_final_omzet,
     )
-    new = profile.is_new_taxpayer_current_year
+    new = False if profile.new_taxpayer_unknown else profile.is_new_taxpayer_current_year
     include_spouse = profile.spouse_aggregation_active and spouse_in_cap
     if new is not None:
         required = (() if new else user_values) + (spouse_values if include_spouse else ())

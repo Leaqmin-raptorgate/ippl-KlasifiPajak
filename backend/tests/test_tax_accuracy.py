@@ -10,6 +10,7 @@ from test_tax_crud_trace_quota import _auth, _profile, _tx
 
 from app.db import SessionLocal
 from app.engine import Profile, Transaction, compute
+from app.engine.compute import _prior_gross_revenue
 from app.models import ClassificationEvent, MonthSnapshot
 from app.models import Profile as ProfileRow
 from app.models import Transaction as TransactionRow
@@ -63,6 +64,8 @@ def test_tc_prior_blank_engine(ruleset, new, aggregate, user, spouse, source, gr
 _PRIOR_USER = (1_000_000_000, 200_000_000, 50_000_000)
 _PRIOR_SPOUSE = (300_000_000, 100_000_000, 50_000_000)
 _PRIOR_EMPTY = (None, None, None)
+# Engine legacy fixture: flag None, not a stored unanswered answer.
+_LEGACY_NONE = "legacy_none"
 
 
 def _stored_prior_profile(*, new, aggregate, user, spouse):
@@ -99,15 +102,25 @@ def _stored_prior_profile(*, new, aggregate, user, spouse):
             1_250_000_000,
             "manual_profile",
         ),
-        (None, False, _PRIOR_EMPTY, _PRIOR_EMPTY, True, 0, "first_year_taxpayer"),
-        (
-            None,
+        pytest.param(
+            _LEGACY_NONE,
+            False,
+            _PRIOR_EMPTY,
+            _PRIOR_EMPTY,
+            True,
+            0,
+            "first_year_taxpayer",
+            id="legacy-none-no-figures-first-year",
+        ),
+        pytest.param(
+            _LEGACY_NONE,
             False,
             (5_200_000_000, None, None),
             _PRIOR_EMPTY,
             True,
             5_200_000_000,
             "manual_profile",
+            id="legacy-none-partial-figures-manual",
         ),
     ],
 )
@@ -120,10 +133,20 @@ def test_prior_year_dashboard_and_engine_agree(
     when spouse_in_cap is true. The None flag is the legacy fixture, not a
     stored profile value.
     """
-    stored = _stored_prior_profile(new=new, aggregate=aggregate, user=user, spouse=spouse)
     ruleset = replace(ruleset, spouse_in_cap=spouse_in_cap)
-    dash_amount, dash_tag = _prior_combined(stored, ruleset)
-    result = compute([], profile_to_engine(stored), ruleset)
+    if new is _LEGACY_NONE:
+        # A stored null now means unanswered (never new), so profile_to_engine
+        # sets new_taxpayer_unknown. The legacy form is the engine Profile with
+        # the flag None and new_taxpayer_unknown False; build it explicitly and
+        # feed the shared prior-year function and compute the same input.
+        stored = _stored_prior_profile(new=None, aggregate=aggregate, user=user, spouse=spouse)
+        engine_profile = replace(profile_to_engine(stored), new_taxpayer_unknown=False)
+        dash_amount, dash_tag = _prior_gross_revenue(engine_profile, ruleset.spouse_in_cap)
+        result = compute([], engine_profile, ruleset)
+    else:
+        stored = _stored_prior_profile(new=new, aggregate=aggregate, user=user, spouse=spouse)
+        dash_amount, dash_tag = _prior_combined(stored, ruleset)
+        result = compute([], profile_to_engine(stored), ruleset)
     assert (dash_amount, dash_tag) == (
         result.prior_year_gross_revenue,
         result.prior_year_resolution_source,

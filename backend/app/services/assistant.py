@@ -468,7 +468,7 @@ def _profile_dict(row: Profile) -> dict[str, Any]:
         "nib_status": row.nib_status,
         "kbli_code": row.kbli_code,
         "spouse_tax_status": row.spouse_tax_status,
-        "is_new_taxpayer_current_year": bool(row.is_new_taxpayer_current_year),
+        "is_new_taxpayer_current_year": row.is_new_taxpayer_current_year,
         "has_selected_article_17": row.has_selected_article_17,
         "has_sole_proprietor_company": row.has_sole_proprietor_company,
         "receives_salary": row.receives_salary,
@@ -515,6 +515,8 @@ def _guidance_for(rows: list[Profile]) -> list[dict[str, str]]:
             conditions.add("company")
         elif row.has_sole_proprietor_company is None:
             conditions.add("company_unknown")
+        if row.is_new_taxpayer_current_year is None:
+            conditions.add("new_taxpayer_unknown")
     selected = []
     for item in items:
         if not isinstance(item, dict) or item.get("condition") not in conditions:

@@ -42,6 +42,9 @@ class Profile:
     taxpayer with no history stays distinguishable from a taxpayer who
     genuinely reported nil. ``None`` means unset.
 
+    ``new_taxpayer_unknown`` is set only for a stored unanswered answer. It is
+    not the legacy ``None`` flag, which still infers a first year (FR-48).
+
     ``spouse_has_usaha_income`` and ``spouse_aggregation_active`` are separate
     fields. FR-03 records marital status; FR-21 and UC-13b record the Pasal 58
     aggregation flag. Neither is derived from the other.
@@ -56,6 +59,7 @@ class Profile:
     prior_year_pekerjaan_bebas_omzet: int | None = None
     prior_year_already_final_omzet: int | None = None
     is_new_taxpayer_current_year: bool | None = None
+    new_taxpayer_unknown: bool = False
     spouse_current_pekerjaan_bebas_omzet: int = 0
     spouse_current_already_final_omzet: int = 0
     prior_spouse_usaha_omzet: int | None = None
