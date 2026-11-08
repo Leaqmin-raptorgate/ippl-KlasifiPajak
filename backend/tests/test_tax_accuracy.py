@@ -260,6 +260,39 @@ def test_empty_profile_dashboard_checks_snapshots_once(client, monkeypatch):
         assert _checked_through(profile_id) == today
 
 
+@pytest.mark.parametrize(
+    "field,value",
+    [("client_name", "x" * 256), ("description", "x" * 256), ("invoice_no", "x" * 65)],
+)
+def test_fr05_long_transaction_fields_return_field_errors(client, field, value):
+    """FR-05: an over-long transaction field is rejected.
+
+    The shared envelope has code and message only. The field name is in the
+    message. There is no field or field_errors key.
+    """
+    _auth(client)
+    assert _profile(client).status_code == 200
+    response = _tx(client, **{field: value})
+    assert response.status_code == 422, response.text
+    error = response.json()["error"]
+    assert error["code"] == "VALIDATION_ERROR"
+    assert field in error["message"]
+    assert "field" not in error and "field_errors" not in error
+
+
+@pytest.mark.parametrize("field", ["client_name", "description"])
+def test_fr05_blank_required_transaction_fields_rejected(client, field):
+    """FR-05: a required transaction field cannot be blank."""
+    _auth(client)
+    assert _profile(client).status_code == 200
+    response = _tx(client, **{field: "   "})
+    assert response.status_code == 422, response.text
+    error = response.json()["error"]
+    assert error["code"] == "VALIDATION_ERROR"
+    assert field in error["message"]
+    assert "field" not in error and "field_errors" not in error
+
+
 def test_fr23a_dashboard_refreshes_when_future_date_arrives(client):
     with freeze_today_jakarta(date(2026, 11, 2)):
         _auth(client)
