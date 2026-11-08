@@ -564,7 +564,7 @@ The confirmation string is exact. Order of writes: set `user_id` and other perso
 
 ### 5.7 `GET /profiles/{tax_year}`
 
-`200` returns the profile, `version`, masked NIB, `spouse_tax_status`, the six prior-year integers, the three spouse current-year integers, `is_new_taxpayer_current_year` (`true`, `false`, or `null` when the question is unanswered, for example `"is_new_taxpayer_current_year": null`), `spouse_aggregation_active`, and `audit_trail` entries of `changed_at`, `field`, `old_value`, `new_value`.
+`200` returns the profile, `version`, masked NIB, `spouse_tax_status`, the six prior-year integers, the three spouse current-year integers, `is_new_taxpayer_current_year` (`true`, `false`, or `null` when the question is unanswered, for example `"is_new_taxpayer_current_year": null`), `spouse_aggregation_active`, and `audit_trail` entries of `changed_at`, `field`, `old_value`, `new_value`. An update that omits the field resets it to unanswered.
 
 `404` `PROFILE_NOT_FOUND`: "Profil untuk tahun pajak yang dipilih belum dibuat."
 
@@ -572,7 +572,7 @@ The confirmation string is exact. Order of writes: set `user_id` and other perso
 
 Accepts the same business fields as the GET body, plus `version`, with `nib_last_4` instead of `nib_masked`. Rejects `entity_type` other than `orang_pribadi` and a `nib_last_4` that is not four digits. The update matches `version` and then increments it.
 
-The six prior-year amounts are nullable; `null` means unanswered and `0` is an explicit amount. FR-48 onboarding records `spouse_tax_status` and nullable yes/no answers `has_selected_article_17`, `has_sole_proprietor_company`, `receives_salary`, and `is_new_taxpayer_current_year`. For each of those yes/no answers, `null` means unanswered and is not stored or read as `false`. Omitting `is_new_taxpayer_current_year` on create or update leaves it unanswered. An unanswered value is not a new taxpayer: missing prior-year user figures resolve as `unverifiable`, and all three user figures present resolve as `manual_profile`, the same as an explicit `false`. These profile fields are implemented; integration of the proposed requirements into the source SRS remains pending.
+The six prior-year amounts are nullable; `null` means unanswered and `0` is an explicit amount. FR-48 onboarding records `spouse_tax_status` and nullable yes/no answers `has_selected_article_17`, `has_sole_proprietor_company`, `receives_salary`, and `is_new_taxpayer_current_year`. For each of those yes/no answers, `null` means unanswered and is not stored or read as `false`. An update that omits `is_new_taxpayer_current_year` resets it to unanswered. Omitting it on create leaves it unanswered. An unanswered value is not a new taxpayer: missing prior-year user figures resolve as `unverifiable`, and all three user figures present resolve as `manual_profile`, the same as an explicit `false`. These profile fields are implemented; integration of the proposed requirements into the source SRS remains pending.
 
 `200` returns the saved profile, including the new `version`. Changing spouse aggregation, prior-year totals, spouse current-year totals, or the new-taxpayer flag marks year snapshots stale and recalculates them inside the user-row lock. A name-only change records an audit row and leaves snapshot hashes unchanged.
 
