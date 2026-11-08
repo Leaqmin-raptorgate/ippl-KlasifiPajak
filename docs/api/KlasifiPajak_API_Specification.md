@@ -899,6 +899,8 @@ At most one `pending` row exists per user and plan. The call locks that row. If 
 
 Midtrans sends `signature_key` in the JSON body. Compute SHA512 of the exact UTF-8 concatenation `order_id + status_code + gross_amount + ServerKey` with no separators, then compare its hexadecimal digest in constant time before any order lookup. Preserve `status_code` and `gross_amount` exactly as received for hashing; `gross_amount` is a string, for example `"25000.00"`. After signature verification parse the amount as integer rupiah and compare it to the order.
 
+Because Midtrans's `signature_key` covers `order_id + status_code + gross_amount + ServerKey` but does NOT sign `transaction_status` or `fraud_status`, settlement transitions require verifying that `status_code == "200"` in addition to signature validity and matching order amount. In production deployments, live status can be verified against the Midtrans Status API.
+
 Example with ServerKey `example-server-key`:
 
 ```json
