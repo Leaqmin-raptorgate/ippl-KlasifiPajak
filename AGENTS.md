@@ -55,9 +55,9 @@ Putra. It supersedes v1.0, v2.5 and v2.6. Its ids include `FR-01` through
 > `SPEC/KlasifiPajak/` (course SRS is never committed here). The HTTP contract
 > of record is API **v1.3.3**, mirrored at
 > `docs/api/KlasifiPajak_API_Specification.md`. The schema of record is ERD
-> **r3** (D-11 `month_snapshots.version`); initial Alembic revision `76fcdbc4af30` matches
-> r3. Current Alembic head `c45af872b930` incorporates proposed ERD r4 revisions
-> (`b19e6a25c70a`, `c45af872b930`). API v1.3.3 includes proposed SRS v2.8 changes
+> **r3** (D-11 `month_snapshots.version`). r3 was `76fcdbc4af30`; later revisions
+> are proposed r4 changes; run `alembic heads` for the current head.
+> API v1.3.3 includes proposed SRS v2.8 changes
 > pending integration into the source SRS. Do not add `TODO(SRS-COMMIT)` markers; every id cited here has a source
 > of record. Disclaimer lock (D-07):
 > `DOKUMEN KERJA (WORKPAPER) — BUKAN SPT RESMI DAN BUKAN PRODUK DJP/CORETAX.`
