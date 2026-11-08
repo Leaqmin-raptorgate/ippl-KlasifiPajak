@@ -24,7 +24,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.errors import ApiError
-from app.classify.model_client import ModelUnavailable, OpenAICompatibleClient
+from app.classify.model_client import (
+    ModelUnavailable,
+    OpenAICompatibleClient,
+    _redact,
+    mask_party_name,
+)
 from app.config.settings import Settings
 from app.logging_redaction import get_logger
 from app.models import ClassificationEvent, MonthSnapshot, Profile, QuotaCounter, Transaction, User
@@ -92,6 +97,7 @@ _DATA_DELIM = re.compile(
     r"<<<|>>>|DATA_[A-Za-z0-9_]+[ \t]*:|^[ \t]*(?:DATA|SYSTEM|DEVELOPER)[ \t]*:",
     re.IGNORECASE | re.MULTILINE,
 )
+_PARTY_NAME_KEYS = frozenset({"client_name", "name"})
 
 _RESERVE_SQL = (
     "UPDATE quota_counters "
@@ -529,10 +535,26 @@ def _corpus_quotes(query: str) -> list[Any]:
     return []
 
 
+def _sanitize_outbound(value: Any, key: str | None = None) -> Any:
+    """Copy model input with private names, emails, and phone numbers removed (FR-43)."""
+    if isinstance(value, str):
+        if key in _PARTY_NAME_KEYS:
+            return mask_party_name(value)
+        return _redact(value)
+    if isinstance(value, dict):
+        return {
+            str(item_key): _sanitize_outbound(item, str(item_key))
+            for item_key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_outbound(item) for item in value]
+    return value
+
+
 def _complete(question: str, tool_results: dict[str, Any]) -> Any:
     """Call the module-global model factory so tests can replace it per request."""
     payload = {"question": _DATA_DELIM.sub("", question), "tool_results": tool_results}
-    encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    encoded = json.dumps(_sanitize_outbound(payload), ensure_ascii=False, separators=(",", ":"))
     messages = [
         {"role": "system", "content": SYSTEM_INSTRUCTION},
         {"role": "user", "content": "DATA: " + encoded},
