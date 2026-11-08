@@ -58,6 +58,7 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     paid_flag: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     valid_until_utc: Mapped[datetime | None] = mapped_column(_DT6, nullable=True)
+    ai_consent_at: Mapped[datetime | None] = mapped_column(_DT6, nullable=True)
     created_at: Mapped[datetime] = mapped_column(_DT6, nullable=False)
 
 
@@ -99,6 +100,11 @@ class Profile(Base):
     kbli_code: Mapped[str] = mapped_column(String(16), default="", nullable=False)
     business_description: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     marital_status: Mapped[str] = mapped_column(String(8), default="unknown", nullable=False)
+    has_selected_article_17: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    has_sole_proprietor_company: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    receives_salary: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    snapshot_checked_through: Mapped[date | None] = mapped_column(Date, nullable=True)
+    spouse_tax_status: Mapped[str] = mapped_column(String(16), default="unknown", nullable=False)
     spouse_aggregation_active: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_new_taxpayer_current_year: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False
@@ -111,18 +117,12 @@ class Profile(Base):
     spouse_current_already_final_idr: Mapped[int] = mapped_column(
         BigInteger, default=0, nullable=False
     )
-    prior_user_usaha_idr: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
-    prior_user_pekerjaan_bebas_idr: Mapped[int] = mapped_column(
-        BigInteger, default=0, nullable=False
-    )
-    prior_user_already_final_idr: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
-    prior_spouse_usaha_idr: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
-    prior_spouse_pekerjaan_bebas_idr: Mapped[int] = mapped_column(
-        BigInteger, default=0, nullable=False
-    )
-    prior_spouse_already_final_idr: Mapped[int] = mapped_column(
-        BigInteger, default=0, nullable=False
-    )
+    prior_user_usaha_idr: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    prior_user_pekerjaan_bebas_idr: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    prior_user_already_final_idr: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    prior_spouse_usaha_idr: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    prior_spouse_pekerjaan_bebas_idr: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    prior_spouse_already_final_idr: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
 
 class ProfileChange(Base):
@@ -288,7 +288,9 @@ class PaymentEvent(Base):
 
     __tablename__ = "payment_events"
     __table_args__ = (
-        UniqueConstraint("order_id", "status", name="uq_payment_events_order_status"),
+        UniqueConstraint(
+            "order_id", "raw_status", "status", name="uq_payment_events_order_raw_status"
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -297,6 +299,7 @@ class PaymentEvent(Base):
     )
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
+    raw_status: Mapped[str] = mapped_column(String(255), nullable=False)
     gross_amount_idr: Mapped[int] = mapped_column(BigInteger, nullable=False)
     transaction_time: Mapped[datetime] = mapped_column(_DT6, nullable=False)
     received_at: Mapped[datetime] = mapped_column(_DT6, nullable=False)
@@ -328,3 +331,24 @@ __all__ = [
     "Transaction",
     "User",
 ]
+
+
+class AppConfig(Base):
+    """Versioned operational configuration values."""
+
+    __tablename__ = "app_config"
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(String(255), nullable=False)
+    updated_at_utc: Mapped[datetime] = mapped_column(_DT6, nullable=False)
+
+
+class ConfigChangeLog(Base):
+    """Append-only history of operational configuration changes."""
+
+    __tablename__ = "config_change_log"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    config_key: Mapped[str] = mapped_column(ForeignKey("app_config.key"), nullable=False)
+    old_value: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    new_value: Mapped[str] = mapped_column(String(255), nullable=False)
+    changed_at_utc: Mapped[datetime] = mapped_column(_DT6, nullable=False)
+    actor: Mapped[str] = mapped_column(String(64), nullable=False)

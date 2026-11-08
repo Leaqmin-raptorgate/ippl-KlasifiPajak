@@ -187,7 +187,7 @@ def test_tc_hard_12_alembic_upgrade_empty_to_head_and_downgrade(monkeypatch):
     engine = create_engine(migrate_url, pool_pre_ping=True)
     with engine.connect() as conn:
         version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
-        assert version == "76fcdbc4af30"
+        assert version == "c45af872b930"
         tables = {row[0] for row in conn.execute(text("SHOW TABLES")).fetchall()}
     engine.dispose()
     for required in (

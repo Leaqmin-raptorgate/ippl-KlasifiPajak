@@ -22,6 +22,10 @@ _BUSINESS_FIELDS = (
     "kbli_code",
     "business_description",
     "marital_status",
+    "spouse_tax_status",
+    "has_selected_article_17",
+    "has_sole_proprietor_company",
+    "receives_salary",
     "spouse_aggregation_active",
     "is_new_taxpayer_current_year",
     "spouse_current_usaha_idr",
@@ -38,6 +42,7 @@ _BUSINESS_FIELDS = (
 # API §5.7: only these mark year snapshots stale (name-only leaves hashes alone).
 _SNAPSHOT_FIELDS = frozenset(
     {
+        "has_selected_article_17",
         "spouse_aggregation_active",
         "is_new_taxpayer_current_year",
         "spouse_current_usaha_idr",
@@ -102,11 +107,23 @@ def update_profile(
             "ENTITY_TYPE_NOT_SUPPORTED",
             "KlasifiPajak v1 hanya mendukung wajib pajak orang_pribadi.",
         )
+    if payload.nib_status == "has_nib" and payload.nib_last_4 is None:
+        raise ApiError(
+            422,
+            "INVALID_NIB_FORMAT",
+            "Kolom nib_last_4 harus berupa tepat 4 digit angka.",
+            field="nib_last_4",
+        )
     if payload.nib_last_4 is not None and not _NIB.match(payload.nib_last_4):
         raise ApiError(
             422,
             "INVALID_NIB_FORMAT",
             "Kolom nib_last_4 harus berupa tepat 4 digit angka.",
+        )
+
+    if "spouse_tax_status" in payload.model_fields_set:
+        payload = payload.model_copy(
+            update={"spouse_aggregation_active": payload.spouse_tax_status == "separate"}
         )
 
     changed = False
@@ -168,6 +185,10 @@ def profile_out(db: Session, profile: ProfileRow) -> ProfileOut:
         kbli_code=profile.kbli_code,
         business_description=profile.business_description,
         marital_status=profile.marital_status,
+        spouse_tax_status=profile.spouse_tax_status,
+        has_selected_article_17=profile.has_selected_article_17,
+        has_sole_proprietor_company=profile.has_sole_proprietor_company,
+        receives_salary=profile.receives_salary,
         spouse_aggregation_active=profile.spouse_aggregation_active,
         is_new_taxpayer_current_year=profile.is_new_taxpayer_current_year,
         version=profile.version,
@@ -184,8 +205,16 @@ def profile_out(db: Session, profile: ProfileRow) -> ProfileOut:
             AuditEntry(
                 changed_at=row.changed_at.isoformat() + "Z",
                 field=row.field,
-                old_value=row.old_value,
-                new_value=row.new_value,
+                old_value=(
+                    f"*********{row.old_value}"
+                    if row.field == "nib_last_4" and row.old_value
+                    else row.old_value
+                ),
+                new_value=(
+                    f"*********{row.new_value}"
+                    if row.field == "nib_last_4" and row.new_value
+                    else row.new_value
+                ),
             )
             for row in audit
         ),

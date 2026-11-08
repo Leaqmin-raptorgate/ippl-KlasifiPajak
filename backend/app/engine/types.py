@@ -47,6 +47,7 @@ class Profile:
     aggregation flag. Neither is derived from the other.
     """
 
+    has_selected_article_17: bool = False
     spouse_has_usaha_income: str = "unknown"
     spouse_aggregation_active: bool = False
     spouse_usaha_omzet_ytd: int = 0

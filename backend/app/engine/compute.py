@@ -155,20 +155,20 @@ def compute(
     cap_spouse_ytd = spouse_ytd if ruleset.spouse_in_cap else 0
 
     prior_gross, prior_source = _prior_gross_revenue(profile)
-    prior_gross += cap_spouse_prior
-    if prior_source == PRIOR_YEAR_UNSET and cap_spouse_prior:
-        prior_source = f"{PRIOR_YEAR_UNSET}+spouse"
+    if prior_source != PRIOR_YEAR_UNVERIFIABLE:
+        prior_gross += cap_spouse_prior
     prior_ineligible = prior_source == PRIOR_YEAR_UNVERIFIABLE or _over_cap(
         prior_gross, ruleset.eligibility_cap_idr, ruleset.ineligible_when
     )
 
-    lines = _allocate(ordered, ruleset, prior_ineligible, spouse_ytd)
+    calculation_ineligible = prior_ineligible or profile.has_selected_article_17
+    lines = _allocate(ordered, ruleset, calculation_ineligible, spouse_ytd)
     months = _months(lines, ordered, profile, ruleset)
     ytd = sum(line.counted_in_usaha_omzet for line in lines)
     exempt = sum(line.exempt for line in lines)
     taxable = sum(line.taxable for line in lines)
     ineligible_amt = sum(line.scheme_ineligible_amount for line in lines)
-    if prior_ineligible:
+    if calculation_ineligible:
         exemption_used = 0
         exemption_remaining = 0
     else:
@@ -301,13 +301,21 @@ def _prior_gross_revenue(profile: Profile) -> tuple[int, str]:
         profile.prior_spouse_pekerjaan_bebas_omzet,
         profile.prior_spouse_already_final_omzet,
     )
-    if profile.is_new_taxpayer_current_year is True:
-        return 0, PRIOR_YEAR_UNSET
+    new = profile.is_new_taxpayer_current_year
+    if new is not None:
+        required = (() if new else user_values) + (
+            spouse_values if profile.spouse_aggregation_active else ()
+        )
+        if any(value is None for value in required):
+            return 0, PRIOR_YEAR_UNVERIFIABLE
+        if new and not profile.spouse_aggregation_active:
+            return 0, PRIOR_YEAR_UNSET
+        return sum(
+            value for value in (() if new else user_values) if value is not None
+        ), PRIOR_YEAR_REPORTED
     supplied = any(value is not None for value in user_values + spouse_values)
     if supplied:
         return sum(value for value in user_values if value is not None), PRIOR_YEAR_REPORTED
-    if profile.is_new_taxpayer_current_year is False:
-        return 0, PRIOR_YEAR_UNVERIFIABLE
     return 0, PRIOR_YEAR_UNSET
 
 
@@ -569,6 +577,8 @@ def _input_hash(
             for tx in selected
         ],
     }
+    if profile.has_selected_article_17:
+        payload["profile_context"]["has_selected_article_17"] = True
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return _INPUT_HASH_PREFIX + hashlib.sha256(raw.encode("utf-8")).hexdigest()
 

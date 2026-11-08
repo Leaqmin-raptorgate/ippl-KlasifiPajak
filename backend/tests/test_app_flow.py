@@ -392,8 +392,8 @@ def test_the_band_reports_how_much_of_it_is_still_unconfirmed():
     pita = client.get("/api/v1/tax/dashboard?tax_year=2026").json()["thresholds"]["pita_500_juta"]
     assert pita["provisional_omzet_idr"] == 7_000_000
     assert "belum terklasifikasi" in pita["annotation"]
-    # Reported alongside the band, never netted out of it.
-    assert pita["ytd_usaha_omzet_idr"] >= pita["provisional_omzet_idr"]
+    # FR-10: provisional rows are reported separately from the classified band.
+    assert pita["ytd_usaha_omzet_idr"] == 0
 
 
 def test_one_account_cannot_read_or_answer_another_accounts_question():

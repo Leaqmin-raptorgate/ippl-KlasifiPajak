@@ -1,5 +1,7 @@
 """Request and response shapes for the account endpoints."""
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 
 from app.api.errors import ApiError
@@ -122,24 +124,28 @@ class ProfileUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     version: int = Field(ge=1)
-    name: str = ""
+    name: str = Field(default="", max_length=255)
     entity_type: str = "orang_pribadi"
-    nib_status: str = "unknown"
+    nib_status: Literal["has_nib", "no_nib", "unknown"] = "unknown"
     nib_last_4: str | None = None
-    kbli_code: str = ""
-    business_description: str = ""
-    marital_status: str = "unknown"
+    kbli_code: str = Field(default="", max_length=16)
+    business_description: str = Field(default="", max_length=255)
+    marital_status: Literal["yes", "no", "unknown"] = "unknown"
+    spouse_tax_status: Literal["unmarried", "separate", "joint", "unknown"] = "unknown"
+    has_selected_article_17: bool | None = None
+    has_sole_proprietor_company: bool | None = None
+    receives_salary: bool | None = None
     spouse_aggregation_active: bool = False
     is_new_taxpayer_current_year: bool = False
     spouse_current_usaha_idr: int = Field(default=0, ge=0)
     spouse_current_pekerjaan_bebas_idr: int = Field(default=0, ge=0)
     spouse_current_already_final_idr: int = Field(default=0, ge=0)
-    prior_user_usaha_idr: int = Field(default=0, ge=0)
-    prior_user_pekerjaan_bebas_idr: int = Field(default=0, ge=0)
-    prior_user_already_final_idr: int = Field(default=0, ge=0)
-    prior_spouse_usaha_idr: int = Field(default=0, ge=0)
-    prior_spouse_pekerjaan_bebas_idr: int = Field(default=0, ge=0)
-    prior_spouse_already_final_idr: int = Field(default=0, ge=0)
+    prior_user_usaha_idr: int | None = Field(default=None, ge=0)
+    prior_user_pekerjaan_bebas_idr: int | None = Field(default=None, ge=0)
+    prior_user_already_final_idr: int | None = Field(default=None, ge=0)
+    prior_spouse_usaha_idr: int | None = Field(default=None, ge=0)
+    prior_spouse_pekerjaan_bebas_idr: int | None = Field(default=None, ge=0)
+    prior_spouse_already_final_idr: int | None = Field(default=None, ge=0)
 
 
 class AuditEntry(BaseModel):
@@ -165,15 +171,19 @@ class ProfileOut(BaseModel):
     business_description: str
     marital_status: str
     spouse_aggregation_active: bool
+    spouse_tax_status: str
+    has_selected_article_17: bool | None
+    has_sole_proprietor_company: bool | None
+    receives_salary: bool | None
     is_new_taxpayer_current_year: bool
     version: int
     spouse_current_usaha_idr: int
     spouse_current_pekerjaan_bebas_idr: int
     spouse_current_already_final_idr: int
-    prior_user_usaha_idr: int
-    prior_user_pekerjaan_bebas_idr: int
-    prior_user_already_final_idr: int
-    prior_spouse_usaha_idr: int
-    prior_spouse_pekerjaan_bebas_idr: int
-    prior_spouse_already_final_idr: int
+    prior_user_usaha_idr: int | None
+    prior_user_pekerjaan_bebas_idr: int | None
+    prior_user_already_final_idr: int | None
+    prior_spouse_usaha_idr: int | None
+    prior_spouse_pekerjaan_bebas_idr: int | None
+    prior_spouse_already_final_idr: int | None
     audit_trail: tuple[AuditEntry, ...]
