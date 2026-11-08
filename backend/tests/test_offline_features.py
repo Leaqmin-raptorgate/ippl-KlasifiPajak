@@ -444,6 +444,96 @@ def test_tc_ocr_second_confirm_of_one_receipt_conflicts_and_delete_removes_it(
     assert not [path for path in tmp_path.rglob("*") if path.is_file()]
 
 
+def test_tc_ocr_confirm_race_past_invoice_precheck_is_duplicate_invoice(
+    client, tmp_path, monkeypatch
+):
+    """A lost invoice race is the invoice conflict, not a receipt conflict.
+
+    The duplicate pre-check is forced to miss, so the second receipt hits the
+    ``duplicate_key`` unique index. That must stay ``DUPLICATE_INVOICE_TRANSACTION``.
+    """
+    from app.classify.model_client import FakeModelClient
+    from app.models import Transaction as TransactionRow
+    from app.services import receipts
+    from app.services import transactions as tx_services
+
+    monkeypatch.setattr(receipts, "RECEIPT_STORAGE_ROOT", tmp_path, raising=False)
+    monkeypatch.setattr(
+        receipts,
+        "get_ocr_client",
+        lambda: FakeModelClient(
+            [
+                {
+                    "amount_idr": None,
+                    "tx_date": None,
+                    "client_name": None,
+                    "invoice_no": None,
+                },
+                {
+                    "amount_idr": None,
+                    "tx_date": None,
+                    "client_name": None,
+                    "invoice_no": None,
+                },
+            ]
+        ),
+    )
+    user_id = _register_login(client, email="ocr-race@example.test", username="ocrrace")
+    _profile(client)
+    _set_paid(user_id)
+    _set_ai_consent(client)
+
+    def _upload() -> str:
+        uploaded = client.post(
+            f"{API}/transactions/ocr-upload",
+            files={"file": ("receipt.jpg", _jpeg_with_gps(), "image/jpeg")},
+        )
+        assert uploaded.status_code == 200, uploaded.text
+        return uploaded.json()["image_id"]
+
+    first_image = _upload()
+    second_image = _upload()
+    assert first_image != second_image
+    body = {
+        "confirmed_amount_idr": 54321,
+        "confirmed_tx_date": "2026-10-16",
+        "confirmed_client_name": "PT Nilai Pengguna",
+        "confirmed_description": "Nilai yang dikonfirmasi pengguna",
+        "confirmed_invoice_no": "USER-RACE-1",
+        "withheld_tax_amount_idr": 0,
+        "source_channel": "corporate_client",
+    }
+    first = client.post(
+        f"{API}/transactions/ocr-confirm",
+        json={**body, "image_id": first_image},
+    )
+    assert first.status_code == 201, first.text
+
+    calls = {"n": 0}
+
+    def _miss_precheck(*_args, **_kwargs):
+        calls["n"] += 1
+        return None
+
+    monkeypatch.setattr(tx_services, "find_duplicate_invoice_id", _miss_precheck)
+    again = client.post(
+        f"{API}/transactions/ocr-confirm",
+        json={**body, "image_id": second_image},
+    )
+    assert calls["n"] >= 1
+    assert again.status_code == 409, again.text
+    assert again.json()["error"]["code"] == "DUPLICATE_INVOICE_TRANSACTION"
+    assert again.json()["error"]["code"] != "RECEIPT_ALREADY_CONFIRMED"
+
+    db = SessionLocal()
+    try:
+        rows = db.scalars(select(TransactionRow).where(TransactionRow.user_id == user_id)).all()
+        assert len(rows) == 1
+        assert rows[0].image_id == first_image
+    finally:
+        db.close()
+
+
 def test_tc_ocr_rejects_image_just_above_pixel_cap(client, tmp_path, monkeypatch):
     """FR-06: a decode just above 40_000_000 pixels uses the existing bomb error."""
     from app.services import receipts

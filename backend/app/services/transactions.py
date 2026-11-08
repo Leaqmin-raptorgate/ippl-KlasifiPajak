@@ -227,6 +227,27 @@ def list_transactions(
     )
 
 
+def find_duplicate_invoice_id(
+    db: Session,
+    *,
+    user_id: str,
+    client_norm: str,
+    invoice_norm: str,
+    amount_idr: int,
+    tx_date: date,
+) -> str | None:
+    """Return a row that already has this client, invoice, amount, and date."""
+    return db.scalar(
+        select(TransactionRow.id).where(
+            TransactionRow.user_id == user_id,
+            TransactionRow.client_name_norm == client_norm,
+            TransactionRow.invoice_no_norm == invoice_norm,
+            TransactionRow.amount_idr == amount_idr,
+            TransactionRow.tx_date == tx_date,
+        )
+    )
+
+
 def create_transaction(
     db: Session,
     user: User,
@@ -262,14 +283,13 @@ def create_transaction(
     invoice_norm = normalize_text(payload.invoice_no) if payload.invoice_no else None
     invoice_norm = invoice_norm or None
     if invoice_norm:
-        duplicate = db.scalar(
-            select(TransactionRow.id).where(
-                TransactionRow.user_id == user.id,
-                TransactionRow.client_name_norm == client_norm,
-                TransactionRow.invoice_no_norm == invoice_norm,
-                TransactionRow.amount_idr == payload.amount_idr,
-                TransactionRow.tx_date == payload.tx_date,
-            )
+        duplicate = find_duplicate_invoice_id(
+            db,
+            user_id=user.id,
+            client_norm=client_norm,
+            invoice_norm=invoice_norm,
+            amount_idr=payload.amount_idr,
+            tx_date=payload.tx_date,
         )
         if duplicate is not None:
             raise ApiError(
