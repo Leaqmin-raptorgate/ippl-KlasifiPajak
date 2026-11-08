@@ -106,9 +106,7 @@ class Profile(Base):
     snapshot_checked_through: Mapped[date | None] = mapped_column(Date, nullable=True)
     spouse_tax_status: Mapped[str] = mapped_column(String(16), default="unknown", nullable=False)
     spouse_aggregation_active: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    is_new_taxpayer_current_year: Mapped[bool] = mapped_column(
-        Boolean, default=False, nullable=False
-    )
+    is_new_taxpayer_current_year: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     spouse_current_usaha_idr: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     spouse_current_pekerjaan_bebas_idr: Mapped[int] = mapped_column(
@@ -156,13 +154,14 @@ class ReceiptImage(Base):
 
 class Transaction(Base):
     __tablename__ = "transactions"
-    __table_args__ = (UniqueConstraint("duplicate_key", name="uq_transactions_duplicate_key"),)
+    __table_args__ = (
+        UniqueConstraint("duplicate_key", name="uq_transactions_duplicate_key"),
+        Index("uq_transactions_image_id", "image_id", unique=True),
+    )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
-    image_id: Mapped[str | None] = mapped_column(
-        ForeignKey("receipt_images.id"), nullable=True, index=True
-    )
+    image_id: Mapped[str | None] = mapped_column(ForeignKey("receipt_images.id"), nullable=True)
     tx_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     amount_idr: Mapped[int] = mapped_column(BigInteger, nullable=False)
     withheld_tax_amount_idr: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
