@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import smtplib
+import ssl
 from email.message import EmailMessage
 from typing import Protocol
 
@@ -71,12 +72,16 @@ class SmtpEmailSender:
             "Token berlaku 30 menit dan hanya sekali pakai.\n\n"
             f"{token}\n"
         )
-        client_cls = smtplib.SMTP_SSL if port == 465 else smtplib.SMTP
+        context = ssl.create_default_context()
         try:
-            with client_cls(host, port, timeout=30) as smtp:
+            if port == 465:
+                client = smtplib.SMTP_SSL(host, port, timeout=30, context=context)
+            else:
+                client = smtplib.SMTP(host, port, timeout=30)
+            with client as smtp:
                 smtp.ehlo()
-                if port == 587:
-                    smtp.starttls()
+                if port != 465:
+                    smtp.starttls(context=context)
                     smtp.ehlo()
                 if username:
                     smtp.login(username, password)

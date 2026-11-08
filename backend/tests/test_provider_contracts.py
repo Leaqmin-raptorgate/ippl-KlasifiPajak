@@ -2,6 +2,8 @@
 
 import hashlib
 import json
+import logging
+import ssl
 from decimal import Decimal
 
 import pytest
@@ -133,6 +135,83 @@ def test_fr_pay03_amount_parser_preserves_integer_rupiah():
     from app.payments.adapter import parse_gross_amount
 
     assert parse_gross_amount("25000.00") == 25_000
+
+
+def test_fr41_smtp_uses_tls_before_login_and_skips_empty_host(monkeypatch, caplog):
+    """FR-41: 465 is SMTP_SSL, every other configured port uses STARTTLS, empty host does not connect."""
+    import smtplib
+
+    from app.services.email import SmtpEmailSender
+
+    events: list[tuple] = []
+    token = "reset-token-plaintext-9f3a"
+
+    class FakeSMTP:
+        def __init__(self, host, port, timeout=30):
+            events.append(("smtp", host, port, timeout))
+            self.port = port
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def ehlo(self):
+            events.append(("ehlo", self.port))
+
+        def starttls(self, *, context=None):
+            events.append(("starttls", context))
+
+        def login(self, username, password):
+            events.append(("login", username, password))
+
+        def send_message(self, message):
+            events.append(("send", str(message["To"])))
+
+    class FakeSMTPSSL(FakeSMTP):
+        def __init__(self, host, port, timeout=30, context=None):
+            events.append(("smtp_ssl", host, port, timeout, context))
+            self.port = port
+
+    monkeypatch.setattr(smtplib, "SMTP", FakeSMTP)
+    monkeypatch.setattr(smtplib, "SMTP_SSL", FakeSMTPSSL)
+    monkeypatch.setenv("SMTP_HOST", "smtp.example.test")
+    monkeypatch.setenv("SMTP_USERNAME", "mailer")
+    monkeypatch.setenv("SMTP_PASSWORD", "secret")
+    monkeypatch.setenv("SMTP_FROM", "noreply@example.test")
+
+    def send(port: str) -> list[str]:
+        events.clear()
+        monkeypatch.setenv("SMTP_PORT", port)
+        SmtpEmailSender().send_password_reset("user@example.test", token)
+        return [item[0] for item in events]
+
+    caplog.set_level(logging.DEBUG)
+    kinds = send("587")
+    assert kinds[0] == "smtp"
+    starttls = next(item for item in events if item[0] == "starttls")
+    assert isinstance(starttls[1], ssl.SSLContext)
+    assert kinds.index("starttls") < kinds.index("login")
+
+    kinds = send("465")
+    assert kinds[0] == "smtp_ssl"
+    assert isinstance(events[0][4], ssl.SSLContext)
+    assert "starttls" not in kinds
+    assert "login" in kinds
+
+    kinds = send("2525")
+    assert kinds[0] == "smtp"
+    assert "smtp_ssl" not in kinds
+    starttls = next(item for item in events if item[0] == "starttls")
+    assert isinstance(starttls[1], ssl.SSLContext)
+    assert kinds.index("starttls") < kinds.index("login")
+
+    events.clear()
+    monkeypatch.setenv("SMTP_HOST", "")
+    SmtpEmailSender().send_password_reset("user@example.test", token)
+    assert events == []
+    assert token not in caplog.text
 
 
 def test_fr_pay07_gateway_defaults_to_sandbox_and_rejects_production_key():
