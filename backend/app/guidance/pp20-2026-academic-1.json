@@ -70,5 +70,11 @@
     "condition": "company_unknown",
     "text": "Status perseroan perorangan belum diketahui. Pastikan apakah peredarannya perlu digabung untuk uji batas.",
     "citation": "PP 20/2026 Pasal 57(2)(e)"
+  },
+  {
+    "id": "new_taxpayer_unknown",
+    "condition": "new_taxpayer_unknown",
+    "text": "Status wajib pajak baru tahun berjalan belum dijawab. Jawab ini terlebih dahulu; hasil kelayakan dapat tidak tepat sebelum diketahui.",
+    "citation": "PP 20/2026 Pasal 58(1)"
   }
 ]

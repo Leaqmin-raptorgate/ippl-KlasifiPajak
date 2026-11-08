@@ -44,6 +44,8 @@ def guidance(db: Session, user: User, ruleset: Ruleset) -> dict:
         conditions.add("company")
     elif profile.has_sole_proprietor_company is None:
         conditions.add("company_unknown")
+    if profile.is_new_taxpayer_current_year is None:
+        conditions.add("new_taxpayer_unknown")
     if monitoring["cap_warning"]:
         conditions.add("cap_warning")
     return {

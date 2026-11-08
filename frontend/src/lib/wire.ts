@@ -40,7 +40,7 @@ export interface Profile {
   has_selected_article_17: boolean | null;
   has_sole_proprietor_company: boolean | null;
   receives_salary: boolean | null;
-  is_new_taxpayer_current_year: boolean;
+  is_new_taxpayer_current_year: boolean | null;
   version: number;
   spouse_current_usaha_idr: number;
   spouse_current_pekerjaan_bebas_idr: number;
@@ -68,7 +68,7 @@ export interface ProfileUpdate {
   has_selected_article_17: boolean | null;
   has_sole_proprietor_company: boolean | null;
   receives_salary: boolean | null;
-  is_new_taxpayer_current_year: boolean;
+  is_new_taxpayer_current_year: boolean | null;
   spouse_current_usaha_idr: number;
   spouse_current_pekerjaan_bebas_idr: number;
   spouse_current_already_final_idr: number;
