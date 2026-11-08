@@ -209,10 +209,12 @@ def logout(
 
 @router.get("/auth/me", response_model=MeOut)
 def me(context: AuthContext = Depends(current_session)) -> MeOut:
+    stamp = context.user.ai_consent_at
     return MeOut(
         user_id=context.user.id,
         email=context.user.email,
         username=context.user.username,
+        ai_consent_at=iso_utc(stamp) if stamp is not None else None,
     )
 
 

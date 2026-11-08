@@ -115,4 +115,20 @@ describe("FR-48 spouse and prior-year answers", () => {
       }
     }
   });
+
+  it("shows error and prevents save when rupiah input contains invalid characters", async () => {
+    const { wrapper, save } = await mountProfile();
+    const input = wrapper.find("#p-pu");
+    expect(input.exists()).toBe(true);
+    await input.setValue("bukan-angka");
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text() === "Simpan")!
+      .trigger("click");
+    await flushPromises();
+    expect(save).not.toHaveBeenCalled();
+    const alert = wrapper.find("[role='alert']");
+    expect(alert.exists()).toBe(true);
+    expect(alert.text()).toContain("tidak valid");
+  });
 });

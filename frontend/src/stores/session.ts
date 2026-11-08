@@ -26,6 +26,7 @@ export const useSessionStore = defineStore("session", () => {
     muatJanji = (async () => {
       try {
         user.value = await api<Me>("/auth/me");
+        persetujuanAi.value = Boolean(user.value.ai_consent_at);
         sesiBerakhir.value = false;
       } catch (error) {
         user.value = null;
@@ -88,6 +89,9 @@ export const useSessionStore = defineStore("session", () => {
       body: JSON.stringify({ consent }),
     });
     persetujuanAi.value = body.consent;
+    if (user.value) {
+      user.value.ai_consent_at = body.ai_consent_at;
+    }
   }
 
   async function mintaReset(email: string) {

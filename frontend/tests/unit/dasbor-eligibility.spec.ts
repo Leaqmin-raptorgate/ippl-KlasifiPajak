@@ -95,4 +95,13 @@ describe("FR-19 dashboard eligibility", () => {
     expect(wrapper.text()).toMatch(reason);
     expect(wrapper.text()).not.toMatch(/pajak\s+(?:Rp\s*)?0\b/i);
   });
+
+  it("renders call to action to profile when status is unverifiable", async () => {
+    const wrapper = await renderDashboard("unverifiable");
+    expect(wrapper.text()).toContain("Data omzet tahun lalu belum lengkap");
+    const cta = wrapper
+      .findAllComponents({ name: "AppButton" })
+      .find((btn) => btn.props("to") === "/profil");
+    expect(cta).toBeTruthy();
+  });
 });
