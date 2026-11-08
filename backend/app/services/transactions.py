@@ -233,6 +233,7 @@ def create_transaction(
     payload: TransactionCreate,
     ruleset: Ruleset,
     background=None,
+    image_id: str | None = None,
 ) -> TransactionOut:
     """Store one row, classify it with the keyword table, and rebuild snapshots.
 
@@ -298,6 +299,7 @@ def create_transaction(
         rule_id=rule_id,
         requires_clarification=requires_clarification,
         version=1,
+        image_id=image_id,
     )
     db.add(row)
     db.flush()

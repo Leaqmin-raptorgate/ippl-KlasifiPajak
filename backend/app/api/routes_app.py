@@ -220,10 +220,13 @@ def me(context: AuthContext = Depends(current_session)) -> MeOut:
 def password_reset_request(
     payload: PasswordResetRequestIn,
     request: Request,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> MessageOut:
     # Discard plaintext; never leak account existence (API §5.4).
-    auth_service.request_password_reset(db, payload, client_ip=_client_ip(request))
+    auth_service.request_password_reset(
+        db, payload, client_ip=_client_ip(request), background_tasks=background_tasks
+    )
     return MessageOut(message=GENERIC_RESET_MESSAGE)
 
 
