@@ -11,6 +11,7 @@ import AppPill from "@/components/ui/AppPill.vue";
 import AppSegmented from "@/components/ui/AppSegmented.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
 import AppSheet from "@/components/ui/AppSheet.vue";
+import PanduanPanel from "@/components/app/PanduanPanel.vue";
 import WorkpaperNote from "@/components/app/WorkpaperNote.vue";
 import { ApiFailure } from "@/lib/api";
 import { CAPABILITIES } from "@/lib/capabilities";
@@ -18,11 +19,13 @@ import { HAPUS_AKUN } from "@/lib/domain";
 import { parseRupiah, rupiah, tanggalWaktuJakarta } from "@/lib/format";
 import { useKuotaStore } from "@/stores/kuota";
 import { useProfilStore } from "@/stores/profil";
+import { usePanduanStore } from "@/stores/panduan";
 import { useSessionStore } from "@/stores/session";
 import type { ProfileUpdate } from "@/lib/wire";
 
 const session = useSessionStore();
 const profil = useProfilStore();
+const panduan = usePanduanStore();
 const kuota = useKuotaStore();
 const router = useRouter();
 
@@ -44,18 +47,20 @@ const draft = reactive({
   nib_last_4: "",
   kbli_code: "",
   business_description: "",
-  marital_status: "unknown",
-  spouse_aggregation_active: false,
+  spouse_tax_status: "unknown" as ProfileUpdate["spouse_tax_status"],
+  has_selected_article_17: "",
+  has_sole_proprietor_company: "",
+  receives_salary: "",
   is_new_taxpayer_current_year: false,
   spouse_current_usaha_idr: "0",
   spouse_current_pekerjaan_bebas_idr: "0",
   spouse_current_already_final_idr: "0",
-  prior_user_usaha_idr: "0",
-  prior_user_pekerjaan_bebas_idr: "0",
-  prior_user_already_final_idr: "0",
-  prior_spouse_usaha_idr: "0",
-  prior_spouse_pekerjaan_bebas_idr: "0",
-  prior_spouse_already_final_idr: "0",
+  prior_user_usaha_idr: "",
+  prior_user_pekerjaan_bebas_idr: "",
+  prior_user_already_final_idr: "",
+  prior_spouse_usaha_idr: "",
+  prior_spouse_pekerjaan_bebas_idr: "",
+  prior_spouse_already_final_idr: "",
 });
 
 const nibOpsi = [
@@ -63,10 +68,16 @@ const nibOpsi = [
   { value: "no_nib", label: "Tidak punya NIB" },
   { value: "has_nib", label: "Punya NIB" },
 ];
-const kawinOpsi = [
-  { value: "unknown", label: "Belum diketahui" },
-  { value: "no", label: "Tidak" },
+const spouseTaxOptions = [
+  { value: "unknown", label: "Belum tahu" },
+  { value: "unmarried", label: "Tidak kawin" },
+  { value: "separate", label: "Terpisah (PH/MT)" },
+  { value: "joint", label: "Digabung" },
+];
+const jawabanOpsi = [
+  { value: "", label: "Belum tahu" },
   { value: "yes", label: "Ya" },
+  { value: "no", label: "Tidak" },
 ];
 
 const FIELD_LABELS: Record<string, string> = {
@@ -93,12 +104,6 @@ function labelNib(status?: string, masked?: string | null): string {
   if (masked) return masked;
   if (status === "no_nib") return "Tidak punya NIB";
   if (status === "has_nib") return "Punya NIB";
-  return "Belum diketahui";
-}
-
-function labelKawin(status?: string): string {
-  if (status === "yes") return "Kawin";
-  if (status === "no") return "Tidak kawin";
   return "Belum diketahui";
 }
 
@@ -133,7 +138,13 @@ const baris = computed(() => {
     { key: "nib", label: "Status NIB", nilai: labelNib(p.nib_status, p.nib_masked) },
     { key: "kbli", label: "KBLI", nilai: p.kbli_code || "Belum diisi" },
     { key: "usaha", label: "Uraian usaha", nilai: p.business_description || "Belum diisi" },
-    { key: "kawin", label: "Status perkawinan", nilai: labelKawin(p.marital_status) },
+    {
+      key: "kawin",
+      label: "Status perpajakan pasangan",
+      nilai:
+        spouseTaxOptions.find((option) => option.value === p.spouse_tax_status)?.label ??
+        "Belum tahu",
+    },
     {
       key: "pasal",
       label: "Agregasi Pasal 58",
@@ -153,23 +164,42 @@ function mulaiUbah() {
   draft.nib_last_4 = "";
   draft.kbli_code = p?.kbli_code ?? "";
   draft.business_description = p?.business_description ?? "";
-  draft.marital_status = p?.marital_status || "unknown";
-  draft.spouse_aggregation_active = p?.spouse_aggregation_active ?? false;
+  draft.spouse_tax_status = p?.spouse_tax_status || "unknown";
+  draft.has_selected_article_17 =
+    p?.has_selected_article_17 == null ? "" : p.has_selected_article_17 ? "yes" : "no";
+  draft.has_sole_proprietor_company =
+    p?.has_sole_proprietor_company == null ? "" : p.has_sole_proprietor_company ? "yes" : "no";
+  draft.receives_salary = p?.receives_salary == null ? "" : p.receives_salary ? "yes" : "no";
   draft.is_new_taxpayer_current_year = p?.is_new_taxpayer_current_year ?? false;
   draft.spouse_current_usaha_idr = uang(p?.spouse_current_usaha_idr ?? 0);
   draft.spouse_current_pekerjaan_bebas_idr = uang(p?.spouse_current_pekerjaan_bebas_idr ?? 0);
   draft.spouse_current_already_final_idr = uang(p?.spouse_current_already_final_idr ?? 0);
-  draft.prior_user_usaha_idr = uang(p?.prior_user_usaha_idr ?? 0);
-  draft.prior_user_pekerjaan_bebas_idr = uang(p?.prior_user_pekerjaan_bebas_idr ?? 0);
-  draft.prior_user_already_final_idr = uang(p?.prior_user_already_final_idr ?? 0);
-  draft.prior_spouse_usaha_idr = uang(p?.prior_spouse_usaha_idr ?? 0);
-  draft.prior_spouse_pekerjaan_bebas_idr = uang(p?.prior_spouse_pekerjaan_bebas_idr ?? 0);
-  draft.prior_spouse_already_final_idr = uang(p?.prior_spouse_already_final_idr ?? 0);
+  draft.prior_user_usaha_idr = p?.prior_user_usaha_idr == null ? "" : uang(p.prior_user_usaha_idr);
+  draft.prior_user_pekerjaan_bebas_idr =
+    p?.prior_user_pekerjaan_bebas_idr == null ? "" : uang(p.prior_user_pekerjaan_bebas_idr);
+  draft.prior_user_already_final_idr =
+    p?.prior_user_already_final_idr == null ? "" : uang(p.prior_user_already_final_idr);
+  draft.prior_spouse_usaha_idr =
+    p?.prior_spouse_usaha_idr == null ? "" : uang(p.prior_spouse_usaha_idr);
+  draft.prior_spouse_pekerjaan_bebas_idr =
+    p?.prior_spouse_pekerjaan_bebas_idr == null ? "" : uang(p.prior_spouse_pekerjaan_bebas_idr);
+  draft.prior_spouse_already_final_idr =
+    p?.prior_spouse_already_final_idr == null ? "" : uang(p.prior_spouse_already_final_idr);
   sedangUbah.value = true;
 }
 
 function angka(raw: string) {
   return parseRupiah(raw) ?? 0;
+}
+
+function nilaiIdr(raw: string) {
+  return raw.trim() === "" ? null : angka(raw);
+}
+
+function booleanJawaban(raw: string): boolean | null {
+  if (raw === "yes") return true;
+  if (raw === "no") return false;
+  return null;
 }
 
 async function simpanData() {
@@ -182,21 +212,26 @@ async function simpanData() {
     nib_last_4: draft.nib_status === "has_nib" ? draft.nib_last_4 : null,
     kbli_code: draft.kbli_code.trim(),
     business_description: draft.business_description.trim(),
-    marital_status: draft.marital_status,
-    spouse_aggregation_active: draft.spouse_aggregation_active,
+    marital_status: profil.profile?.marital_status ?? "unknown",
+    spouse_tax_status: draft.spouse_tax_status,
+    spouse_aggregation_active: draft.spouse_tax_status === "separate",
+    has_selected_article_17: booleanJawaban(draft.has_selected_article_17),
+    has_sole_proprietor_company: booleanJawaban(draft.has_sole_proprietor_company),
+    receives_salary: booleanJawaban(draft.receives_salary),
     is_new_taxpayer_current_year: draft.is_new_taxpayer_current_year,
     spouse_current_usaha_idr: angka(draft.spouse_current_usaha_idr),
     spouse_current_pekerjaan_bebas_idr: angka(draft.spouse_current_pekerjaan_bebas_idr),
     spouse_current_already_final_idr: angka(draft.spouse_current_already_final_idr),
-    prior_user_usaha_idr: angka(draft.prior_user_usaha_idr),
-    prior_user_pekerjaan_bebas_idr: angka(draft.prior_user_pekerjaan_bebas_idr),
-    prior_user_already_final_idr: angka(draft.prior_user_already_final_idr),
-    prior_spouse_usaha_idr: angka(draft.prior_spouse_usaha_idr),
-    prior_spouse_pekerjaan_bebas_idr: angka(draft.prior_spouse_pekerjaan_bebas_idr),
-    prior_spouse_already_final_idr: angka(draft.prior_spouse_already_final_idr),
+    prior_user_usaha_idr: nilaiIdr(draft.prior_user_usaha_idr),
+    prior_user_pekerjaan_bebas_idr: nilaiIdr(draft.prior_user_pekerjaan_bebas_idr),
+    prior_user_already_final_idr: nilaiIdr(draft.prior_user_already_final_idr),
+    prior_spouse_usaha_idr: nilaiIdr(draft.prior_spouse_usaha_idr),
+    prior_spouse_pekerjaan_bebas_idr: nilaiIdr(draft.prior_spouse_pekerjaan_bebas_idr),
+    prior_spouse_already_final_idr: nilaiIdr(draft.prior_spouse_already_final_idr),
   };
   try {
     await profil.simpan(body);
+    if (session.user) await panduan.muat();
     sedangUbah.value = false;
   } catch (error) {
     galat.value = error instanceof ApiFailure ? error.message : "Simpan gagal.";
@@ -224,7 +259,10 @@ const konfirmasiGagal = computed(() =>
 );
 
 onMounted(() => {
-  void profil.muat();
+  void profil.muat().then(() => {
+    if (session.user && profil.profile) void panduan.muat();
+    else panduan.bersihkan();
+  });
   void kuota.muat();
   // The device list reads /auth/sessions, so it is only fetched while the block
   // that renders it exists.
@@ -323,11 +361,44 @@ async function jalankanHapus() {
           <AppInput id="p-usaha" v-model="draft.business_description" />
         </AppField>
         <AppField
-          label="Status perkawinan"
-          for-id="p-kawin"
-          hint="Terpisah dari agregasi Pasal 58."
+          label="Status perpajakan pasangan"
+          for-id="p-status-pasangan"
+          hint="Pilih belum tahu jika belum yakin. Hanya PH/MT yang mengaktifkan agregasi Pasal 58."
         >
-          <AppSelect id="p-kawin" v-model="draft.marital_status" :options="kawinOpsi" />
+          <AppSelect
+            id="p-status-pasangan"
+            v-model="draft.spouse_tax_status"
+            :options="spouseTaxOptions"
+          />
+        </AppField>
+        <AppField
+          label="Memilih tarif umum Pasal 17?"
+          for-id="p-pasal17"
+          hint="Belum tahu dapat dibiarkan kosong."
+        >
+          <AppSelect
+            id="p-pasal17"
+            v-model="draft.has_selected_article_17"
+            :options="jawabanOpsi"
+          />
+        </AppField>
+        <AppField
+          label="Memiliki Perseroan Perorangan?"
+          for-id="p-ptperorangan"
+          hint="Belum tahu dapat dibiarkan kosong."
+        >
+          <AppSelect
+            id="p-ptperorangan"
+            v-model="draft.has_sole_proprietor_company"
+            :options="jawabanOpsi"
+          />
+        </AppField>
+        <AppField
+          label="Menerima gaji sebagai pegawai?"
+          for-id="p-gaji"
+          hint="Belum tahu dapat dibiarkan kosong."
+        >
+          <AppSelect id="p-gaji" v-model="draft.receives_salary" :options="jawabanOpsi" />
         </AppField>
         <AppField label="Omzet usaha pasangan tahun ini" for-id="p-su">
           <AppInput id="p-su" v-model="draft.spouse_current_usaha_idr" mono inputmode="numeric" />
@@ -393,16 +464,14 @@ async function jalankanHapus() {
         </div>
         <p class="demo-cat">
           <label>
-            <input v-model="draft.spouse_aggregation_active" type="checkbox" />
-            Agregasi Pasal 58 aktif
-          </label>
-          <label>
             <input v-model="draft.is_new_taxpayer_current_year" type="checkbox" />
             Wajib pajak baru tahun ini
           </label>
         </p>
       </div>
     </AppCard>
+
+    <PanduanPanel v-if="profil.profile" />
 
     <AppCard title="Preferensi" subtitle="Berlaku untuk akun ini di perangkat ini.">
       <div class="tema">

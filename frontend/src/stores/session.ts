@@ -13,6 +13,7 @@ export const useSessionStore = defineStore("session", () => {
   const siap = ref(false);
   const sesiBerakhir = ref(false);
   const pesan = ref("");
+  const persetujuanAi = ref(false);
   const theme = ref<Theme>(readTheme());
   let muatJanji: Promise<void> | null = null;
 
@@ -44,12 +45,14 @@ export const useSessionStore = defineStore("session", () => {
 
   function jatuh(code: string) {
     user.value = null;
+    persetujuanAi.value = false;
     siap.value = true;
     sesiBerakhir.value = code === "session_expired" || code === "session_revoked";
   }
 
   async function masuk(identifier: string, password: string) {
     pesan.value = "";
+    persetujuanAi.value = false;
     await api("/auth/login", {
       method: "POST",
       body: JSON.stringify({ identifier, password }),
@@ -74,8 +77,17 @@ export const useSessionStore = defineStore("session", () => {
       /* a dead cookie still leaves the shell */
     }
     user.value = null;
+    persetujuanAi.value = false;
     siap.value = true;
     sesiBerakhir.value = false;
+  }
+
+  async function aturPersetujuanAi(consent: boolean) {
+    const body = await api<{ consent: boolean; ai_consent_at: string | null }>("/ai-consent", {
+      method: "PUT",
+      body: JSON.stringify({ consent }),
+    });
+    persetujuanAi.value = body.consent;
   }
 
   async function mintaReset(email: string) {
@@ -111,6 +123,7 @@ export const useSessionStore = defineStore("session", () => {
     siap,
     sesiBerakhir,
     pesan,
+    persetujuanAi,
     theme,
     tampilanNama,
     inisial,
@@ -121,6 +134,7 @@ export const useSessionStore = defineStore("session", () => {
     keluar,
     mintaReset,
     konfirmasiReset,
+    aturPersetujuanAi,
     setTheme,
     toggleTheme,
   };

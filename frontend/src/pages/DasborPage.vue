@@ -8,16 +8,21 @@ import AppMeter from "@/components/ui/AppMeter.vue";
 import AppPill from "@/components/ui/AppPill.vue";
 import StatCard from "@/components/app/StatCard.vue";
 import TransactionLedger from "@/components/app/TransactionLedger.vue";
+import PanduanPanel from "@/components/app/PanduanPanel.vue";
 import WorkpaperNote from "@/components/app/WorkpaperNote.vue";
 import { ApiFailure } from "@/lib/api";
 import { CAPABILITIES } from "@/lib/capabilities";
 import { KATEGORI_LABEL } from "@/lib/domain";
 import { bulanTahun, persen, rupiah, rupiahPlain, rupiahShort } from "@/lib/format";
 import { usePajakStore } from "@/stores/pajak";
+import { usePanduanStore } from "@/stores/panduan";
+import { useSessionStore } from "@/stores/session";
 import { useTransaksiStore } from "@/stores/transaksi";
 
 const store = useTransaksiStore();
 const pajak = usePajakStore();
+const panduan = usePanduanStore();
+const session = useSessionStore();
 const router = useRouter();
 const pdfPesan = ref("");
 
@@ -44,8 +49,8 @@ const omzetBelumTerklasifikasi = computed(() => pita.value?.provisional_omzet_id
 
 const STATUS_LABEL: Record<string, string> = {
   scheme_eligible: "Memenuhi syarat",
-  scheme_ineligible: "Tidak memenuhi syarat",
-  unverifiable: "Belum dapat diperiksa",
+  scheme_ineligible: "Tidak dihitung di sini",
+  unverifiable: "Tidak dihitung di sini",
 };
 
 const OVER_LABEL: Record<string, string> = {
@@ -54,6 +59,22 @@ const OVER_LABEL: Record<string, string> = {
 };
 
 const statusSkema = computed(() => STATUS_LABEL[lalu.value?.status ?? ""] ?? "—");
+const alasanSkema = computed(() => {
+  const alasanApi = pajak.dashboard?.monthly_summaries.find(
+    (bulan) => bulan.annotation,
+  )?.annotation;
+  if (alasanApi) return alasanApi;
+  if (lalu.value?.status === "scheme_ineligible") {
+    return `Omzet gabungan tahun lalu ${rupiah(lalu.value.combined_prior_year_gross_idr)} melampaui batas ${rupiah(lalu.value.limit_idr)}.`;
+  }
+  if (lalu.value?.status === "unverifiable") {
+    return "Data omzet tahun lalu belum lengkap, sehingga batas kelayakan belum dapat diperiksa.";
+  }
+  return "";
+});
+const skemaTidakDihitung = computed(
+  () => lalu.value?.status === "scheme_ineligible" || lalu.value?.status === "unverifiable",
+);
 
 const breakdown = computed(() => {
   const now = tahun.value;
@@ -78,7 +99,10 @@ const breakdown = computed(() => {
 const terbaru = computed(() => store.items.slice(0, 5));
 
 onMounted(() => {
-  void pajak.muat();
+  void pajak.muat().then(() => {
+    if (session.user && pajak.dashboard) void panduan.muat();
+    else panduan.bersihkan();
+  });
   void store.muat({ per_page: 5 }).catch(() => undefined);
 });
 
@@ -205,6 +229,15 @@ async function unduh() {
       </div>
     </AppCard>
 
+    <AppCard v-if="tahun?.cap_warning" class="cap-warning" role="status">
+      <p class="cap-warning-title">Omzet gabungan mendekati batas tahun berjalan</p>
+      <p>
+        Omzet gabungan tercatat {{ rupiah(tahun.ytd_combined_gross_idr) }} atau
+        {{ tahun.cap_warning_percent }}% dari batas {{ rupiah(tahun.limit_idr) }}. Peringatan ini
+        tidak mengubah status kelayakan atau angka pajak.
+      </p>
+    </AppCard>
+
     <section class="stats" aria-label="Ringkasan">
       <div class="stat-grid kp-stagger">
         <StatCard
@@ -230,15 +263,18 @@ async function unduh() {
           label="Kelayakan skema (omzet lalu)"
           :value="statusSkema"
           :caption="
-            lalu
+            alasanSkema ||
+            (lalu
               ? `Omzet gabungan: ${rupiah(lalu.combined_prior_year_gross_idr)}`
-              : 'Menunggu dasbor'
+              : 'Menunggu dasbor')
           "
           icon="helpCircle"
-          :tone="lalu?.status === 'scheme_ineligible' ? 'warn' : 'default'"
+          :tone="skemaTidakDihitung ? 'warn' : 'default'"
         />
       </div>
     </section>
+
+    <PanduanPanel v-if="pajak.dashboard" />
 
     <section v-if="pajak.dashboard" aria-labelledby="h-bulan">
       <div class="sec-head">
@@ -252,17 +288,23 @@ async function unduh() {
           <li v-for="bulan in pajak.dashboard.monthly_summaries" :key="bulan.month" class="mix-row">
             <span>{{ bulanTahun(bulan.month + "-01") }}</span>
             <span class="figure">omzet {{ rupiahPlain(bulan.usaha_omzet_idr) }}</span>
-            <span class="figure">pajak {{ rupiahPlain(bulan.tax_0_5_pct_idr) }}</span>
-            <span class="figure">kurang bayar {{ rupiahPlain(bulan.sisa_bayar_idr) }}</span>
-            <AppPill
-              size="sm"
-              :label="OVER_LABEL[bulan.overwithheld_status] ?? bulan.overwithheld_status"
-              :tone="bulan.overwithheld_status === 'nihil' ? 'neutral' : 'ask'"
-            />
+            <template v-if="skemaTidakDihitung">
+              <span class="figure">Tidak dihitung di sini</span>
+              <span class="muted">{{ alasanSkema }}</span>
+            </template>
+            <template v-else>
+              <span class="figure">pajak {{ rupiahPlain(bulan.tax_0_5_pct_idr) }}</span>
+              <span class="figure">kurang bayar {{ rupiahPlain(bulan.sisa_bayar_idr) }}</span>
+              <AppPill
+                size="sm"
+                :label="OVER_LABEL[bulan.overwithheld_status] ?? bulan.overwithheld_status"
+                :tone="bulan.overwithheld_status === 'nihil' ? 'neutral' : 'ask'"
+              />
+            </template>
           </li>
         </ul>
       </AppCard>
-      <p v-if="CAPABILITIES.workpaperExport && pajak.recap" class="sub">
+      <p v-if="CAPABILITIES.workpaperExport && pajak.recap && !skemaTidakDihitung" class="sub">
         Rekap usaha {{ rupiah(pajak.recap.total_usaha_omzet_idr) }}, kena
         {{ rupiah(pajak.recap.total_porsi_kena_idr) }}, pajak
         {{ rupiah(pajak.recap.total_tax_0_5_pct_idr) }}, sisa
@@ -414,6 +456,17 @@ async function unduh() {
   font: var(--t-body);
   color: var(--ink);
   line-height: 1.4;
+}
+
+.cap-warning {
+  border-color: var(--cat-ask-line);
+  background: var(--cat-ask-bg);
+  color: var(--cat-ask-ink);
+}
+
+.cap-warning-title {
+  margin-bottom: var(--s-1);
+  font-weight: 650;
 }
 
 .meter {
