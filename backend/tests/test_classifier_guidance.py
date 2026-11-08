@@ -189,3 +189,15 @@ def test_tc_cap_warning_exact_integer_boundary(client, amount, warning):
         assert monitoring["cap_warning_percent"] == 80
         assert monitoring["cap_warning"] is warning
         assert monitoring["next_year_ineligible"] is False
+
+
+@pytest.mark.parametrize(
+    "description", ["bunga deposito", "bunga bank", "dividen", "hadiah undian"]
+)
+def test_fr10_non_business_excluded_from_cap(description):
+    """FR-10 / FR-20: non-business receipts do not count as turnover."""
+    assert classify(description)[0] == "non_object"
+
+
+def test_fr10_business_rent_remains_final():
+    assert classify("sewa tanah")[0] == "already_final"

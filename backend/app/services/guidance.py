@@ -1,6 +1,7 @@
 """Static, cited guidance selected for a taxpayer (FR-49)."""
 
 import json
+from functools import lru_cache
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -13,6 +14,16 @@ from app.services.profile import find_profile
 from app.services.snapshot import DISCLAIMER
 
 
+@lru_cache(maxsize=16)
+def _load_guidance_items(ruleset_id: str) -> list[dict]:
+    path = Path(__file__).parent.parent / "guidance" / f"{ruleset_id}.json"
+    if not path.is_file():
+        raise ApiError(
+            500, "RULESET_GUIDANCE_NOT_FOUND", f"Panduan ruleset {ruleset_id} tidak ditemukan."
+        )
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def guidance(db: Session, user: User, ruleset: Ruleset) -> dict:
     """Return the applicable ruleset guidance and disclaimer."""
     profile = find_profile(db, user, ruleset.tax_year)
@@ -20,9 +31,7 @@ def guidance(db: Session, user: User, ruleset: Ruleset) -> dict:
         raise ApiError(
             404, "PROFILE_NOT_FOUND", "Profil untuk tahun pajak yang dipilih belum dibuat."
         )
-    items = json.loads(
-        (Path(__file__).parent.parent / "guidance" / f"{ruleset.ruleset_id}.json").read_text()
-    )
+    items = _load_guidance_items(ruleset.ruleset_id)
     monitoring = dashboard(db, user, ruleset.tax_year, ruleset)["thresholds"][
         "monitoring_current_year_cap_4_8m"
     ]

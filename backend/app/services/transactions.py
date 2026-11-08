@@ -30,6 +30,7 @@ from app.schemas.transaction import (
     TransactionUpdate,
 )
 from app.security import iso_utc, new_id, now_utc
+from app.services.config import get_config
 from app.services.profile import find_profile
 from app.services.snapshot import DISCLAIMER
 from app.services.snapshots_store import (
@@ -271,7 +272,7 @@ def create_transaction(
             )
 
     category, rule_id, confidence, requires_clarification, citation = classify(
-        f"{payload.description} {payload.client_name}"
+        payload.description, float(get_config(db, "T_rule"))
     )
     row = TransactionRow(
         id=new_id("tx_"),
@@ -377,7 +378,11 @@ def clarification_for(db: Session, user: User, transaction_id: str) -> Clarifica
     return ClarificationOut(
         transaction_id=row.id,
         provisional_category=row.category,
-        question=_CLARIFICATION_QUESTION,
+        question=(
+            f"Penghasilan dari {row.client_name} sebesar Rp {row.amount_idr:,}".replace(",", ".")
+            + ": "
+            + _CLARIFICATION_QUESTION
+        ),
         options=tuple(
             ClarificationOption(value=value, label=label) for value, label in _CATEGORIES
         ),
@@ -651,7 +656,7 @@ def reclassify_transactions(
         old_category = row.category
         old_requires_clarification = row.requires_clarification
         category, rule_id, confidence, requires_clarification, citation = classify(
-            f"{row.description} {row.client_name}"
+            row.description, float(get_config(db, "T_rule"))
         )
         old_was = old_category
         before = _usaha_total(db, user.id, tax_year=ruleset.tax_year, as_of=today_jakarta())
