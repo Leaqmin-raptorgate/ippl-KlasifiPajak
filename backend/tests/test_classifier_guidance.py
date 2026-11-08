@@ -175,6 +175,32 @@ def test_fr49_guidance_is_profile_applicable_cited_and_disclaimed(client):
     )
 
 
+def test_reclassify_reads_rule_threshold_once(client, monkeypatch):
+    """A multi-row reclassify loads T_rule once for the whole request."""
+    _auth(client)
+    assert _profile(client).status_code == 200
+    first = _tx(client, description="Penjualan sembako", invoice_no="INV-ONCE-A").json()
+    second = _tx(client, description="Jasa penerjemahan", invoice_no="INV-ONCE-B").json()
+    calls = {"n": 0}
+    from app.services import transactions as transaction_service
+
+    real = transaction_service.get_config
+
+    def wrapped(db, key):
+        if key == "T_rule":
+            calls["n"] += 1
+        return real(db, key)
+
+    monkeypatch.setattr(transaction_service, "get_config", wrapped)
+    response = client.post(
+        "/api/v1/transactions/reclassify",
+        json={"transaction_ids": [first["id"], second["id"]]},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["reclassified_count"] == 2
+    assert calls["n"] == 1
+
+
 @pytest.mark.parametrize(("amount", "warning"), [(3_839_999_999, False), (3_840_000_000, True)])
 def test_tc_cap_warning_exact_integer_boundary(client, amount, warning):
     """FR-50: the 80 percent notice does not itself make next year ineligible."""

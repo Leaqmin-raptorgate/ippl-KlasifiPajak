@@ -651,12 +651,13 @@ def reclassify_transactions(
             )
         rows.append(row)
 
+    threshold = float(get_config(db, "T_rule"))
     results = []
     for row in rows:
         old_category = row.category
         old_requires_clarification = row.requires_clarification
         category, rule_id, confidence, requires_clarification, citation = classify(
-            row.description, float(get_config(db, "T_rule"))
+            row.description, threshold
         )
         old_was = old_category
         before = _usaha_total(db, user.id, tax_year=ruleset.tax_year, as_of=today_jakarta())
