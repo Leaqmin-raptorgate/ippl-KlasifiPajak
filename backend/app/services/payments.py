@@ -79,13 +79,17 @@ def create_order(db: Session, user: User, plan_id: str) -> tuple[dict, bool]:
         .with_for_update()
     )
     if pending is not None and pending.expires_at_utc > instant:
-        result = _order_out(pending)
-        db.commit()
-        if not result["payment_url"]:
-            raise ApiError(
-                503, "PAYMENT_GATEWAY_UNAVAILABLE", "Pembayaran sedang disiapkan. Coba lagi."
-            )
-        return result, False
+        if not pending.payment_url and (instant - pending.created_at) > timedelta(minutes=1):
+            pending.status = "fail"
+            db.flush()
+        else:
+            result = _order_out(pending)
+            db.commit()
+            if not result["payment_url"]:
+                raise ApiError(
+                    503, "PAYMENT_GATEWAY_UNAVAILABLE", "Pembayaran sedang disiapkan. Coba lagi."
+                )
+            return result, False
     if pending is not None:
         pending.status = "expire"
         db.flush()
@@ -143,7 +147,10 @@ def list_orders(db: Session, user: User) -> list[dict]:
 def process_notification(db: Session, payload: dict[str, Any]) -> dict:
     """Verify, record and apply a gateway event atomically (FR-PAY-03)."""
     # Always use the real verifier, even when order creation uses a fake gateway.
-    verifier = MidtransAdapter(server_key=os.environ.get("MIDTRANS_SERVER_KEY", ""))
+    verifier = MidtransAdapter(
+        server_key=os.environ.get("MIDTRANS_SERVER_KEY", ""),
+        is_production=os.environ.get("MIDTRANS_IS_PRODUCTION", "false").lower() == "true",
+    )
     if not verifier.verify_notification(payload):
         raise ApiError(401, "INVALID_WEBHOOK_SIGNATURE", "Tanda tangan pembayaran tidak sah.")
     order_id = payload["order_id"]
@@ -207,8 +214,8 @@ def process_notification(db: Session, payload: dict[str, Any]) -> dict:
                 received_at=instant,
             )
         )
-        db.flush()
-        if normalized == "settlement" and order.status != "settlement":
+        status_code = str(payload.get("status_code", ""))
+        if normalized == "settlement" and status_code == "200" and order.status != "settlement":
             order.status = "settlement"
             if owner is not None and order.user_id == owner.id:
                 start = max(instant, owner.valid_until_utc) if owner.valid_until_utc else instant
