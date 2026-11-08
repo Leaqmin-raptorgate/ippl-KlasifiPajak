@@ -9,19 +9,19 @@ Spec of record: **SRS v2.7**, **API v1.3.3** (mirrored under `docs/api/`),
 
 ## Approved decisions (D-01…D-11)
 
-| ID   | Topic                                                                                                             | Status                                                                     |
-| ---- | ----------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| D-01 | Receipt photo storage: local disk under `RECEIPT_STORAGE_ROOT`, authenticated GET, EXIF strip                     | **approved** 2026-10-28 (build still pending OCR / FR-06)                  |
-| D-02 | Cross-doc naming / consistency (quota columns, profile maps, MySQL 8, `auth_rate_limits`)                         | **approved** 2026-10-28 — applied in docs                                  |
-| D-03 | PP 20/2026 wording corrections (`already_final` toward cap, golden labels)                                        | **approved** 2026-10-28 — applied in docs                                  |
-| D-04 | Google OIDC: design in docs, **defer build** in v1                                                                | **approved** 2026-10-28                                                    |
-| D-05 | Security fixes (test-support fail-closed, argon2id, webhook order, prompt envelope, rate limits, …)               | **approved** 2026-10-28 — largely landed in PR #3                          |
-| D-06 | Receipt extras from Aerial-Analytics: S1+S4 **Must**, S5 Should, S2 Could                                         | **approved** 2026-11-02 (gated on OCR staying in v1)                       |
-| D-07 | B-08 hardening plan r2                                                                                            | **approved** 2026-11-02                                                    |
-| D-08 | Full v1 per lecturer rubric (OCR, Midtrans, AI, recap PDF — **no feature cut**)                                   | **approved** 2026-11-02                                                    |
-| D-09 | AI via 9router (`AI_BASE_URL` / `AI_API_KEY` / model ids); fail-closed when unset                                 | **approved** 2026-11-02 — **landed** (PR #17)                              |
-| D-10 | Midtrans keys deferred to placeholders; live keys before demo freeze                                              | **approved** 2026-11-02 — **adapter landed** (PR #16)                      |
-| D-11 | Snapshot `version` UK; OCR via 9router+Gemini Vision; PDF=`fpdf2`; Midtrans `redirect_url`; FE CI gate; M50 lanes | **approved** 2026-11-02 — versioning, FE CI, OCR, PDF, and Snap **landed** |
+| ID   | Topic                                                                                                             | Status                                                                                         |
+| ---- | ----------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| D-01 | Receipt photo storage: local disk under `RECEIPT_STORAGE_ROOT`, authenticated GET, EXIF strip                     | **approved** 2026-10-28 — **landed** (local disk, authenticated GET, EXIF strip, FR-06 upload) |
+| D-02 | Cross-doc naming / consistency (quota columns, profile maps, MySQL 8, `auth_rate_limits`)                         | **approved** 2026-10-28 — applied in docs                                                      |
+| D-03 | PP 20/2026 wording corrections (`already_final` toward cap, golden labels)                                        | **approved** 2026-10-28 — applied in docs                                                      |
+| D-04 | Google OIDC: design in docs, **defer build** in v1                                                                | **approved** 2026-10-28                                                                        |
+| D-05 | Security fixes (test-support fail-closed, argon2id, webhook order, prompt envelope, rate limits, …)               | **approved** 2026-10-28 — largely landed in PR #3                                              |
+| D-06 | Receipt extras from Aerial-Analytics: S1+S4 **Must**, S5 Should, S2 Could                                         | **approved** 2026-11-02 (gated on OCR staying in v1)                                           |
+| D-07 | B-08 hardening plan r2                                                                                            | **approved** 2026-11-02                                                                        |
+| D-08 | Full v1 per lecturer rubric (OCR, Midtrans, AI, recap PDF — **no feature cut**)                                   | **approved** 2026-11-02                                                                        |
+| D-09 | AI via 9router (`AI_BASE_URL` / `AI_API_KEY` / model ids); fail-closed when unset                                 | **approved** 2026-11-02 — **landed** (PR #17)                                                  |
+| D-10 | Midtrans keys deferred to placeholders; live keys before demo freeze                                              | **approved** 2026-11-02 — **adapter landed** (PR #16)                                          |
+| D-11 | Snapshot `version` UK; OCR via 9router+Gemini Vision; PDF=`fpdf2`; Midtrans `redirect_url`; FE CI gate; M50 lanes | **approved** 2026-11-02 — versioning, FE CI, OCR, PDF, and Snap **landed**                     |
 
 ### D-07 disclaimer (exact string)
 
