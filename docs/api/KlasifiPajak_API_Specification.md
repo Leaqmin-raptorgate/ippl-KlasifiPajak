@@ -687,6 +687,8 @@ Paid gate. Body contains `image_id` and the confirmed fields (`confirmed_amount_
 
 `201` returns the captured transaction and `image_id`.
 
+One receipt image confirms into exactly one transaction. A second confirm of the same `image_id` returns `409` `RECEIPT_ALREADY_CONFIRMED`: "Struk ini sudah dikonfirmasi menjadi satu transaksi." No second transaction is created.
+
 ### 5.16 `GET /transactions/{id}/clarification`
 
 `200`:

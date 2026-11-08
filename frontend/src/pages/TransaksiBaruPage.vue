@@ -204,6 +204,7 @@ function batal() {
 }
 
 async function simpan() {
+  if (sibuk.value) return;
   sudahCobaSimpan.value = true;
   galatSimpan.value = "";
   bersihkanGalatServer();

@@ -21,6 +21,7 @@ from typing import Any
 
 from PIL import Image, UnidentifiedImageError
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.errors import ApiError
@@ -47,6 +48,7 @@ _SIZE_MESSAGE = "Ukuran berkas melebihi batas maksimum 8 MB."
 _TYPE_MESSAGE = "Berkas harus berupa JPEG atau PNG."
 _RATE_MESSAGE = "Terlalu banyak unggahan struk. Coba lagi dalam satu jam."
 _NOT_FOUND = "Transaksi tidak ditemukan."
+_ALREADY_CONFIRMED = "Struk ini sudah dikonfirmasi menjadi satu transaksi."
 
 _JPEG_MAGIC = b"\xff\xd8\xff"
 _PNG_MAGIC = b"\x89PNG"
@@ -204,9 +206,9 @@ def confirm_receipt(
     now = now_utc()
     if image.expires_at_utc is not None and image.expires_at_utc < now:
         raise ApiError(404, "TRANSACTION_NOT_FOUND", _NOT_FOUND)
-    existing = db.scalar(select(TransactionRow.id).where(TransactionRow.image_id == image.id))
-    if existing is not None:
-        raise ApiError(409, "RECEIPT_ALREADY_CONFIRMED", "Struk sudah dikaitkan dengan transaksi.")
+    taken = db.scalar(select(TransactionRow.id).where(TransactionRow.image_id == image.id))
+    if taken is not None:
+        raise ApiError(409, "RECEIPT_ALREADY_CONFIRMED", _ALREADY_CONFIRMED)
 
     from app.schemas.transaction import TransactionCreate
     from app.services.transactions import create_transaction
@@ -220,7 +222,13 @@ def confirm_receipt(
         withheld_tax_amount_idr=withheld_tax_amount_idr,
         source_channel=source_channel,
     )
-    created = create_transaction(db, user, payload, ruleset, image_id=image.id)
+    try:
+        # Link the receipt before the insert commits, so a second confirm
+        # cannot leave a transaction that has no image_id.
+        created = create_transaction(db, user, payload, ruleset, image_id=image.id)
+    except IntegrityError:
+        db.rollback()
+        raise ApiError(409, "RECEIPT_ALREADY_CONFIRMED", _ALREADY_CONFIRMED) from None
     return {"image_id": image.id, "transaction": created.model_dump(mode="json")}
 
 
