@@ -13,11 +13,11 @@ Not a filed return. Not authorized DJP software.
 
 ## Spec versions (source of truth)
 
-| Artefact | Version                                 | Where                                                                                                  |
-| -------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| SRS      | **v2.7**                                | Outside this repository (`SPEC/`); course SRS is never pushed here                                     |
-| API      | **v1.3.3**                              | Mirrored at [`docs/api/KlasifiPajak_API_Specification.md`](docs/api/KlasifiPajak_API_Specification.md) |
-| ERD      | **r3** (D-11 `month_snapshots.version`) | Outside this repository (`SPEC/`); Alembic `76fcdbc4af30` matches r3                                   |
+| Artefact | Version                                 | Where                                                                                                                                     |
+| -------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| SRS      | **v2.7**                                | Outside this repository (`SPEC/`); course SRS is never pushed here                                                                        |
+| API      | **v1.3.3**                              | Mirrored at [`docs/api/KlasifiPajak_API_Specification.md`](docs/api/KlasifiPajak_API_Specification.md)                                    |
+| ERD      | **r3** (D-11 `month_snapshots.version`) | Outside this repository (`SPEC/`); initial revision `76fcdbc4af30` matches r3; head `c45af872b930` incorporates proposed ERD r4 revisions |
 
 Prior API text in this repo was v1.2.2; treat the mirror above as normative.
 
@@ -45,7 +45,8 @@ npm ci   # ALWAYS npm ci, never npm install (lockfile-locked)
 | `JWT_SECRET`           | Session signing secret (≥ 32 bytes in production).                                                                            |
 | `TRUSTED_PROXY_IPS`    | Comma-separated peer IPs/CIDRs allowed to supply `X-Forwarded-For`. Empty = trust none.                                       |
 | `TRUSTED_PROXY_COUNT`  | How many rightmost XFF hops to peel when the peer is trusted (default `0`).                                                   |
-| `AI_*` / `MIDTRANS_*`  | Placeholders for later rubric work (D-09 / D-10). Leave empty until those features are built.                                 |
+| `AI_*`                 | OpenAI-compatible client settings for receipt OCR, fallback classification, and assistant Q&A. Empty = fail closed to rules.  |
+| `MIDTRANS_*`           | Midtrans Snap server/client keys and production flag for subscription checkout and notification verification.                 |
 
 ### Docker Compose (MySQL + migrate + API + frontend)
 
@@ -157,9 +158,9 @@ The workflow does not publish or deploy anything.
 - `backend/app/schemas/` — Pydantic request and response shapes
 - `backend/app/services/` — one function per use case
 - `backend/app/models/` — SQLAlchemy tables (ERD r3)
-- `backend/app/classify/` — keyword/rules path today; model client later
-- `backend/app/payments/` — gateway adapter (**not built**)
-- `backend/alembic/` — migrations (initial head = ERD r3 / D-11)
+- `backend/app/classify/` — keyword/rules path and fallback AI classifier
+- `backend/app/payments/` — Midtrans Snap gateway adapter and notification handling
+- `backend/alembic/` — migrations (initial revision `76fcdbc4af30` = ERD r3; head `c45af872b930` = ERD r4 draft)
 - `backend/tests/` — engine tests, API tests, and `TC-GOLDEN-*`
 - `frontend/` — Vue 3 + Vite
 - `docs/api/`: API specification mirror (v1.3.3)
