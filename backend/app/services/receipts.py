@@ -201,6 +201,13 @@ def confirm_receipt(
     """
     _require_paid(user)
     image = _owned_image(db, user.id, image_id)
+    now = now_utc()
+    if image.expires_at_utc is not None and image.expires_at_utc < now:
+        raise ApiError(404, "TRANSACTION_NOT_FOUND", _NOT_FOUND)
+    existing = db.scalar(select(TransactionRow.id).where(TransactionRow.image_id == image.id))
+    if existing is not None:
+        raise ApiError(409, "RECEIPT_ALREADY_CONFIRMED", "Struk sudah dikaitkan dengan transaksi.")
+
     from app.schemas.transaction import TransactionCreate
     from app.services.transactions import create_transaction
 
@@ -213,12 +220,7 @@ def confirm_receipt(
         withheld_tax_amount_idr=withheld_tax_amount_idr,
         source_channel=source_channel,
     )
-    created = create_transaction(db, user, payload, ruleset)
-    stored = db.get(TransactionRow, created.id)
-    if stored is None or stored.user_id != user.id:
-        raise ApiError(404, "TRANSACTION_NOT_FOUND", _NOT_FOUND)
-    stored.image_id = image.id
-    db.commit()
+    created = create_transaction(db, user, payload, ruleset, image_id=image.id)
     return {"image_id": image.id, "transaction": created.model_dump(mode="json")}
 
 

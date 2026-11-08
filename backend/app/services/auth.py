@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import unicodedata
 from datetime import datetime, timedelta
+from typing import Any
 
 from sqlalchemy import inspect, select, text, update
 from sqlalchemy.orm import Session
@@ -316,8 +317,19 @@ def get_email_sender():
     return build_email_sender()
 
 
+def deliver_password_reset_email(recipient: str, plaintext: str) -> None:
+    """Deliver a password-reset message via the configured mail sender (FR-41)."""
+    try:
+        get_email_sender().send_password_reset(recipient, plaintext)
+    except Exception:
+        log.info("password reset mail failed")
+
+
 def request_password_reset(
-    db: Session, payload: PasswordResetRequestIn, client_ip: str = "0.0.0.0"
+    db: Session,
+    payload: PasswordResetRequestIn,
+    client_ip: str = "0.0.0.0",
+    background_tasks: Any = None,
 ) -> str:
     """Always return the generic message; never reveal whether the email exists.
 
@@ -357,10 +369,10 @@ def request_password_reset(
         # Plaintext is returned only to the caller that can deliver mail / tests.
         # Routes discard it and respond with the generic message only.
         log.info("password reset token issued user_id=%s", user.id)
-        try:
-            get_email_sender().send_password_reset(user.email, plaintext)
-        except Exception:
-            log.info("password reset mail failed user_id=%s", user.id)
+        if background_tasks is not None:
+            background_tasks.add_task(deliver_password_reset_email, user.email, plaintext)
+        else:
+            deliver_password_reset_email(user.email, plaintext)
         return plaintext
     # Unknown email: mint+hash already done; touch the DB with a no-op UPDATE so
     # known/unknown pay a similar round-trip (B2) without inserting a fake row.

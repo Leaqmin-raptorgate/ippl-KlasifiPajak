@@ -325,6 +325,22 @@ def test_tc_ocr_strips_gps_owner_get_is_private_and_confirm_uses_user_values(
     assert transaction["client_name"] == "PT Nilai Pengguna"
     assert transaction["invoice_no"] == "USER-OK-1"
 
+    reconfirm = client.post(
+        f"{API}/transactions/ocr-confirm",
+        json={
+            "image_id": image_id,
+            "confirmed_amount_idr": 54321,
+            "confirmed_tx_date": "2026-10-16",
+            "confirmed_client_name": "PT Nilai Pengguna",
+            "confirmed_description": "Nilai yang dikonfirmasi pengguna",
+            "confirmed_invoice_no": "USER-OK-1",
+            "withheld_tax_amount_idr": 0,
+            "source_channel": "corporate_client",
+        },
+    )
+    assert reconfirm.status_code == 409
+    assert reconfirm.json()["error"]["code"] == "RECEIPT_ALREADY_CONFIRMED"
+
 
 def test_tc_assistant_consent_and_success_quota_are_fail_closed(client, monkeypatch):
     """TC-OFFLINE-ASSISTANT, FR-27/FR-28: consent and safe fallback consume no quota."""
@@ -342,7 +358,13 @@ def test_tc_assistant_consent_and_success_quota_are_fail_closed(client, monkeypa
     no_consent = client.post(f"{API}/assistant/query", json={"question": "Jelaskan ringkasan saya"})
     assert no_consent.status_code == 403
     assert no_consent.json()["error"]["code"] == "AI_CONSENT_REQUIRED"
-    _set_ai_consent(client)
+    res1 = client.put(f"{API}/ai-consent", json={"consent": True})
+    assert res1.status_code == 200
+    first_stamp = res1.json()["ai_consent_at"]
+    assert first_stamp is not None
+    res2 = client.put(f"{API}/ai-consent", json={"consent": True})
+    assert res2.status_code == 200
+    assert res2.json()["ai_consent_at"] == first_stamp
     initial = client.get(f"{API}/quotas").json()["assistant_chat"]["used"]
 
     invented = client.post(f"{API}/assistant/query", json={"question": "Berapa pajak saya?"})

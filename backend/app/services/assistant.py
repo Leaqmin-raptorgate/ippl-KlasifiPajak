@@ -136,7 +136,11 @@ def get_model_client() -> OpenAICompatibleClient:
 
 def set_ai_consent(db: Session, user: User, consent: bool) -> dict:
     """Record or withdraw AI processing consent and commit (FR-27)."""
-    user.ai_consent_at = now_utc() if consent else None
+    if consent:
+        if user.ai_consent_at is None:
+            user.ai_consent_at = now_utc()
+    else:
+        user.ai_consent_at = None
     db.commit()
     stamp = user.ai_consent_at
     return {
