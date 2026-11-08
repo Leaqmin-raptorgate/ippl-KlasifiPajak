@@ -214,16 +214,24 @@ def test_model_new_taxpayer_nullable_and_receipt_image_unique():
     assert column.default is None
     assert column.server_default is None
 
+    from sqlalchemy import UniqueConstraint
+
     image = TransactionRow.__table__.c.image_id
     assert image.nullable is True
-    indexes = [
+    image_indexes = [
         index
         for index in TransactionRow.__table__.indexes
-        if "image_id" in {col.name for col in index.columns}
+        if index.name == "uq_transactions_image_id"
     ]
-    assert len(indexes) == 1
-    assert indexes[0].name == "uq_transactions_image_id"
-    assert indexes[0].unique is True
+    assert image_indexes == []
+    constraints = [
+        constraint
+        for constraint in TransactionRow.__table__.constraints
+        if constraint.name == "uq_transactions_image_id"
+    ]
+    assert len(constraints) == 1
+    assert isinstance(constraints[0], UniqueConstraint)
+    assert [column.name for column in constraints[0].columns] == ["image_id"]
     fks = list(image.foreign_keys)
     assert len(fks) == 1
     assert fks[0].column.table.name == "receipt_images"

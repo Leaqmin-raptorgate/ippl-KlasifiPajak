@@ -156,7 +156,7 @@ class Transaction(Base):
     __tablename__ = "transactions"
     __table_args__ = (
         UniqueConstraint("duplicate_key", name="uq_transactions_duplicate_key"),
-        Index("uq_transactions_image_id", "image_id", unique=True),
+        UniqueConstraint("image_id", name="uq_transactions_image_id"),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
