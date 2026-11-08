@@ -238,6 +238,19 @@ async function unduh() {
       </p>
     </AppCard>
 
+    <AppCard v-if="lalu?.status === 'unverifiable'" class="cap-warning" role="status">
+      <p class="cap-warning-title">Data omzet tahun lalu belum lengkap</p>
+      <p>
+        Batas kelayakan skema PPh final 0,5% belum dapat diperiksa karena omzet tahun lalu belum
+        diisi. Lengkapi profil tahun pajak untuk memastikan skema yang berlaku.
+      </p>
+      <div class="unverifiable-act">
+        <AppButton to="/profil" variant="outline" size="sm" icon="profil">
+          Lengkapi data profil
+        </AppButton>
+      </div>
+    </AppCard>
+
     <section class="stats" aria-label="Ringkasan">
       <div class="stat-grid kp-stagger">
         <StatCard
@@ -467,6 +480,10 @@ async function unduh() {
 .cap-warning-title {
   margin-bottom: var(--s-1);
   font-weight: 650;
+}
+
+.unverifiable-act {
+  margin-top: var(--s-3);
 }
 
 .meter {

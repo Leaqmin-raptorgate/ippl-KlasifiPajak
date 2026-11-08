@@ -188,12 +188,24 @@ function mulaiUbah() {
   sedangUbah.value = true;
 }
 
-function angka(raw: string) {
-  return parseRupiah(raw) ?? 0;
+function parseNilaiWajib(raw: string, label: string): number {
+  const teks = raw.trim();
+  if (teks === "") return 0;
+  const parsed = parseRupiah(teks);
+  if (parsed === null) {
+    throw new Error(`Format ${label} tidak valid: gunakan angka rupiah.`);
+  }
+  return parsed;
 }
 
-function nilaiIdr(raw: string) {
-  return raw.trim() === "" ? null : angka(raw);
+function parseNilaiOpsional(raw: string, label: string): number | null {
+  const teks = raw.trim();
+  if (teks === "") return null;
+  const parsed = parseRupiah(teks);
+  if (parsed === null) {
+    throw new Error(`Format ${label} tidak valid: gunakan angka rupiah.`);
+  }
+  return parsed;
 }
 
 function booleanJawaban(raw: string): boolean | null {
@@ -204,6 +216,52 @@ function booleanJawaban(raw: string): boolean | null {
 
 async function simpanData() {
   galat.value = "";
+  let spouseUsaha = 0;
+  let spousePekerjaanBebas = 0;
+  let spouseFinal = 0;
+  let priorUserUsaha: number | null = null;
+  let priorUserPekerjaanBebas: number | null = null;
+  let priorUserFinal: number | null = null;
+  let priorSpouseUsaha: number | null = null;
+  let priorSpousePekerjaanBebas: number | null = null;
+  let priorSpouseFinal: number | null = null;
+
+  try {
+    spouseUsaha = parseNilaiWajib(draft.spouse_current_usaha_idr, "omzet usaha pasangan");
+    spousePekerjaanBebas = parseNilaiWajib(
+      draft.spouse_current_pekerjaan_bebas_idr,
+      "pekerjaan bebas pasangan",
+    );
+    spouseFinal = parseNilaiWajib(
+      draft.spouse_current_already_final_idr,
+      "penghasilan final pasangan",
+    );
+    priorUserUsaha = parseNilaiOpsional(draft.prior_user_usaha_idr, "omzet usaha tahun lalu");
+    priorUserPekerjaanBebas = parseNilaiOpsional(
+      draft.prior_user_pekerjaan_bebas_idr,
+      "pekerjaan bebas tahun lalu",
+    );
+    priorUserFinal = parseNilaiOpsional(
+      draft.prior_user_already_final_idr,
+      "penghasilan final tahun lalu",
+    );
+    priorSpouseUsaha = parseNilaiOpsional(
+      draft.prior_spouse_usaha_idr,
+      "omzet usaha pasangan tahun lalu",
+    );
+    priorSpousePekerjaanBebas = parseNilaiOpsional(
+      draft.prior_spouse_pekerjaan_bebas_idr,
+      "pekerjaan bebas pasangan tahun lalu",
+    );
+    priorSpouseFinal = parseNilaiOpsional(
+      draft.prior_spouse_already_final_idr,
+      "penghasilan final pasangan tahun lalu",
+    );
+  } catch (err) {
+    galat.value = err instanceof Error ? err.message : "Format nominal tidak valid.";
+    return;
+  }
+
   const body: ProfileUpdate = {
     version: profil.profile?.version ?? 1,
     name: draft.name.trim(),
@@ -219,15 +277,15 @@ async function simpanData() {
     has_sole_proprietor_company: booleanJawaban(draft.has_sole_proprietor_company),
     receives_salary: booleanJawaban(draft.receives_salary),
     is_new_taxpayer_current_year: draft.is_new_taxpayer_current_year,
-    spouse_current_usaha_idr: angka(draft.spouse_current_usaha_idr),
-    spouse_current_pekerjaan_bebas_idr: angka(draft.spouse_current_pekerjaan_bebas_idr),
-    spouse_current_already_final_idr: angka(draft.spouse_current_already_final_idr),
-    prior_user_usaha_idr: nilaiIdr(draft.prior_user_usaha_idr),
-    prior_user_pekerjaan_bebas_idr: nilaiIdr(draft.prior_user_pekerjaan_bebas_idr),
-    prior_user_already_final_idr: nilaiIdr(draft.prior_user_already_final_idr),
-    prior_spouse_usaha_idr: nilaiIdr(draft.prior_spouse_usaha_idr),
-    prior_spouse_pekerjaan_bebas_idr: nilaiIdr(draft.prior_spouse_pekerjaan_bebas_idr),
-    prior_spouse_already_final_idr: nilaiIdr(draft.prior_spouse_already_final_idr),
+    spouse_current_usaha_idr: spouseUsaha,
+    spouse_current_pekerjaan_bebas_idr: spousePekerjaanBebas,
+    spouse_current_already_final_idr: spouseFinal,
+    prior_user_usaha_idr: priorUserUsaha,
+    prior_user_pekerjaan_bebas_idr: priorUserPekerjaanBebas,
+    prior_user_already_final_idr: priorUserFinal,
+    prior_spouse_usaha_idr: priorSpouseUsaha,
+    prior_spouse_pekerjaan_bebas_idr: priorSpousePekerjaanBebas,
+    prior_spouse_already_final_idr: priorSpouseFinal,
   };
   try {
     await profil.simpan(body);
