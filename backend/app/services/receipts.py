@@ -35,6 +35,8 @@ from app.security import new_id, now_utc
 RECEIPT_STORAGE_ROOT = os.environ.get("RECEIPT_STORAGE_ROOT", "/var/lib/klasifipajak/receipts")
 
 _MAX_BYTES = 8 * 1024 * 1024
+_DUPLICATE_INVOICE = "Nomor faktur ini sudah tercatat untuk klien, nominal, dan tanggal yang sama."
+_DUPLICATE_INVOICE_KEY = "uq_transactions_duplicate_key"
 # Set before every decode. Matches Pillow's default bomb ceiling so a
 # process-wide None cannot turn the check off. The SRS names no pixel cap.
 _MAX_IMAGE_PIXELS = 89_478_485
@@ -222,13 +224,23 @@ def confirm_receipt(
         withheld_tax_amount_idr=withheld_tax_amount_idr,
         source_channel=source_channel,
     )
+    image_pk = image.id
     try:
         # Link the receipt before the insert commits, so a second confirm
         # cannot leave a transaction that has no image_id.
-        created = create_transaction(db, user, payload, ruleset, image_id=image.id)
-    except IntegrityError:
+        created = create_transaction(db, user, payload, ruleset, image_id=image_pk)
+    except IntegrityError as exc:
         db.rollback()
-        raise ApiError(409, "RECEIPT_ALREADY_CONFIRMED", _ALREADY_CONFIRMED) from None
+        # A concurrent confirm of this same image wins the unique index.
+        # A concurrent invoice duplicate must keep its own error code.
+        taken_after = db.scalar(
+            select(TransactionRow.id).where(TransactionRow.image_id == image_pk)
+        )
+        if taken_after is not None:
+            raise ApiError(409, "RECEIPT_ALREADY_CONFIRMED", _ALREADY_CONFIRMED) from None
+        if _DUPLICATE_INVOICE_KEY in str(getattr(exc, "orig", exc)):
+            raise ApiError(409, "DUPLICATE_INVOICE_TRANSACTION", _DUPLICATE_INVOICE) from None
+        raise
     return {"image_id": image.id, "transaction": created.model_dump(mode="json")}
 
 
