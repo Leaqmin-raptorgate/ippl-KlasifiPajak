@@ -34,7 +34,25 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     # Refuse downgrade if distinct raw events share a normalized status: doing
-    # so would otherwise discard recorded payment history.
+    # so would otherwise discard recorded payment history. Check before any drop.
+    bind = op.get_bind()
+    duplicates = bind.execute(
+        sa.text(
+            """
+            SELECT order_id, status
+            FROM payment_events
+            GROUP BY order_id, status
+            HAVING COUNT(*) > 1
+            """
+        )
+    ).fetchall()
+    if duplicates:
+        raise RuntimeError(
+            "Refusing downgrade: payment_events has more than one row for the "
+            "same order_id and normalized status. Distinct raw_status values "
+            "would collapse or the old unique key would fail. Merge those rows "
+            "before downgrading."
+        )
     op.drop_constraint("uq_payment_events_order_raw_status", "payment_events", type_="unique")
     op.create_unique_constraint(
         "uq_payment_events_order_status", "payment_events", ["order_id", "status"]
