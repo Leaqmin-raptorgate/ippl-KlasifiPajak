@@ -245,3 +245,34 @@ def test_fr_pay07_gateway_defaults_to_sandbox_and_rejects_production_key():
     assert "sandbox.midtrans.com" in adapter.base_url
     with pytest.raises(ValueError):
         MidtransAdapter(server_key="Mid-server-production", is_production=False)
+
+
+def test_in_process_rate_limit_dicts_drop_expired_keys(monkeypatch):
+    """Old rate-limit keys are removed on the next read or write after the window."""
+    from app.services import assistant, classification_fallback, receipts
+
+    assistant._hour_hits.clear()
+    classification_fallback._hour_hits.clear()
+    receipts._upload_hits.clear()
+    clock = {"now": 1_000_000.0}
+    monkeypatch.setattr(assistant.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(classification_fallback.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(receipts.time, "monotonic", lambda: clock["now"])
+    try:
+        assistant._enforce_hourly_limit("old-assistant")
+        assert classification_fallback._hourly_allow("old-fallback") is True
+        receipts._consume_upload_slot("old-upload")
+        clock["now"] += 3600 + 1
+        assistant._enforce_hourly_limit("new-assistant")
+        assert classification_fallback._hourly_allow("new-fallback") is True
+        receipts._consume_upload_slot("new-upload")
+        assert "old-assistant" not in assistant._hour_hits
+        assert "old-fallback" not in classification_fallback._hour_hits
+        assert "old-upload" not in receipts._upload_hits
+        assert "new-assistant" in assistant._hour_hits
+        assert "new-fallback" in classification_fallback._hour_hits
+        assert "new-upload" in receipts._upload_hits
+    finally:
+        assistant._hour_hits.clear()
+        classification_fallback._hour_hits.clear()
+        receipts._upload_hits.clear()
