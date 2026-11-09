@@ -49,8 +49,8 @@ const omzetBelumTerklasifikasi = computed(() => pita.value?.provisional_omzet_id
 
 const STATUS_LABEL: Record<string, string> = {
   scheme_eligible: "Memenuhi syarat",
-  scheme_ineligible: "Tidak dihitung di sini",
-  unverifiable: "Tidak dihitung di sini",
+  scheme_ineligible: "Tidak memenuhi syarat",
+  unverifiable: "Belum dapat diperiksa",
 };
 
 const OVER_LABEL: Record<string, string> = {
@@ -74,6 +74,10 @@ const alasanSkema = computed(() => {
 });
 const skemaTidakDihitung = computed(
   () => lalu.value?.status === "scheme_ineligible" || lalu.value?.status === "unverifiable",
+);
+/** The PDF still prints PPh as 0 for a year that cannot be checked. */
+const bolehUnduh = computed(
+  () => CAPABILITIES.workpaperExport && lalu.value?.status !== "unverifiable",
 );
 
 const breakdown = computed(() => {
@@ -137,12 +141,7 @@ async function unduh() {
         <AppButton v-if="!pajak.dashboard" to="/profil" variant="primary" icon="profil">
           Buat profil tahun pajak
         </AppButton>
-        <AppButton
-          v-else-if="CAPABILITIES.workpaperExport"
-          variant="outline"
-          icon="unduh"
-          @click="unduh"
-        >
+        <AppButton v-else-if="bolehUnduh" variant="outline" icon="unduh" @click="unduh">
           Unduh workpaper
         </AppButton>
         <AppButton

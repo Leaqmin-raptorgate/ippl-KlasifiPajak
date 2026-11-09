@@ -3,6 +3,7 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { ApiFailure, api } from "@/lib/api";
 import type { Me } from "@/lib/wire";
+import { usePanduanStore } from "@/stores/panduan";
 
 export type Theme = "light" | "dark";
 
@@ -81,6 +82,7 @@ export const useSessionStore = defineStore("session", () => {
     persetujuanAi.value = false;
     siap.value = true;
     sesiBerakhir.value = false;
+    usePanduanStore().bersihkan();
   }
 
   async function aturPersetujuanAi(consent: boolean) {

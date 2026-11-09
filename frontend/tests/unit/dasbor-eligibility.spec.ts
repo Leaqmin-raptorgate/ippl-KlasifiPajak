@@ -104,4 +104,24 @@ describe("FR-19 dashboard eligibility", () => {
       .find((btn) => btn.props("to") === "/profil");
     expect(cta).toBeTruthy();
   });
+
+  it("hides the workpaper button when the year is unverifiable", async () => {
+    const unverifiable = await renderDashboard("unverifiable");
+    const eligible = await renderDashboard("scheme_eligible");
+    expect(unverifiable.text()).toContain("Cuplikan bulan");
+    expect(unverifiable.text()).not.toContain("Unduh workpaper");
+    expect(eligible.text()).toContain("Unduh workpaper");
+  });
+
+  it("labels scheme_ineligible and unverifiable differently", async () => {
+    const ineligible = await renderDashboard("scheme_ineligible");
+    const unverifiable = await renderDashboard("unverifiable");
+    expect(nilaiKelayakan(ineligible)).toBe("Tidak memenuhi syarat");
+    expect(nilaiKelayakan(unverifiable)).toBe("Belum dapat diperiksa");
+  });
 });
+
+function nilaiKelayakan(wrapper: Awaited<ReturnType<typeof renderDashboard>>) {
+  const card = wrapper.findAll(".stat").find((item) => item.text().includes("Kelayakan skema"));
+  return card?.get(".val").text() ?? "";
+}

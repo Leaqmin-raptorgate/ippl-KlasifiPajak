@@ -178,7 +178,6 @@ async function unggah() {
   if (!berkas.value) return;
   galatSimpan.value = "";
   if (!session.persetujuanAi) {
-    berkas.value = null;
     galatSimpan.value = "Persetujuan pemrosesan AI diperlukan sebelum fitur ini digunakan.";
     return;
   }
@@ -198,6 +197,13 @@ async function unggah() {
     }
   }
 }
+
+watch(
+  () => session.persetujuanAi,
+  (setuju) => {
+    if (setuju && berkas.value && !imageId.value) void unggah();
+  },
+);
 
 function batal() {
   router.back();
