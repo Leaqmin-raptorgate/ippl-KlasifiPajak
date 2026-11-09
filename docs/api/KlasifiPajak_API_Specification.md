@@ -49,6 +49,8 @@ SRS §2.7.f points here. Endpoint paths, JSON fields, error codes, and session r
 
 `ruleset_id` `pp20-2026-academic-1` carries `effective_date` `2026-09-26` as its **academic ruleset stamp** (not the PP promulgation date) and applies to every valid 2026 `tx_date`, including dates before 26 September 2026. UI and docs must not present 2026-09-26 as the PP date.
 
+This ruleset is tax year 2026 only. A different tax year needs its own ruleset rule. Spouse turnover for 2026 follows PP 20/2026 Pasal 58 ayat (2) and ayat (3), and the Penjelasan to ayat (2) on a minor child's turnover. The profile mapping is in §5.8. This note does not change `spouse_in_band` (`false`), `spouse_in_cap` (`true`), or the Rp 500.000.000 band.
+
 `GET /ruleset` may include `rate_str` `"0.005"` as display text. Arithmetic uses `rate_numerator` and `rate_denominator` only.
 
 `rounding_rule` is `floor` or `round_half_up`. This academic file ships `floor`.
@@ -138,6 +140,7 @@ On Bagian B, `as_of_date` is today in `Asia/Jakarta`. `months` and stored snapsh
 - `source_channel`: `marketplace`, `corporate_client`, `retail`, `other`.
 - `nib_status`: `has_nib`, `no_nib`, `unknown`.
 - `marital_status`: `yes`, `no`, `unknown`.
+- `spouse_tax_status`: `unmarried`, `separate`, `joint`, `unknown`. For tax year 2026, a PUT that includes this field stores `spouse_aggregation_active` as true only for `separate`. See §5.8.
 - `entity_type`: `orang_pribadi` only.
 - `nib_last_4`: exactly four digits `^[0-9]{4}$` when `nib_status` is `has_nib`. The stored value is those four digits. The display mask is nine asterisks plus those digits (`*********0123`). A longer NIB is rejected and is not stored.
 - Duplicate invoice key, when `invoice_no_norm` is not null: `(user_id, client_name_norm, invoice_no_norm, amount_idr, tx_date)`. The same invoice number with a different amount or date is a second row. Empty invoice numbers are `NULL` and are not part of the key.
@@ -539,7 +542,7 @@ The confirmation string is exact. Order of writes: set `user_id` and other perso
 
 ### 5.7 `GET /profiles/{tax_year}`
 
-`200` returns the profile, `version`, masked NIB, the six prior-year integers, the three spouse current-year integers, `is_new_taxpayer_current_year`, and `audit_trail` entries of `changed_at`, `field`, `old_value`, `new_value`.
+`200` returns the profile, `version`, masked NIB, `spouse_tax_status`, the six prior-year integers, the three spouse current-year integers, `is_new_taxpayer_current_year`, `spouse_aggregation_active`, and `audit_trail` entries of `changed_at`, `field`, `old_value`, `new_value`.
 
 `404` `PROFILE_NOT_FOUND`: "Profil untuk tahun pajak yang dipilih belum dibuat."
 
@@ -548,6 +551,19 @@ The confirmation string is exact. Order of writes: set `user_id` and other perso
 Accepts the same business fields as the GET body, plus `version`, with `nib_last_4` instead of `nib_masked`. Rejects `entity_type` other than `orang_pribadi` and a `nib_last_4` that is not four digits. The update matches `version` and then increments it.
 
 `200` returns the saved profile, including the new `version`. Changing spouse aggregation, prior-year totals, spouse current-year totals, or the new-taxpayer flag marks year snapshots stale and recalculates them inside the user-row lock. A name-only change records an audit row and leaves snapshot hashes unchanged.
+
+Tax year 2026 only. A different tax year needs its own ruleset rule. This section does not change `spouse_aggregation_active` beyond the save rule below, and it does not change `spouse_in_cap`, `spouse_in_band`, or the Rp 500.000.000 band.
+
+PP 20/2026 Pasal 58 ayat (2): for spouses who have a written agreement separating property and income (PH), or where the wife elects to exercise her own tax rights and obligations (MT), the turnover test uses the combined gross turnover of husband and wife. Ayat (3) includes single-person companies founded by the couple in that combination. The Penjelasan to ayat (2) includes the turnover of a minor child. This release stores `has_sole_proprietor_company` and does not add that company's turnover, or a minor child's turnover, to the cap. Those amounts are not modelled.
+
+When the body includes `spouse_tax_status`, the service stores `spouse_aggregation_active` as true only for `separate`, and as false for `unmarried`, `joint`, and `unknown`. When the body omits `spouse_tax_status`, the sent `spouse_aggregation_active` is stored as sent.
+
+| `spouse_tax_status` | Flag stored when the status is sent | Basis                                                                                         |
+| ------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------- |
+| `unmarried`         | false                               | No spouse.                                                                                    |
+| `separate`          | true                                | Pasal 58(2), PH or MT.                                                                        |
+| `joint`             | false                               | Product assumption: the couple uses one account, so the spouse's turnover is already in it.   |
+| `unknown`           | false                               | May be inexact, and not signed off. Unknown does not by itself make eligibility unverifiable. |
 
 `409` `VERSION_CONFLICT`: "Data ini sudah diubah di perangkat lain. Muat ulang, lalu simpan lagi."
 
