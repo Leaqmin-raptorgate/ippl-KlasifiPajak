@@ -897,7 +897,11 @@ At most one `pending` row exists per user and plan. The call locks that row. If 
 
 Midtrans sends `signature_key` in the JSON body. Compute SHA512 of the exact UTF-8 concatenation `order_id + status_code + gross_amount + ServerKey` with no separators, then compare its hexadecimal digest in constant time before any order lookup. Preserve `status_code` and `gross_amount` exactly as received for hashing; `gross_amount` is a string, for example `"25000.00"`. After signature verification parse the amount as integer rupiah and compare it to the order.
 
-Because Midtrans's `signature_key` covers `order_id + status_code + gross_amount + ServerKey` but does NOT sign `transaction_status` or `fraud_status`, settlement transitions require verifying that `status_code == "200"` in addition to signature validity and matching order amount. This build does not call the Midtrans Status API.
+Because Midtrans's `signature_key` covers `order_id + status_code + gross_amount + ServerKey` but does NOT sign `transaction_status` or `fraud_status`, settlement transitions require verifying that `status_code == "200"` in addition to signature validity and matching order amount. This build does not call the Midtrans Status API. A signed `settlement`, or a `capture` whose `fraud_status` is `accept`, returns `400` `INVALID_WEBHOOK_STATUS` and is not stored when `status_code` is not `"200"`. The refusal is raised before the payment event is inserted. A later notice with `status_code` `"200"` can still settle the order.
+
+This build trusts the signed notice. It keeps these checks: a valid signature, an order that exists, an amount that matches, `status_code == "200"` for a settlement, and duplicate events that are idempotent. It does not call the Midtrans Status API, and that confirmation is required before real payments. Midtrans recommends the Status API for out-of-order or late notices and for anything coming from the browser, because the signature does not cover `transaction_status`.
+
+Midtrans retries a notification that does not get a 2xx response. A `400` and a `404` are retried twice, a `500` once, a `503` four times, and other failures up to five times, spaced from about 2 minutes to 3.5 hours. The `400` for a settlement whose `status_code` is not `"200"` is therefore delivered again a few times. Those repeats are harmless because nothing was stored.
 
 Example with ServerKey `example-server-key`:
 
