@@ -288,9 +288,9 @@ def delete_user_files(db: Session, user_id: str) -> None:
 
 
 def _require_paid(user: User) -> None:
-    from app.services.subscription import _is_paid_active
+    from app.services.subscription import is_paid_active
 
-    if not _is_paid_active(user):
+    if not is_paid_active(user):
         raise ApiError(403, "PAID_SUBSCRIPTION_REQUIRED", _PAID_MESSAGE)
 
 

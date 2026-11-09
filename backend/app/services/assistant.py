@@ -34,7 +34,7 @@ from app.config.settings import Settings
 from app.logging_redaction import get_logger
 from app.models import ClassificationEvent, MonthSnapshot, Profile, QuotaCounter, Transaction, User
 from app.security import iso_utc, new_id, now_utc
-from app.services.subscription import FREE_ASSISTANT_LIMIT, _is_paid_active, _jakarta_month_key
+from app.services.subscription import FREE_ASSISTANT_LIMIT, _jakarta_month_key, is_paid_active
 
 log = get_logger("app.assistant")
 
@@ -46,13 +46,24 @@ FALLBACK_ANSWER = (
 AVOIDANCE_ANSWER = (
     "Pertanyaan ini di luar bantuan KlasifiPajak. Hubungi konsultan pajak berlisensi."
 )
-FREE_QUOTA_MESSAGE = (
-    "Batas kuota asisten gratis Anda untuk bulan ini telah tercapai (15 jawaban). "
-    "Silakan berlangganan untuk menambah kuota."
-)
-PAID_QUOTA_MESSAGE = (
-    "Plafon wajar asisten akun berbayar Anda untuk bulan ini telah tercapai (200 jawaban)."
-)
+
+
+def _free_quota_message(limit: int) -> str:
+    """Free-tier refusal. ``limit`` is ``FREE_ASSISTANT_LIMIT``."""
+    return (
+        "Batas kuota asisten gratis Anda untuk bulan ini telah tercapai "
+        f"({limit} jawaban). "
+        "Silakan berlangganan untuk menambah kuota."
+    )
+
+
+def _paid_quota_message(limit: int) -> str:
+    """Paid-tier refusal. ``limit`` is the ruleset assistant quota."""
+    return (
+        f"Plafon wajar asisten akun berbayar Anda untuk bulan ini telah tercapai ({limit} jawaban)."
+    )
+
+
 RATE_LIMIT_MESSAGE = "Terlalu banyak permintaan asisten. Coba lagi dalam 60 menit."
 
 # Fixed instruction. User text is never concatenated into this string.
@@ -170,9 +181,9 @@ def answer(db: Session, user: User, question: str) -> dict:
     if _is_avoidance(question):
         return _body(AVOIDANCE_ANSWER, [], _remaining(db, user.id, month_key, limit))
     if not _reserve_chat(db, user.id, month_key, limit):
-        if _is_paid_active(user):
-            raise ApiError(429, "PAID_CHAT_CEILING_EXHAUSTED", PAID_QUOTA_MESSAGE)
-        raise ApiError(429, "FREE_CHAT_QUOTA_EXHAUSTED", FREE_QUOTA_MESSAGE)
+        if is_paid_active(user):
+            raise ApiError(429, "PAID_CHAT_CEILING_EXHAUSTED", _paid_quota_message(limit))
+        raise ApiError(429, "FREE_CHAT_QUOTA_EXHAUSTED", _free_quota_message(limit))
     try:
         tool_results = _collect_tools(db, user.id, question)
         literals = _stored_private_literals(db, user.id)
@@ -220,7 +231,7 @@ def _is_avoidance(question: str) -> bool:
 
 
 def _chat_limit(user: User) -> int:
-    if not _is_paid_active(user):
+    if not is_paid_active(user):
         return FREE_ASSISTANT_LIMIT
     return _ruleset_assistant_quota()
 

@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.config.settings import Settings
 from app.models import User
-from app.services.subscription import FREE_AI_LIMIT, _is_paid_active, _jakarta_month_key
+from app.services.subscription import FREE_AI_LIMIT, _jakarta_month_key, is_paid_active
 
 _RESERVE_SQL = (
     "UPDATE quota_counters "
@@ -57,7 +57,7 @@ def _limit_for(db: Session, user_id: str) -> int | None:
     user = db.get(User, user_id)
     if user is None:
         return None
-    if _is_paid_active(user):
+    if is_paid_active(user):
         return _paid_ai_limit()
     return FREE_AI_LIMIT
 

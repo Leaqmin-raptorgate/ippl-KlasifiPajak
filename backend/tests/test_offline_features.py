@@ -979,6 +979,52 @@ def test_tc_assistant_quota_exhaustion_skips_model_call(client, monkeypatch):
     assert fake.calls == []
 
 
+def test_tc_assistant_quota_messages_follow_the_quota_constants(client, monkeypatch):
+    """FR-27: the 15 and 200 in quota messages come from the quota constants."""
+    from app.classify.model_client import FakeModelClient
+    from app.services import assistant
+
+    monkeypatch.setattr(assistant, "FREE_ASSISTANT_LIMIT", 17)
+    monkeypatch.setattr(assistant, "_ruleset_assistant_quota", lambda: 19)
+    fake = FakeModelClient(["Jawaban yang tidak boleh terpakai."])
+    monkeypatch.setattr(assistant, "get_model_client", lambda: fake)
+
+    free_id = _register_login(client, email="quota-msg-free@example.test", username="quotamsgfree")
+    _set_ai_consent(client)
+    client.get(f"{API}/quotas")
+    db = SessionLocal()
+    try:
+        counter = db.scalar(select(QuotaCounter).where(QuotaCounter.user_id == free_id))
+        assert counter is not None
+        counter.assistant_chat_used = 17
+        db.commit()
+    finally:
+        db.close()
+    free = client.post(f"{API}/assistant/query", json={"question": "Jelaskan data saya"})
+    assert free.status_code == 429, free.text
+    assert "(17 jawaban)" in free.json()["error"]["message"]
+    assert "(15 jawaban)" not in free.json()["error"]["message"]
+
+    paid_id = _register_login(client, email="quota-msg-paid@example.test", username="quotamsgpaid")
+    _set_paid(paid_id)
+    _set_ai_consent(client)
+    client.get(f"{API}/quotas")
+    db = SessionLocal()
+    try:
+        counter = db.scalar(select(QuotaCounter).where(QuotaCounter.user_id == paid_id))
+        assert counter is not None
+        counter.assistant_chat_used = 19
+        db.commit()
+    finally:
+        db.close()
+    paid = client.post(f"{API}/assistant/query", json={"question": "Jelaskan data saya"})
+    assert paid.status_code == 429, paid.text
+    assert paid.json()["error"]["code"] == "PAID_CHAT_CEILING_EXHAUSTED"
+    assert "(19 jawaban)" in paid.json()["error"]["message"]
+    assert "(200 jawaban)" not in paid.json()["error"]["message"]
+    assert fake.calls == []
+
+
 def test_tc_email_reset_sends_plaintext_only_to_sender_and_never_logs_it(
     client, caplog, monkeypatch
 ):

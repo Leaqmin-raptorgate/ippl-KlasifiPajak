@@ -16,7 +16,7 @@ from app.models import Transaction as TransactionRow
 from app.services import dashboard as dashboard_service
 from app.services.dashboard import _prior_combined
 from app.services.snapshots_store import freeze_today_jakarta, profile_to_engine
-from app.services.subscription import _is_paid_active
+from app.services.subscription import is_paid_active
 
 
 @pytest.mark.parametrize(
@@ -350,8 +350,8 @@ def test_fr03_invalid_profile_fields_return_field_errors(client, field, value):
 def test_fr35_subscription_active_at_expiry_boundary():
     instant = datetime(2026, 11, 7, 12, 0)
     user = SimpleNamespace(paid_flag=True, valid_until_utc=instant)
-    assert _is_paid_active(user, instant) is True
-    assert _is_paid_active(user, instant + timedelta(microseconds=1)) is False
+    assert is_paid_active(user, instant) is True
+    assert is_paid_active(user, instant + timedelta(microseconds=1)) is False
 
 
 @pytest.mark.parametrize("environment", ["development", "production"])

@@ -12,7 +12,7 @@ from app.config.settings import Settings
 from app.db import get_db
 from app.services import recap as recap_service
 from app.services.snapshot import active_ruleset
-from app.services.subscription import _is_paid_active
+from app.services.subscription import is_paid_active
 
 router = APIRouter()
 
@@ -48,7 +48,7 @@ def post_recap_pdf(
 ) -> Response:
     """Stream one workpaper PDF for an active paid account (FR-32 / FR-36)."""
     ruleset = _checked_ruleset(tax_year, settings)
-    if not _is_paid_active(context.user):
+    if not is_paid_active(context.user):
         raise ApiError(403, "PAID_SUBSCRIPTION_REQUIRED", _PAID_PDF_MESSAGE)
     payload = recap_service.workpaper_pdf(db, context.user, tax_year, ruleset)
     filename = f'attachment; filename="Workpaper_PPh_Final_{tax_year}.pdf"'
