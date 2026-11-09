@@ -10,6 +10,7 @@ from test_tax_crud_trace_quota import _auth
 from app.db import SessionLocal
 from app.models import PaymentEvent, SubscriptionOrder, User
 from app.security import now_utc
+from app.services.payments import _is_production
 
 SERVER_KEY = "SB-Mid-server-offline-test"
 
@@ -139,6 +140,25 @@ def test_fr_pay03_late_settlement_after_expiry_activates(client, fake_gateway):
         client.post("/api/v1/webhooks/payment", json=_notice(order["order_id"])).status_code == 200
     )
     assert client.get("/api/v1/subscriptions/status").json()["paid_flag"] is True
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("true", True),
+        ("TRUE", True),
+        ("false", False),
+        pytest.param(None, False, id="unset"),
+        ("", False),
+    ],
+)
+def test_is_production_flag(monkeypatch, raw, expected):
+    """MIDTRANS_IS_PRODUCTION is true only for the lowercase word true."""
+    if raw is None:
+        monkeypatch.delenv("MIDTRANS_IS_PRODUCTION", raising=False)
+    else:
+        monkeypatch.setenv("MIDTRANS_IS_PRODUCTION", raw)
+    assert _is_production() is expected
 
 
 def test_fr_pay07_production_webhook_unknown_order_is_not_found(client, monkeypatch):
