@@ -105,6 +105,7 @@ Held until D-10 placeholders are wired into an adapter. Contract is API
 - [ ] Reject a tampered `gross_amount_idr`
 - [ ] Webhook idempotency, monotonic status, renewal arithmetic
 - [ ] Map Snap `redirect_url` → API `payment_url` (D-11)
+- [ ] TODO: Status API confirmation before production
 
 ## Sprint 1 — docs and stack
 
