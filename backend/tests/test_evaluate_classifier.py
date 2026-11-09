@@ -182,7 +182,7 @@ def test_rules_predictor_uses_description_and_clarifies_on_no_match():
 
 
 def test_report_records_provenance(tmp_path):
-    """The report names dataset hash, classifier version, split and that no model ran."""
+    """The report names the dataset hash, the classifier version, and that no model ran."""
     path = _workbook(
         tmp_path / "r.xlsx",
         [("C1", "Penjualan kaos", "approved", "usaha", "Rina", "")],
@@ -195,17 +195,24 @@ def test_report_records_provenance(tmp_path):
     assert len(report["classifier"]["rules_version"]) == 64
     assert report["classifier"]["tier"] == "rules_only"
     assert report["classifier"]["model_called"] is False
-    assert report["split"] == "dev"
+    assert "split" not in report
     assert report["counts"] == {"labelled": 1, "should_clarify": 0, "excluded": 0, "unreviewed": 0}
 
 
-def test_split_flag_is_recorded(tmp_path):
+def test_split_flag_is_not_accepted(tmp_path, capsys):
+    """Argument parsing no longer accepts ``--split``."""
+    with pytest.raises(SystemExit) as help_exit:
+        ev.main(["--help"])
+    assert help_exit.value.code == 0
+    assert "--split" not in capsys.readouterr().out
+
     path = _workbook(
         tmp_path / "r.xlsx", [("C1", "Penjualan kaos", "approved", "usaha", "Rina", "")]
     )
-    out = tmp_path / "report.json"
-    assert ev.main([str(path), "--split", "heldout", "--json", str(out)]) == 0
-    assert json.loads(out.read_text(encoding="utf-8"))["split"] == "heldout"
+    with pytest.raises(SystemExit) as split_exit:
+        ev.main([str(path), "--split", "heldout"])
+    assert split_exit.value.code != 0
+    assert "--split" in capsys.readouterr().err
 
 
 def test_scorer_never_imports_the_model_client():

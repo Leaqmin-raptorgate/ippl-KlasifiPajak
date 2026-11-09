@@ -12,13 +12,13 @@ Reads the ``Review`` sheet of ``candidate_label_review.xlsx`` (header row holds
   ``--allow-partial`` is given, and the count is always reported.
 
 Only the rule tier (``app.classify.rules``) is scored. No model is called
-(FR-12, FR-13). The report records the dataset hash, rule-table hash and split,
+(FR-12, FR-13). The report records the dataset hash and the rule-table hash,
 so a result can be tied to the exact data and rules that produced it.
 
 Usage::
 
     python backend/scripts/evaluate_classifier.py REVIEW.xlsx \
-        [--split dev|heldout] [--allow-partial] [--json OUT.json]
+        [--allow-partial] [--json OUT.json]
 """
 
 from __future__ import annotations
@@ -194,9 +194,7 @@ def _print_report(report: dict) -> None:
     cla = report["result"]["should_clarify"]
     counts = report["counts"]
     print(f"Dataset: {report['dataset']['path']} (sha256 {report['dataset']['sha256'][:12]})")
-    print(
-        f"Rules: {report['classifier']['rules_version'][:12]}  tier=rules_only  split={report['split']}"
-    )
+    print(f"Rules: {report['classifier']['rules_version'][:12]}  tier=rules_only")
     print(
         f"Rows: labelled={counts['labelled']} should_clarify={counts['should_clarify']} "
         f"excluded={counts['excluded']} unreviewed={counts['unreviewed']}"
@@ -238,7 +236,6 @@ def main(argv: list[str] | None = None) -> int:
     """Exit 0 with a report, or 2 when the dataset is missing, unreviewed or malformed."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("dataset", type=Path)
-    parser.add_argument("--split", choices=("dev", "heldout"), default="dev")
     parser.add_argument("--allow-partial", action="store_true")
     parser.add_argument("--json", type=Path, dest="json_out")
     args = parser.parse_args(sys.argv[1:] if argv is None else argv)
@@ -268,7 +265,6 @@ def main(argv: list[str] | None = None) -> int:
             "rules_version": _rules_version(),
             "model_called": False,
         },
-        "split": args.split,
         "counts": {
             "labelled": result["labelled"]["n"],
             "should_clarify": result["should_clarify"]["n"],
