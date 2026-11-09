@@ -252,6 +252,30 @@ def delete_receipt_for_transaction(db: Session, row: TransactionRow) -> None:
     db.delete(image)
 
 
+def purge_expired_receipts(db: Session) -> int:
+    """Delete expired receipt rows and files that no transaction references.
+
+    Returns how many rows were removed and commits that work. A linked receipt
+    is kept even when ``expires_at_utc`` is already past. There is no scheduler;
+    ``python -m app.scripts.purge_receipts`` calls this.
+    """
+    now = now_utc()
+    referenced = (
+        select(TransactionRow.id).where(TransactionRow.image_id == ReceiptImage.id).exists()
+    )
+    rows = db.scalars(
+        select(ReceiptImage).where(ReceiptImage.expires_at_utc < now, ~referenced)
+    ).all()
+    removed = 0
+    for row in rows:
+        if not _delete_bytes(row.storage_key):
+            continue
+        db.delete(row)
+        removed += 1
+    db.commit()
+    return removed
+
+
 def delete_user_files(db: Session, user_id: str) -> None:
     """Delete every receipt file stored for this account (FR-06, FR-42).
 
