@@ -188,24 +188,18 @@ function mulaiUbah() {
   sedangUbah.value = true;
 }
 
-function parseNilaiWajib(raw: string, label: string): number {
+function parseAngka<T extends number | null>(
+  raw: string,
+  label: string,
+  kosong: T,
+): { ok: true; value: number | T } | { ok: false; value: string } {
   const teks = raw.trim();
-  if (teks === "") return 0;
-  const parsed = parseRupiah(teks);
-  if (parsed === null) {
-    throw new Error(`Format ${label} tidak valid: gunakan angka rupiah.`);
+  if (teks === "") return { ok: true, value: kosong };
+  const angka = parseRupiah(teks);
+  if (angka === null) {
+    return { ok: false, value: `Format ${label} tidak valid: gunakan angka rupiah.` };
   }
-  return parsed;
-}
-
-function parseNilaiOpsional(raw: string, label: string): number | null {
-  const teks = raw.trim();
-  if (teks === "") return null;
-  const parsed = parseRupiah(teks);
-  if (parsed === null) {
-    throw new Error(`Format ${label} tidak valid: gunakan angka rupiah.`);
-  }
-  return parsed;
+  return { ok: true, value: angka };
 }
 
 function booleanJawaban(raw: string): boolean | null {
@@ -216,49 +210,77 @@ function booleanJawaban(raw: string): boolean | null {
 
 async function simpanData() {
   galat.value = "";
-  let spouseUsaha = 0;
-  let spousePekerjaanBebas = 0;
-  let spouseFinal = 0;
-  let priorUserUsaha: number | null = null;
-  let priorUserPekerjaanBebas: number | null = null;
-  let priorUserFinal: number | null = null;
-  let priorSpouseUsaha: number | null = null;
-  let priorSpousePekerjaanBebas: number | null = null;
-  let priorSpouseFinal: number | null = null;
-
-  try {
-    spouseUsaha = parseNilaiWajib(draft.spouse_current_usaha_idr, "omzet usaha pasangan");
-    spousePekerjaanBebas = parseNilaiWajib(
-      draft.spouse_current_pekerjaan_bebas_idr,
-      "pekerjaan bebas pasangan",
-    );
-    spouseFinal = parseNilaiWajib(
-      draft.spouse_current_already_final_idr,
-      "penghasilan final pasangan",
-    );
-    priorUserUsaha = parseNilaiOpsional(draft.prior_user_usaha_idr, "omzet usaha tahun lalu");
-    priorUserPekerjaanBebas = parseNilaiOpsional(
-      draft.prior_user_pekerjaan_bebas_idr,
-      "pekerjaan bebas tahun lalu",
-    );
-    priorUserFinal = parseNilaiOpsional(
-      draft.prior_user_already_final_idr,
-      "penghasilan final tahun lalu",
-    );
-    priorSpouseUsaha = parseNilaiOpsional(
-      draft.prior_spouse_usaha_idr,
-      "omzet usaha pasangan tahun lalu",
-    );
-    priorSpousePekerjaanBebas = parseNilaiOpsional(
-      draft.prior_spouse_pekerjaan_bebas_idr,
-      "pekerjaan bebas pasangan tahun lalu",
-    );
-    priorSpouseFinal = parseNilaiOpsional(
-      draft.prior_spouse_already_final_idr,
-      "penghasilan final pasangan tahun lalu",
-    );
-  } catch (err) {
-    galat.value = err instanceof Error ? err.message : "Format nominal tidak valid.";
+  const spouseUsaha = parseAngka(draft.spouse_current_usaha_idr, "omzet usaha pasangan", 0);
+  if (!spouseUsaha.ok) {
+    galat.value = spouseUsaha.value;
+    return;
+  }
+  const spousePekerjaanBebas = parseAngka(
+    draft.spouse_current_pekerjaan_bebas_idr,
+    "pekerjaan bebas pasangan",
+    0,
+  );
+  if (!spousePekerjaanBebas.ok) {
+    galat.value = spousePekerjaanBebas.value;
+    return;
+  }
+  const spouseFinal = parseAngka(
+    draft.spouse_current_already_final_idr,
+    "penghasilan final pasangan",
+    0,
+  );
+  if (!spouseFinal.ok) {
+    galat.value = spouseFinal.value;
+    return;
+  }
+  const priorUserUsaha = parseAngka(draft.prior_user_usaha_idr, "omzet usaha tahun lalu", null);
+  if (!priorUserUsaha.ok) {
+    galat.value = priorUserUsaha.value;
+    return;
+  }
+  const priorUserPekerjaanBebas = parseAngka(
+    draft.prior_user_pekerjaan_bebas_idr,
+    "pekerjaan bebas tahun lalu",
+    null,
+  );
+  if (!priorUserPekerjaanBebas.ok) {
+    galat.value = priorUserPekerjaanBebas.value;
+    return;
+  }
+  const priorUserFinal = parseAngka(
+    draft.prior_user_already_final_idr,
+    "penghasilan final tahun lalu",
+    null,
+  );
+  if (!priorUserFinal.ok) {
+    galat.value = priorUserFinal.value;
+    return;
+  }
+  const priorSpouseUsaha = parseAngka(
+    draft.prior_spouse_usaha_idr,
+    "omzet usaha pasangan tahun lalu",
+    null,
+  );
+  if (!priorSpouseUsaha.ok) {
+    galat.value = priorSpouseUsaha.value;
+    return;
+  }
+  const priorSpousePekerjaanBebas = parseAngka(
+    draft.prior_spouse_pekerjaan_bebas_idr,
+    "pekerjaan bebas pasangan tahun lalu",
+    null,
+  );
+  if (!priorSpousePekerjaanBebas.ok) {
+    galat.value = priorSpousePekerjaanBebas.value;
+    return;
+  }
+  const priorSpouseFinal = parseAngka(
+    draft.prior_spouse_already_final_idr,
+    "penghasilan final pasangan tahun lalu",
+    null,
+  );
+  if (!priorSpouseFinal.ok) {
+    galat.value = priorSpouseFinal.value;
     return;
   }
 
@@ -277,15 +299,15 @@ async function simpanData() {
     has_sole_proprietor_company: booleanJawaban(draft.has_sole_proprietor_company),
     receives_salary: booleanJawaban(draft.receives_salary),
     is_new_taxpayer_current_year: draft.is_new_taxpayer_current_year,
-    spouse_current_usaha_idr: spouseUsaha,
-    spouse_current_pekerjaan_bebas_idr: spousePekerjaanBebas,
-    spouse_current_already_final_idr: spouseFinal,
-    prior_user_usaha_idr: priorUserUsaha,
-    prior_user_pekerjaan_bebas_idr: priorUserPekerjaanBebas,
-    prior_user_already_final_idr: priorUserFinal,
-    prior_spouse_usaha_idr: priorSpouseUsaha,
-    prior_spouse_pekerjaan_bebas_idr: priorSpousePekerjaanBebas,
-    prior_spouse_already_final_idr: priorSpouseFinal,
+    spouse_current_usaha_idr: spouseUsaha.value,
+    spouse_current_pekerjaan_bebas_idr: spousePekerjaanBebas.value,
+    spouse_current_already_final_idr: spouseFinal.value,
+    prior_user_usaha_idr: priorUserUsaha.value,
+    prior_user_pekerjaan_bebas_idr: priorUserPekerjaanBebas.value,
+    prior_user_already_final_idr: priorUserFinal.value,
+    prior_spouse_usaha_idr: priorSpouseUsaha.value,
+    prior_spouse_pekerjaan_bebas_idr: priorSpousePekerjaanBebas.value,
+    prior_spouse_already_final_idr: priorSpouseFinal.value,
   };
   try {
     await profil.simpan(body);
