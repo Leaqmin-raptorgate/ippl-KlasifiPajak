@@ -312,13 +312,26 @@ def _timeout_s() -> float:
     return value
 
 
+def _prune_upload_hits(now: float) -> None:
+    """Drop stamps, and keys, that are outside the rolling hour."""
+    expired: list[str] = []
+    for key, stamps in _upload_hits.items():
+        fresh = [stamp for stamp in stamps if now - stamp < _UPLOAD_WINDOW_S]
+        if fresh:
+            _upload_hits[key] = fresh
+        else:
+            expired.append(key)
+    for key in expired:
+        del _upload_hits[key]
+
+
 def _consume_upload_slot(user_id: str) -> None:
     """Allow 30 uploads per user per rolling hour, in this process only."""
     now = time.monotonic()
     with _rate_lock:
-        hits = [stamp for stamp in _upload_hits.get(user_id, []) if now - stamp < _UPLOAD_WINDOW_S]
+        _prune_upload_hits(now)
+        hits = _upload_hits.get(user_id, [])
         if len(hits) >= _UPLOAD_LIMIT:
-            _upload_hits[user_id] = hits
             raise ApiError(429, "RATE_LIMITED", _RATE_MESSAGE)
         hits.append(now)
         _upload_hits[user_id] = hits

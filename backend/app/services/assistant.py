@@ -187,17 +187,28 @@ def answer(db: Session, user: User, question: str) -> dict:
     return _body(text, _citations(tool_results), _remaining(db, user.id, month_key, limit))
 
 
+def _prune_hour_hits(now: float) -> None:
+    """Drop stamps, and keys, that are outside the rolling hour."""
+    cutoff = now - _HOUR_SECONDS
+    expired: list[str] = []
+    for key, hits in _hour_hits.items():
+        while hits and hits[0] <= cutoff:
+            hits.popleft()
+        if not hits:
+            expired.append(key)
+    for key in expired:
+        del _hour_hits[key]
+
+
 def _enforce_hourly_limit(user_id: str) -> None:
     """Allow 60 assistant requests per user per rolling hour."""
     now = time.monotonic()
-    cutoff = now - _HOUR_SECONDS
     with _hour_lock:
+        _prune_hour_hits(now)
         hits = _hour_hits.get(user_id)
         if hits is None:
             hits = deque()
             _hour_hits[user_id] = hits
-        while hits and hits[0] <= cutoff:
-            hits.popleft()
         if len(hits) >= _HOUR_LIMIT:
             raise ApiError(429, "RATE_LIMITED", RATE_LIMIT_MESSAGE)
         hits.append(now)
