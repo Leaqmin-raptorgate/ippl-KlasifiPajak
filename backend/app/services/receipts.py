@@ -34,9 +34,9 @@ from app.security import new_id, now_utc
 RECEIPT_STORAGE_ROOT = os.environ.get("RECEIPT_STORAGE_ROOT", "/var/lib/klasifipajak/receipts")
 
 _MAX_BYTES = 8 * 1024 * 1024
-# Set before every decode. Matches Pillow's default bomb ceiling so a
-# process-wide None cannot turn the check off. The SRS names no pixel cap.
-_MAX_IMAGE_PIXELS = 89_478_485
+# Set before every decode. Below Pillow's default bomb ceiling so a
+# process-wide None cannot turn the check off. About 8000 x 5000.
+_MAX_IMAGE_PIXELS = 40_000_000
 _UPLOAD_LIMIT = 30
 _UPLOAD_WINDOW_S = 3600.0
 _RETENTION = timedelta(days=7)
