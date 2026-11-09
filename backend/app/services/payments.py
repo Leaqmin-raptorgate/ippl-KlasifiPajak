@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -52,15 +52,17 @@ def has_pending_order(db: Session, user: User) -> bool:
 
 
 def _order_out(order: SubscriptionOrder) -> dict:
-    return {
+    body = {
         "order_id": order.id,
         "plan_id": order.plan_id,
         "amount_idr": order.amount_idr,
         "status": order.status,
-        "payment_url": order.payment_url,
         "created_at": iso_utc(order.created_at),
         "expires_at_utc": iso_utc(order.expires_at_utc),
     }
+    if order.status == "pending":
+        body["payment_url"] = order.payment_url
+    return body
 
 
 def create_order(db: Session, user: User, plan_id: str) -> tuple[dict, bool]:
@@ -136,6 +138,33 @@ def create_order(db: Session, user: User, plan_id: str) -> tuple[dict, bool]:
     result = _order_out(row)
     db.commit()
     return result, True
+
+
+def _notice_transaction_time(payload: dict[str, Any], received_at: datetime) -> datetime:
+    """Use the notice clock when it parses; otherwise keep the receipt time."""
+    parsed = _parse_notice_time(payload.get("transaction_time"))
+    return parsed if parsed is not None else received_at
+
+
+def _parse_notice_time(raw: Any) -> datetime | None:
+    """Parse transaction_time. A Midtrans clock has no offset and is stored as given."""
+    if not isinstance(raw, str):
+        return None
+    text = raw.strip()
+    if not text:
+        return None
+    if "T" in text or text.endswith("Z"):
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is not None:
+            return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+        return parsed
+    try:
+        return datetime.strptime(text, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
 
 
 def list_orders(db: Session, user: User) -> list[dict]:
@@ -218,7 +247,7 @@ def process_notification(db: Session, payload: dict[str, Any]) -> dict:
                 status=normalized,
                 raw_status=status,
                 gross_amount_idr=amount,
-                transaction_time=instant,
+                transaction_time=_notice_transaction_time(payload, instant),
                 received_at=instant,
             )
         )

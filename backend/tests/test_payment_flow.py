@@ -1,7 +1,7 @@
 """Payment routes and entitlement transitions with an offline gateway (FR-PAY-01..08)."""
 
 import hashlib
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -230,3 +230,88 @@ def test_fr_pay01_stuck_pending_without_url_becomes_fail_not_expire(client, fake
     with SessionLocal() as db:
         old = db.scalar(select(SubscriptionOrder).where(SubscriptionOrder.id == order["order_id"]))
         assert old.status == "fail"
+
+
+def test_fr_pay03_stores_payload_transaction_time(client, fake_gateway):
+    """The notice clock is stored; paid days still start from the receipt time."""
+    _auth(client)
+    user_id = client.get("/api/v1/auth/me").json()["user_id"]
+    order = _order(client)
+    before = now_utc()
+    payload = _notice(order["order_id"])
+    payload["transaction_time"] = "2020-01-09 18:27:19"
+    response = client.post("/api/v1/webhooks/payment", json=payload)
+    assert response.status_code == 200, response.text
+    with SessionLocal() as db:
+        event = db.scalar(select(PaymentEvent).where(PaymentEvent.order_id == order["order_id"]))
+        assert event is not None
+        assert event.transaction_time == datetime(2020, 1, 9, 18, 27, 19)
+        assert before <= event.received_at <= now_utc()
+    user = _user(user_id)
+    assert user.paid_flag is True
+    assert before + timedelta(days=30) <= user.valid_until_utc <= now_utc() + timedelta(days=30)
+
+
+def test_fr_pay03_iso_transaction_time_is_stored(client, fake_gateway):
+    """An ISO transaction_time from the notice is stored as naive UTC."""
+    _auth(client)
+    order = _order(client)
+    payload = _notice(order["order_id"], "expire")
+    payload["transaction_time"] = "2026-10-18T10:30:00Z"
+    response = client.post("/api/v1/webhooks/payment", json=payload)
+    assert response.status_code == 200, response.text
+    with SessionLocal() as db:
+        event = db.scalar(select(PaymentEvent).where(PaymentEvent.order_id == order["order_id"]))
+        assert event is not None
+        assert event.transaction_time == datetime(2026, 10, 18, 10, 30)
+
+
+def test_fr_pay03_missing_or_unreadable_transaction_time_uses_receipt_time(client, fake_gateway):
+    """No usable notice clock keeps today's receipt time and still accepts the event."""
+    _auth(client)
+    order = _order(client)
+    before = now_utc()
+    missing = client.post("/api/v1/webhooks/payment", json=_notice(order["order_id"], "pending"))
+    assert missing.status_code == 200, missing.text
+    with SessionLocal() as db:
+        event = db.scalar(
+            select(PaymentEvent).where(
+                PaymentEvent.order_id == order["order_id"],
+                PaymentEvent.raw_status == "pending",
+            )
+        )
+        assert event is not None
+        assert before <= event.transaction_time <= now_utc()
+        assert event.transaction_time == event.received_at
+    before_bad = now_utc()
+    bad = _notice(order["order_id"], "expire")
+    bad["transaction_time"] = "not-a-time"
+    response = client.post("/api/v1/webhooks/payment", json=bad)
+    assert response.status_code == 200, response.text
+    with SessionLocal() as db:
+        event = db.scalar(
+            select(PaymentEvent).where(
+                PaymentEvent.order_id == order["order_id"],
+                PaymentEvent.raw_status == "expire",
+            )
+        )
+        assert event is not None
+        assert before_bad <= event.transaction_time <= now_utc()
+        assert event.transaction_time == event.received_at
+
+
+def test_fr_pay02_list_returns_payment_url_only_while_pending(client, fake_gateway):
+    """History includes the pay link only while the order is still pending."""
+    _auth(client)
+    order = _order(client)
+    listed = client.get("/api/v1/subscriptions/orders")
+    assert listed.status_code == 200, listed.text
+    pending = listed.json()["items"]
+    assert pending[0]["order_id"] == order["order_id"]
+    assert pending[0]["status"] == "pending"
+    assert pending[0]["payment_url"] == order["payment_url"]
+    settled = client.post("/api/v1/webhooks/payment", json=_notice(order["order_id"]))
+    assert settled.status_code == 200, settled.text
+    items = client.get("/api/v1/subscriptions/orders").json()["items"]
+    assert items[0]["status"] == "settlement"
+    assert "payment_url" not in items[0]
