@@ -26,6 +26,12 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Rule:
+    """One keyword rule.
+
+    ``confidence`` is how sure a match of this phrase is, from 0 to 1.
+    It is not a tax rate, and the value on each row is not retuned here.
+    """
+
     id: str
     category: str
     phrase: str
@@ -105,7 +111,7 @@ RULES: tuple[Rule, ...] = (
     Rule("pekerjaan_bebas.honor", "pekerjaan_bebas", "honor"),
     Rule("pekerjaan_bebas.consult", "pekerjaan_bebas", "konsultasi"),
     Rule("pekerjaan_bebas.design", "pekerjaan_bebas", "jasa desain"),
-    Rule("pekerjaan_bebas.design2", "pekerjaan_bebas", "desain"),
+    Rule("pekerjaan_bebas.desain", "pekerjaan_bebas", "desain"),
     Rule("pekerjaan_bebas.speaker", "pekerjaan_bebas", "narasumber"),
     Rule("pekerjaan_bebas.mentoring", "pekerjaan_bebas", "mentoring"),
     Rule("pekerjaan_bebas.workshop", "pekerjaan_bebas", "workshop"),
@@ -118,7 +124,7 @@ RULES: tuple[Rule, ...] = (
     Rule("usaha.workshop", "usaha", "bengkel"),
     Rule("usaha.sale", "usaha", "penjualan"),
     Rule("usaha.sale2", "usaha", "jual"),
-    Rule("usaha.sale3", "usaha", "jualan"),
+    Rule("usaha.jualan", "usaha", "jualan"),
     Rule("usaha.order", "usaha", "order"),
     Rule("usaha.order_slang", "usaha", "orderan"),
     Rule("usaha.order_id", "usaha", "pesanan"),
@@ -150,7 +156,11 @@ _CLARIFY = ("usaha", "", 0.0, True, "")
 
 
 def classify(text: str, threshold: float = 0.8) -> tuple[str, str, float, bool, str]:
-    """Classify a description; mixed or unknown rows go to clarification (FR-11, FR-14)."""
+    """Classify a description; mixed or unknown rows go to clarification (FR-11, FR-14).
+
+    ``threshold`` is the minimum rule confidence that may be applied. A match
+    below it goes to clarification. The default is 0.8 and is not retuned here.
+    """
     matches = [rule for rule, pattern in _COMPILED_RULES if pattern.search(text)]
     if not matches:
         return _CLARIFY

@@ -72,7 +72,15 @@ def load_review_workbook(path: Path) -> Dataset:
     """Read the Review sheet into labelled, abstention, excluded and unreviewed rows."""
     from openpyxl import load_workbook
 
-    ws = load_workbook(path, read_only=True)["Review"]
+    wb = load_workbook(path, read_only=True)
+    try:
+        return _dataset_from_review(wb["Review"])
+    finally:
+        wb.close()
+
+
+def _dataset_from_review(ws) -> Dataset:
+    """Turn a Review worksheet into a dataset. The caller closes the workbook."""
     rows = ws.iter_rows(values_only=True)
     header: list[str] | None = None
     for row in rows:
