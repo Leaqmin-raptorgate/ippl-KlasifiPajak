@@ -175,7 +175,8 @@ def answer(db: Session, user: User, question: str) -> dict:
         raise ApiError(429, "FREE_CHAT_QUOTA_EXHAUSTED", FREE_QUOTA_MESSAGE)
     try:
         tool_results = _collect_tools(db, user.id, question)
-        raw = _complete(question, tool_results)
+        literals = _stored_private_literals(db, user.id)
+        raw = _complete(question, tool_results, literals)
         text = _strip_data_delimiters(_answer_text(raw))
     except Exception:
         _refund_chat(db, user.id, month_key)
@@ -330,14 +331,9 @@ def _bind_tools(db: Session, user_id: str) -> dict[str, Any]:
                 "id": row.id,
                 "tx_date": row.tx_date.isoformat(),
                 "amount_idr": int(row.amount_idr),
-                "withheld_tax_amount_idr": int(row.withheld_tax_amount_idr),
-                "client_name": row.client_name,
-                "description": row.description,
-                "invoice_no": row.invoice_no,
                 "category": row.category,
-                "source": row.source,
-                "rule_id": row.rule_id,
                 "requires_clarification": bool(row.requires_clarification),
+                "source": row.source,
                 "citation": citations.get(row.id, ""),
             }
             for row in rows
@@ -443,17 +439,13 @@ def _snapshot_dict(row: MonthSnapshot) -> dict[str, Any]:
 
 
 def _profile_dict(row: Profile) -> dict[str, Any]:
-    """Profile fields for the model. NIB digits are omitted."""
+    """Allowlisted profile fields. Name and free text are not included."""
     return {
         "tax_year": int(row.tax_year),
-        "name": row.name,
         "entity_type": row.entity_type,
         "nib_status": row.nib_status,
         "kbli_code": row.kbli_code,
-        "business_description": row.business_description,
-        "marital_status": row.marital_status,
         "spouse_tax_status": row.spouse_tax_status,
-        "spouse_aggregation_active": bool(row.spouse_aggregation_active),
         "is_new_taxpayer_current_year": bool(row.is_new_taxpayer_current_year),
         "has_selected_article_17": row.has_selected_article_17,
         "has_sole_proprietor_company": row.has_sole_proprietor_company,
@@ -535,6 +527,43 @@ def _corpus_quotes(query: str) -> list[Any]:
     return []
 
 
+def _stored_private_literals(db: Session, user_id: str) -> list[str]:
+    """Stored description, invoice number, client name, and profile name."""
+    found: list[str] = []
+
+    def add(value: object) -> None:
+        if not isinstance(value, str):
+            return
+        text = value.strip()
+        if len(text) < 3 or text in found:
+            return
+        found.append(text)
+
+    rows = db.scalars(select(Transaction).where(Transaction.user_id == user_id)).all()
+    for row in rows:
+        add(row.description)
+        add(row.invoice_no)
+        add(row.client_name)
+    profiles = db.scalars(select(Profile).where(Profile.user_id == user_id)).all()
+    for row in profiles:
+        add(row.name)
+    found.sort(key=len, reverse=True)
+    return found
+
+
+def _scrub_literals(value: Any, literals: list[str]) -> Any:
+    """Remove stored private literals, including from the free-text question."""
+    if isinstance(value, str):
+        for literal in literals:
+            value = value.replace(literal, "[REDACTED]")
+        return value
+    if isinstance(value, dict):
+        return {str(key): _scrub_literals(item, literals) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_scrub_literals(item, literals) for item in value]
+    return value
+
+
 def _sanitize_outbound(value: Any, key: str | None = None) -> Any:
     """Copy model input with private names, emails, and phone numbers removed (FR-43)."""
     if isinstance(value, str):
@@ -551,9 +580,10 @@ def _sanitize_outbound(value: Any, key: str | None = None) -> Any:
     return value
 
 
-def _complete(question: str, tool_results: dict[str, Any]) -> Any:
+def _complete(question: str, tool_results: dict[str, Any], literals: list[str]) -> Any:
     """Call the module-global model factory so tests can replace it per request."""
     payload = {"question": _DATA_DELIM.sub("", question), "tool_results": tool_results}
+    payload = _scrub_literals(payload, literals)
     encoded = json.dumps(_sanitize_outbound(payload), ensure_ascii=False, separators=(",", ":"))
     messages = [
         {"role": "system", "content": SYSTEM_INSTRUCTION},

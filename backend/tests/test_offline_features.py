@@ -500,8 +500,286 @@ def test_tc_assistant_payload_masks_private_name_email_and_phone(client, monkeyp
     assert raw_profile not in rendered
     assert email not in rendered
     assert phone not in rendered
-    assert "[KLIEN]" in rendered
-    assert "[REDACTED]" in rendered
+    assert "[KLIEN]" not in rendered
+    sent = _outbound_payload(fake)
+    assert set(sent["tool_results"]["baca_transaksi_sendiri"][0]) == _TX_KEYS
+    assert "name" not in sent["tool_results"]["baca_profil"]["profiles"][0]
+
+
+_TX_KEYS = {
+    "id",
+    "tx_date",
+    "amount_idr",
+    "category",
+    "requires_clarification",
+    "source",
+    "citation",
+}
+_PROFILE_KEYS = {
+    "tax_year",
+    "entity_type",
+    "nib_status",
+    "kbli_code",
+    "spouse_tax_status",
+    "is_new_taxpayer_current_year",
+    "has_selected_article_17",
+    "has_sole_proprietor_company",
+    "receives_salary",
+    "snapshot_checked_through",
+    "spouse_current_usaha_idr",
+    "spouse_current_pekerjaan_bebas_idr",
+    "spouse_current_already_final_idr",
+    "prior_user_usaha_idr",
+    "prior_user_pekerjaan_bebas_idr",
+    "prior_user_already_final_idr",
+    "prior_spouse_usaha_idr",
+    "prior_spouse_pekerjaan_bebas_idr",
+    "prior_spouse_already_final_idr",
+}
+_SNAPSHOT_KEYS = {
+    "month_key",
+    "version",
+    "status",
+    "ruleset_id",
+    "effective_date",
+    "scheme_eligibility_status",
+    "next_year_ineligible",
+    "usaha_omzet_idr",
+    "porsi_bebas_idr",
+    "porsi_kena_idr",
+    "tax_0_5_pct_idr",
+    "withheld_tax_idr",
+    "sisa_bayar_idr",
+    "overwithheld_excess_idr",
+    "overwithheld_status",
+    "pekerjaan_bebas_omzet_idr",
+    "already_final_omzet_idr",
+    "non_object_omzet_idr",
+    "annotation",
+}
+_THRESHOLD_KEYS = {
+    "month_key",
+    "status",
+    "scheme_eligibility_status",
+    "next_year_ineligible",
+    "overwithheld_status",
+    "usaha_omzet_idr",
+    "porsi_bebas_idr",
+    "porsi_kena_idr",
+    "tax_0_5_pct_idr",
+    "withheld_tax_idr",
+    "sisa_bayar_idr",
+    "overwithheld_excess_idr",
+    "pekerjaan_bebas_omzet_idr",
+    "already_final_omzet_idr",
+    "non_object_omzet_idr",
+}
+_PASSAGE_KEYS = {"id", "text", "citation"}
+
+
+def _outbound_payload(fake) -> dict:
+    """Parse the single DATA object the assistant sent to the model."""
+    assert len(fake.calls) == 1
+    message = fake.calls[0]["messages"][1]["content"]
+    assert message.startswith("DATA: ")
+    return json.loads(message[len("DATA: ") :])
+
+
+def test_tc_assistant_allowlist_exact_keys(client, monkeypatch):
+    """FR-27: each tool result has exactly the allowlisted keys."""
+    from app.classify.model_client import FakeModelClient
+    from app.services import assistant
+
+    _register_login(client, email="assistant-keys@example.test", username="assistantkeys")
+    _profile(client)
+    _transaction(client, tx_date="2026-11-09", amount_idr=2_500_000)
+    _set_ai_consent(client)
+    fake = FakeModelClient(["Ringkasan tanpa angka."])
+    monkeypatch.setattr(assistant, "get_model_client", lambda: fake)
+
+    response = client.post(f"{API}/assistant/query", json={"question": "berapa omzet bulan ini"})
+    assert response.status_code == 200, response.text
+    payload = _outbound_payload(fake)
+    assert set(payload) == {"question", "tool_results"}
+    tools = payload["tool_results"]
+    assert set(tools) == {
+        "baca_transaksi_sendiri",
+        "baca_cuplikan",
+        "baca_profil",
+        "baca_status_ambang",
+        "cari_kutipan_korpus",
+    }
+    assert tools["baca_transaksi_sendiri"]
+    assert {tuple(sorted(row)) for row in tools["baca_transaksi_sendiri"]} == {
+        tuple(sorted(_TX_KEYS))
+    }
+    assert tools["baca_cuplikan"]
+    assert {tuple(sorted(row)) for row in tools["baca_cuplikan"]} == {tuple(sorted(_SNAPSHOT_KEYS))}
+    assert tools["baca_status_ambang"]
+    assert {tuple(sorted(row)) for row in tools["baca_status_ambang"]} == {
+        tuple(sorted(_THRESHOLD_KEYS))
+    }
+    profile = tools["baca_profil"]
+    assert set(profile) == {"profiles", "guidance"}
+    assert profile["profiles"]
+    assert {tuple(sorted(row)) for row in profile["profiles"]} == {tuple(sorted(_PROFILE_KEYS))}
+    assert profile["guidance"]
+    assert {tuple(sorted(row)) for row in profile["guidance"]} == {tuple(sorted(_PASSAGE_KEYS))}
+    assert tools["cari_kutipan_korpus"]
+    assert {tuple(sorted(row)) for row in tools["cari_kutipan_korpus"]} == {
+        tuple(sorted(_PASSAGE_KEYS))
+    }
+
+
+def test_tc_assistant_payload_omits_private_text_even_in_the_question(client, monkeypatch):
+    """FR-27: description, invoice, client name, and profile name are not sent."""
+    from app.classify.model_client import FakeModelClient
+    from app.services import assistant
+
+    raw_client = "Sari Wulandari"
+    raw_profile = "Budi Santoso"
+    raw_invoice = "INV-RAHASIA-77"
+    raw_description = "Penjualan khusus ke klien rahasia"
+    _register_login(client, email="assistant-omit@example.test", username="assistantomit")
+    profile = client.put(
+        f"{API}/profiles/2026",
+        json={
+            "version": 1,
+            "name": raw_profile,
+            "entity_type": "orang_pribadi",
+            "nib_status": "no_nib",
+            "nib_last_4": None,
+            "kbli_code": "47111",
+            "business_description": "Jasa desain interior rumah",
+            "marital_status": "no",
+            "spouse_tax_status": "unmarried",
+            "spouse_aggregation_active": False,
+            "is_new_taxpayer_current_year": True,
+            "prior_user_usaha_idr": 0,
+            "prior_user_pekerjaan_bebas_idr": 0,
+            "prior_user_already_final_idr": 0,
+        },
+    )
+    assert profile.status_code == 200, profile.text
+    _transaction(
+        client,
+        client_name=raw_client,
+        description=raw_description,
+        invoice_no=raw_invoice,
+        tx_date="2026-11-09",
+    )
+    _set_ai_consent(client)
+    fake = FakeModelClient(["Ringkasan tanpa angka."])
+    monkeypatch.setattr(assistant, "get_model_client", lambda: fake)
+    question = (
+        f"Cek klien {raw_client} faktur {raw_invoice} "
+        f"profil {raw_profile} deskripsi {raw_description}"
+    )
+
+    response = client.post(f"{API}/assistant/query", json={"question": question})
+    assert response.status_code == 200, response.text
+    rendered = json.dumps(fake.calls, ensure_ascii=False)
+    assert raw_client not in rendered
+    assert raw_profile not in rendered
+    assert raw_invoice not in rendered
+    assert raw_description not in rendered
+    assert "Jasa desain interior rumah" not in rendered
+    assert "[KLIEN]" not in rendered
+    payload = _outbound_payload(fake)
+    assert "faktur" in payload["question"]
+    assert "question" in payload
+
+
+def test_tc_assistant_reduced_context_still_answers_useful_questions(client, monkeypatch):
+    """FR-27: omzet, clarification, and the cap still have the fields they need."""
+    from app.services import assistant
+
+    class Reader:
+        def __init__(self):
+            self.calls: list[dict] = []
+
+        def complete(self, messages, response_schema=None):
+            self.calls.append({"messages": messages, "response_schema": response_schema})
+            message = messages[1]["content"]
+            data = json.loads(message[len("DATA: ") :])
+            tools = data["tool_results"]
+            question = data["question"]
+            if "omzet" in question:
+                row = next(
+                    item for item in tools["baca_cuplikan"] if item["month_key"] == "2026-11"
+                )
+                amount = row["usaha_omzet_idr"]
+                assert amount > 0
+                return {"answer": f"Omzet bulan ini Rp {amount}.", "citations": []}
+            if "klarifikasi" in question:
+                row = next(
+                    item
+                    for item in tools["baca_transaksi_sendiri"]
+                    if item["requires_clarification"]
+                )
+                return {
+                    "answer": f"Transaksi {row['id']} butuh klarifikasi.",
+                    "citations": [],
+                }
+            if "batas" in question:
+                row = next(
+                    item for item in tools["baca_status_ambang"] if item["month_key"] == "2026-11"
+                )
+                return {
+                    "answer": (
+                        f"Kelayakan {row['scheme_eligibility_status']}. "
+                        f"Omzet usaha Rp {row['usaha_omzet_idr']}."
+                    ),
+                    "citations": [],
+                }
+            raise AssertionError(question)
+
+    _register_login(client, email="assistant-useful@example.test", username="assistantuseful")
+    _profile(client)
+    _transaction(
+        client,
+        tx_date="2026-11-09",
+        amount_idr=2_500_000,
+        description="Penjualan barang dagangan",
+        invoice_no="USEFUL-OMZET",
+    )
+    flagged = _transaction(
+        client,
+        tx_date="2026-11-09",
+        amount_idr=50_000,
+        description="Catatan yang belum jelas",
+        invoice_no="USEFUL-FLAG",
+        client_name="Pembeli Lain",
+    )
+    db = SessionLocal()
+    try:
+        row = db.get(Transaction, flagged["id"])
+        assert row is not None
+        row.requires_clarification = True
+        db.commit()
+        flagged_id = row.id
+    finally:
+        db.close()
+    _set_ai_consent(client)
+    reader = Reader()
+    monkeypatch.setattr(assistant, "get_model_client", lambda: reader)
+
+    omzet = client.post(f"{API}/assistant/query", json={"question": "berapa omzet bulan ini"})
+    assert omzet.status_code == 200, omzet.text
+    assert "tidak cukup" not in omzet.json()["answer"]
+    assert "2500000" in omzet.json()["answer"] or "2.500.000" in omzet.json()["answer"]
+
+    which = client.post(
+        f"{API}/assistant/query", json={"question": "transaksi mana yang butuh klarifikasi"}
+    )
+    assert which.status_code == 200, which.text
+    assert flagged_id in which.json()["answer"]
+    assert "tidak cukup" not in which.json()["answer"]
+
+    cap = client.post(f"{API}/assistant/query", json={"question": "apakah saya mendekati batas"})
+    assert cap.status_code == 200, cap.text
+    assert "tidak cukup" not in cap.json()["answer"]
+    assert "Kelayakan" in cap.json()["answer"]
 
 
 def test_tc_assistant_quota_exhaustion_skips_model_call(client, monkeypatch):
