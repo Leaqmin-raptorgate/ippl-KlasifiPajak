@@ -94,17 +94,32 @@ def validate_classification(
     return ClassificationResult(category, numeric, citation, rationale)
 
 
-# Mask long digit sequences even when separators are used, before building any prompt.
-_LONG_NUMBER = re.compile(r"(?<!\d)(?:\d[\s.\-]?){12,}\d(?!\d)")
+# A token starts at the beginning, after whitespace, or after punctuation.
+# A hyphen between digits is not a token boundary, so a date is not a phone.
+_TOKEN_START = r"(?<!\d)(?<!\d-)"
+# One separator between groups. Another separator or a digit continues the token.
+_TOKEN_END = r"(?!\d)(?![\s.\-][\d\s.\-])"
+# 13 or more digits, in groups of at least three. A 2-digit month or day does not qualify.
+_LONG_NUMBER = re.compile(_TOKEN_START + r"\d{3,}(?:[\s.\-]\d{3,})*" + _TOKEN_END)
 _EMAIL = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
-# 0812 and +62 812 forms are shorter than the 13-digit run above.
-_ID_MOBILE = re.compile(r"(?<!\d)(?:\+?62[\s.\-]?|0)8(?:[\s.\-]?\d){8,11}(?!\d)")
+# 0812 and +62 812 forms. Groups after the prefix are at least three digits.
+_ID_MOBILE = re.compile(
+    _TOKEN_START + r"(?:\+?62[\s.\-]?8\d{2,}|08\d+)" + r"(?:[\s.\-]\d{3,})*" + _TOKEN_END
+)
 _BUSINESS_NAME = re.compile(r"^\s*(?:PT|CV|UD|Toko|Koperasi)\b", re.IGNORECASE)
+_MIN_LONG_DIGITS = 13
+
+
+def _replace_long_number(match: re.Match[str]) -> str:
+    digits = re.sub(r"\D", "", match.group(0))
+    if len(digits) >= _MIN_LONG_DIGITS:
+        return "[REDACTED]"
+    return match.group(0)
 
 
 def _redact_text(text: str) -> str:
     text = _EMAIL.sub("[REDACTED]", text)
-    text = _LONG_NUMBER.sub("[REDACTED]", text)
+    text = _LONG_NUMBER.sub(_replace_long_number, text)
     return _ID_MOBILE.sub("[REDACTED]", text)
 
 

@@ -63,6 +63,29 @@ def test_fr12_threshold_model_result_is_accepted():
     assert result is not None and result.category == "usaha"
 
 
+@pytest.mark.parametrize(
+    ("text", "redacted"),
+    [
+        ("2026-08-01 2026-08-31", False),
+        ("2026-08-15", False),
+        ("01-08-2026 s/d 31-08-2026", False),
+        ("0812-3456-7890", True),
+        ("+62 812 3456 7890", True),
+        ("081234567890", True),
+    ],
+)
+def test_fr43_phone_pattern_leaves_dates_and_redacts_mobiles(text, redacted):
+    """FR-43: a date range is not a phone; the three mobile forms still are."""
+    from app.classify.model_client import _redact_text
+
+    result = _redact_text(text)
+    if redacted:
+        assert text not in result
+        assert "[REDACTED]" in result
+    else:
+        assert result == text
+
+
 def test_fr43_prompt_keeps_injection_in_data_and_masks_private_client():
     """FR-43, NFR-16: input text cannot become system instructions or expose NIB."""
     from app.classify.model_client import build_classification_messages
