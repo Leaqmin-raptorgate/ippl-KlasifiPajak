@@ -48,6 +48,6 @@ install_error_handler(app)
 if not settings.is_production:
     app.include_router(engine_router)
 app.include_router(app_router, prefix="/api/v1")
-# API §5.32 / ARGON-4: password-reset-token test-support mounts only under APP_ENV=test.
+# API §5.31–§5.32: test-support routes mount only under APP_ENV=test.
 if settings.is_test:
     app.include_router(test_support_router, prefix="/api/v1")

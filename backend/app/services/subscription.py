@@ -30,8 +30,9 @@ FREE_ASSISTANT_LIMIT = 15
 
 def _is_paid_active(user: User, now: datetime | None = None) -> bool:
     instant = now or now_utc()
+    # API §2.6: active at exactly valid_until_utc, inactive after that instant.
     return bool(
-        user.paid_flag and user.valid_until_utc is not None and user.valid_until_utc > instant
+        user.paid_flag and user.valid_until_utc is not None and user.valid_until_utc >= instant
     )
 
 

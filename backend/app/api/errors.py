@@ -2,10 +2,12 @@
 
 API v1.3.2 section 2.5 pins ``{"error": {"code", "message"}}``. Messages are
 Indonesian because the frontend keys its text on the code and shows the
-message as written.
+message as written. Request validation uses that same envelope. This module
+does not add ``field`` or ``field_errors``; nothing else in the API returns them.
 """
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.config.settings import Settings
@@ -41,3 +43,19 @@ def install_error_handler(app: FastAPI) -> None:
                 secure=settings.is_production,
             )
         return response
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation(_: Request, exc: RequestValidationError) -> JSONResponse:
+        loc = []
+        errors = exc.errors()
+        if errors:
+            loc = [str(part) for part in errors[0].get("loc", ()) if part != "body"]
+        field = loc[-1] if loc else ""
+        if field:
+            message = f"Isian {field} tidak valid. Periksa data yang dikirim, lalu coba lagi."
+        else:
+            message = "Isian tidak valid. Periksa data yang dikirim, lalu coba lagi."
+        return JSONResponse(
+            status_code=422,
+            content={"error": {"code": "VALIDATION_ERROR", "message": message}},
+        )

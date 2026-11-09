@@ -112,7 +112,6 @@ def update_profile(
             422,
             "INVALID_NIB_FORMAT",
             "Kolom nib_last_4 harus berupa tepat 4 digit angka.",
-            field="nib_last_4",
         )
     if payload.nib_last_4 is not None and not _NIB.match(payload.nib_last_4):
         raise ApiError(

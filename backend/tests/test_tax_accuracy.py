@@ -1,6 +1,7 @@
 """Tax eligibility and ledger regression cases (FR-03, FR-10, FR-19, FR-35)."""
 
-from datetime import date
+from datetime import date, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
@@ -11,6 +12,7 @@ from app.engine import Profile, Transaction, compute
 from app.models import ClassificationEvent
 from app.models import Transaction as TransactionRow
 from app.services.snapshots_store import freeze_today_jakarta
+from app.services.subscription import _is_paid_active
 
 
 @pytest.mark.parametrize(
@@ -154,6 +156,63 @@ def test_fr03_profile_audit_masks_nib(client):
     assert trail
     assert trail[-1]["old_value"] == "*********4321"
     assert trail[-1]["new_value"] == "*********1234"
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("nib_status", "invalid"),
+        ("marital_status", "invalid"),
+        ("nib_last_4", None),
+        ("name", "x" * 256),
+        ("kbli_code", "x" * 17),
+        ("business_description", "x" * 256),
+    ],
+)
+def test_fr03_invalid_profile_fields_return_field_errors(client, field, value):
+    """Invalid profile values stay rejected.
+
+    The old assertion looked for ``error.field`` or ``error.field_errors``.
+    The live contract (spec §2.5 and the error helper) is only
+    ``{"error": {"code", "message"}}``. No handler returns those extra keys,
+    so the expectation follows that envelope. The message still names the field.
+    """
+    _auth(client)
+    response = _profile(client, **{field: value})
+    assert response.status_code == 422, response.text
+    body = response.json()
+    assert "field_errors" not in body
+    error = body["error"]
+    assert set(error) == {"code", "message"}
+    assert error["code"] and error["message"]
+    assert field in error["message"]
+
+
+def test_fr35_subscription_active_at_expiry_boundary():
+    instant = datetime(2026, 11, 7, 12, 0)
+    user = SimpleNamespace(paid_flag=True, valid_until_utc=instant)
+    assert _is_paid_active(user, instant) is True
+    assert _is_paid_active(user, instant + timedelta(microseconds=1)) is False
+
+
+@pytest.mark.parametrize("environment", ["development", "production"])
+def test_fr_pay07_override_route_is_not_mounted_outside_test(environment):
+    """FR-PAY-07: test support is absent from application routing in non-test environments."""
+    import os
+    import subprocess
+    import sys
+
+    env = os.environ.copy()
+    env.update(APP_ENV=environment, JWT_SECRET="x" * 40)
+    code = (
+        "from app.main import app; "
+        "assert '/api/v1/test-support/subscription-override' "
+        "not in app.openapi()['paths']"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code], env=env, capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_fr_pay07_test_support_rejects_non_loopback_server_address():
