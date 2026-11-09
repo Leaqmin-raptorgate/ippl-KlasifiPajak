@@ -350,6 +350,29 @@ def test_tc_ocr_strips_gps_owner_get_is_private_and_confirm_uses_user_values(
     assert reconfirm.json()["error"]["code"] == "RECEIPT_ALREADY_CONFIRMED"
 
 
+def test_tc_ocr_rejects_image_just_above_pixel_cap(client, tmp_path, monkeypatch):
+    """FR-06: a decode just above 40_000_000 pixels uses the existing bomb error."""
+    from app.services import receipts
+
+    monkeypatch.setattr(receipts, "RECEIPT_STORAGE_ROOT", tmp_path, raising=False)
+    user_id = _register_login(client, email="ocr-pixels@example.test", username="ocrpixels")
+    _set_paid(user_id)
+    _set_ai_consent(client)
+    width, height = 8001, 5000
+    assert width * height > 40_000_000
+    image = Image.new("RGB", (width, height), color=(1, 2, 3))
+    raw = io.BytesIO()
+    image.save(raw, format="JPEG", quality=40)
+
+    response = client.post(
+        f"{API}/transactions/ocr-upload",
+        files={"file": ("wide.jpg", raw.getvalue(), "image/jpeg")},
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["error"]["code"] == "IMAGE_TYPE_NOT_SUPPORTED"
+    assert not [path for path in tmp_path.rglob("*") if path.is_file()]
+
+
 def test_tc_ocr_applies_exif_orientation_before_stripping_metadata(client, tmp_path, monkeypatch):
     """FR-06: orientation 6 is applied, then the stored JPEG has no EXIF."""
     from app.classify.model_client import FakeModelClient
