@@ -19,7 +19,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -350,8 +350,8 @@ def _reencode_unlocked(raw: bytes, mime: str) -> bytes:
 
 
 def _without_metadata(image: Image.Image, mime: str) -> Image.Image:
-    """Copy pixels into a new image so EXIF, XMP, and GPS are not kept."""
-    working = image
+    """Apply EXIF orientation, then copy pixels so EXIF, XMP, and GPS are dropped."""
+    working = ImageOps.exif_transpose(image)
     if mime == "image/jpeg" and working.mode not in ("L", "RGB", "CMYK"):
         working = working.convert("RGB")
     elif mime == "image/png" and working.mode not in ("1", "L", "LA", "RGB", "RGBA"):

@@ -350,6 +350,50 @@ def test_tc_ocr_strips_gps_owner_get_is_private_and_confirm_uses_user_values(
     assert reconfirm.json()["error"]["code"] == "RECEIPT_ALREADY_CONFIRMED"
 
 
+def test_tc_ocr_applies_exif_orientation_before_stripping_metadata(client, tmp_path, monkeypatch):
+    """FR-06: orientation 6 is applied, then the stored JPEG has no EXIF."""
+    from app.classify.model_client import FakeModelClient
+    from app.services import receipts
+
+    monkeypatch.setattr(receipts, "RECEIPT_STORAGE_ROOT", tmp_path, raising=False)
+    monkeypatch.setattr(
+        receipts,
+        "get_ocr_client",
+        lambda: FakeModelClient(
+            [
+                {
+                    "amount_idr": 1,
+                    "tx_date": "2026-10-15",
+                    "client_name": "Toko",
+                    "invoice_no": "ORI-6",
+                }
+            ]
+        ),
+    )
+    user_id = _register_login(client, email="ocr-orient@example.test", username="ocrorient")
+    _set_paid(user_id)
+    _set_ai_consent(client)
+    image = Image.new("RGB", (8, 3), color=(20, 40, 60))
+    exif = image.getexif()
+    exif[274] = 6
+    raw = io.BytesIO()
+    image.save(raw, format="JPEG", exif=exif)
+    original = Image.open(io.BytesIO(raw.getvalue()))
+    assert original.size == (8, 3)
+    assert original.getexif().get(274) == 6
+
+    uploaded = client.post(
+        f"{API}/transactions/ocr-upload",
+        files={"file": ("receipt.jpg", raw.getvalue(), "image/jpeg")},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    stored = client.get(f"{API}/transactions/receipt-images/{uploaded.json()['image_id']}")
+    assert stored.status_code == 200, stored.text
+    processed = Image.open(io.BytesIO(stored.content))
+    assert processed.size == (3, 8)
+    assert 274 not in processed.getexif()
+
+
 def test_tc_ocr_confirm_rejects_expired_receipt_without_transaction(client, tmp_path, monkeypatch):
     """FR-06b: an expired receipt is not found and creates no transaction."""
     from app.classify.model_client import FakeModelClient
