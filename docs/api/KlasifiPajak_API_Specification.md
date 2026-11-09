@@ -2,7 +2,7 @@
 
 **Version:** 1.3.3
 **Status:** Normative contract
-**Aligned with:** KlasifiPajak SRS v2.7 and SDD v1.1 (2 November 2026), except FR-20 and FR-22, which this version supersedes until SRS v2.8.
+**Aligned with:** KlasifiPajak SRS v2.7 and SDD v1.1 (2 November 2026). The SRS of record is v2.7. API v1.3.3 includes draft SRS v2.8 changes pending integration into the course SRS. Source SRS v2.8 is not ratified.
 **Author:** 11241050 - Muhammad Aditya Putra
 
 SRS §2.7.f points here. Endpoint paths, JSON fields, error codes, and session rules in this file are the contract. The SRS states product behavior and does not lock a framework name.
@@ -14,8 +14,8 @@ SRS §2.7.f points here. Endpoint paths, JSON fields, error codes, and session r
 | 1.2.2   | 2026-10-18 | Baseline aligned with SRS v2.6.                                                                                                                                                                                                                                                                                                                    |
 | 1.3.0   | 2026-10-28 | D-01: local receipt storage + `GET /transactions/receipt-images/{image_id}`; D-02: quota column names, reclassify quota note, profile field map; D-04: Google OIDC endpoints designed and deferred; D-05: prompt envelope §2.8, test-support fail-closed, argon2id, webhook edge cases, email validation, rate limits, session `created_at` alias. |
 | 1.3.1   | 2026-11-02 | D-11 + wire alignment: §5.16 example adds `provisional_category`; §5.17 optional `version` → `409` `VERSION_CONFLICT`; §5.20 lists `provisional_omzet_idr` / `provisional_usaha_omzet_idr`; §5.14 note that OCR extraction may use the same OpenAI-compatible `AI_BASE_URL` gateway (provider-agnostic).                                           |
-| 1.3.3   | 2026-11-07 | Align prior-year eligibility, provisional rows, workpaper, onboarding and Midtrans with the proposed SRS v2.8 changes. These changes await integration into the source SRS. §5.23 and §5.24 add `409` `STALE_SNAPSHOT` when a month stays `usang` without a `berlaku` row.                                                                         |
 | 1.3.2   | 2026-11-07 | Month `input_hash` becomes `v2:`: a month hashes its own rows plus `carry_forward` (§4). `next_year_ineligible` on a stored month is cumulative through that month (§2.3, §5.21). Transaction writes check every month from January through the Jakarta `as_of` month; only months whose hash changes receive a new version (§5.12).               |
+| 1.3.3   | 2026-11-07 | Align prior-year eligibility, provisional rows, workpaper, onboarding and Midtrans with the proposed SRS v2.8 changes. These changes await integration into the source SRS. §5.23 and §5.24 add `409` `STALE_SNAPSHOT` when a month stays `usang` without a `berlaku` row.                                                                         |
 
 ---
 
@@ -680,7 +680,7 @@ Same body shape as create, plus `version`. Inside the user-row lock, the write c
 
 ### 5.14 `POST /transactions/ocr-upload`
 
-Paid gate. `multipart/form-data` field `file`, JPEG or PNG, at most 8 MB. Does not create a transaction. Bytes are written under private `RECEIPT_STORAGE_ROOT` (not a BLOB column). Before persist: reject size > 8 MB; verify magic bytes (`FF D8 FF` / `89 50 4E 47`) in addition to Content-Type; decode, **strip all EXIF/XMP/GPS** (required), and re-encode in the same format (JPEG stays JPEG, PNG stays PNG); store only re-encoded bytes. `storage_key` is an opaque relative path `receipts/{yyyy}/{mm}/{ulid26}.{ext}` with no PII and is never returned to the client. An image that is never confirmed is deleted, row and bytes, 7 days after upload (daily purge: delete bytes first, then row; idempotent; keep rule is “referenced by a transaction”, `expires_at_utc` is left as-is on confirm). A confirmed image stays until its transaction or the account is deleted. A lapsed paid account keeps confirmed images and cannot upload another. Rate limit: 30 requests per user per hour (`429` `RATE_LIMITED`). Full image bytes are never written to application logs.
+Paid gate. `multipart/form-data` field `file`, JPEG or PNG, at most 8 MB. Does not create a transaction. Bytes are written under private `RECEIPT_STORAGE_ROOT` (not a BLOB column). Before persist: reject size > 8 MB; verify magic bytes (`FF D8 FF` / `89 50 4E 47`) in addition to Content-Type; before decode, cap the image at 40,000,000 pixels, and an image just above that cap returns `422` `IMAGE_TYPE_NOT_SUPPORTED` (the type error, not the 8 MB error); decode, **strip all EXIF/XMP/GPS** (required), and re-encode in the same format (JPEG stays JPEG, PNG stays PNG); store only re-encoded bytes. `ImageOps.exif_transpose` runs before metadata is stripped, so a phone photo is stored upright and the stored file has no EXIF. `storage_key` is an opaque relative path `receipts/{yyyy}/{mm}/img_{ulid26}.{ext}` with no PII and is never returned to the client. An unconfirmed image expires 7 days after upload. There is no daily in-process scheduler. An expired receipt that no transaction links to is removed when that same user uploads again, and by `python -m app.scripts.purge_receipts` (documented in `backend/README.md`). Bytes are deleted with the row. A receipt a transaction links to is kept, including after `expires_at_utc`, and confirm leaves `expires_at_utc` unchanged. A confirmed image stays until its transaction or the account is deleted. A lapsed paid account keeps confirmed images and cannot upload another. Rate limit: 30 requests per user per hour (`429` `RATE_LIMITED`). Full image bytes are never written to application logs.
 
 Candidate-field extraction may be served through the same OpenAI-compatible model gateway configured by `AI_BASE_URL` (provider-agnostic; D-11). The response contract stays `candidate_fields` only; which backend performs OCR is an implementation choice and is not locked to a vendor name.
 
@@ -891,7 +891,7 @@ At most one `pending` row exists per user and plan. The call locks that row. If 
 
 ### 5.29 `GET /subscriptions/orders`
 
-`200` returns the caller's orders: `order_id`, `plan_id`, `amount_idr`, `status`, `created_at`. No payment-instrument data.
+`200` returns the caller's orders: `order_id`, `plan_id`, `amount_idr`, `status`, `created_at`. `payment_url` is included only while `status` is `pending`. No payment-instrument data.
 
 ### 5.30 `POST /webhooks/payment`
 
@@ -920,7 +920,7 @@ The signature above is SHA512 over `ord_20261018_0120025000.00example-server-key
 
 Map `settlement`, and `capture` with `fraud_status=accept`, to settlement. Map `pending`, `authorize`, and `capture` with `challenge` to pending; map `deny`, `cancel`, and `failure` to fail; map `expire` to expire. Record refunds, partial refunds, chargebacks, partial chargebacks and unknown statuses, acknowledge them with 200, and leave entitlement unchanged. Exact challenge semantics require sandbox verification.
 
-Transitions are idempotent: a duplicate adds no days; a pending or terminal failure cannot reverse a settlement; late settlement after expiry or failure activates. A new settlement sets `valid_until = max(now_utc, current_valid_until_utc) + 30 days`. Record the raw status. Verify signature first, then find the order and compare amount; store the event and update the order and entitlement in one transaction. A deleted account is not revived.
+Transitions are idempotent: a duplicate adds no days; a pending or terminal failure cannot reverse a settlement; late settlement after expiry or failure activates. A new settlement sets `valid_until = max(now_utc, current_valid_until_utc) + 30 days`. Record the raw status. Verify signature first, then find the order and compare amount; store the event and update the order and entitlement in one transaction. A deleted account is not revived. A `transaction_time` of `YYYY-MM-DD HH:MM:SS` is stored as that clock with no GMT+7 conversion; an ISO value with `Z` or an offset is stored as naive UTC; a missing or unreadable value stays the receipt time, and paid days still start from the receipt time.
 
 `200`: `{ "acknowledged": true, "idempotent_duplicate": false }`. Invalid signatures return `401 INVALID_WEBHOOK_SIGNATURE`. A missing, empty, or non-string `transaction_status`, a `transaction_status` longer than 255 characters, or a non-string `fraud_status` returns `400 INVALID_WEBHOOK_STATUS`. Amount mismatch returns `400 ORDER_AMOUNT_MISMATCH`. Unknown order after a valid signature returns `404 ORDER_NOT_FOUND`. Configure the HTTPS Payment Notification URL in Midtrans MAP settings. The sandbox notification behavior still needs verification.
 

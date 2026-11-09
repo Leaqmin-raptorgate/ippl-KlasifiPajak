@@ -51,16 +51,21 @@ Putra. It supersedes v1.0, v2.5 and v2.6. Its ids include `FR-01` through
 `FR-47`, `FR-23a`, `FR-PAY-01` through `FR-PAY-09`, `NFR-01` through at least
 `NFR-14` (see SRS for the full NFR set), and `UC-01` through `UC-26`.
 
-> **Provenance.** SRS **v2.7** lives on disk outside this repository at
-> `SPEC/KlasifiPajak/` (course SRS is never committed here). The HTTP contract
-> of record is API **v1.3.3**, mirrored at
-> `docs/api/KlasifiPajak_API_Specification.md`. The schema of record is ERD
-> **r3** (D-11 `month_snapshots.version`). r3 was `76fcdbc4af30`; later revisions
-> are proposed r4 changes; run `alembic heads` for the current head.
-> API v1.3.3 includes proposed SRS v2.8 changes
-> pending integration into the source SRS. Do not add `TODO(SRS-COMMIT)` markers; every id cited here has a source
-> of record. Disclaimer lock (D-07):
-> `DOKUMEN KERJA (WORKPAPER) — BUKAN SPT RESMI DAN BUKAN PRODUK DJP/CORETAX.`
+> **Provenance.**
+>
+> - SRS **v2.7** lives on disk outside this repository at `SPEC/KlasifiPajak/`.
+>   The course SRS is never committed here.
+> - The HTTP contract of record is API **v1.3.3**, mirrored at
+>   `docs/api/KlasifiPajak_API_Specification.md`.
+> - API v1.3.3 includes proposed SRS v2.8 changes pending integration into
+>   the source SRS.
+> - The schema of record is ERD **r3** (D-11 `month_snapshots.version`).
+>   r3 was `76fcdbc4af30`. Later revisions are proposed r4 changes.
+>   Run `alembic heads` for the current head.
+> - Do not add `TODO(SRS-COMMIT)` markers. Every id cited here has a source
+>   of record.
+> - Disclaimer lock (D-07):
+>   `DOKUMEN KERJA (WORKPAPER) — BUKAN SPT RESMI DAN BUKAN PRODUK DJP/CORETAX.`
 
 Ids such as `FR-17`, `FR-23a`, `UC-19a`, `UC-20`, `NFR-12` and `NFR-13` are
 defined in the SRS. Do not treat them as invented.
