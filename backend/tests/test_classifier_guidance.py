@@ -8,6 +8,8 @@ from test_tax_crud_trace_quota import _auth, _profile, _tx
 
 from app.classify.rules import RULES, classify
 from app.db import SessionLocal
+from app.engine import Profile as TaxProfile
+from app.engine import Transaction, compute
 from app.models import MonthSnapshot, Profile
 from app.services.snapshots_store import freeze_today_jakarta
 
@@ -262,3 +264,66 @@ def test_fr10_non_business_excluded_from_cap(description):
 
 def test_fr10_business_rent_remains_final():
     assert classify("sewa tanah")[0] == "already_final"
+
+
+_CAP_PROBE = 4_800_000_001
+
+
+@pytest.mark.parametrize(
+    ("description", "category", "rule_id", "in_base", "in_cap"),
+    [
+        ("penjualan barang", "usaha", "usaha.sale", True, True),
+        ("jasa penerjemahan", "pekerjaan_bebas", "pekerjaan_bebas.translation", False, True),
+        ("sewa tanah", "already_final", "already_final.rent", False, True),
+        ("sewa bangunan", "already_final", "already_final.rent_building", False, True),
+        ("bunga deposito", "non_object", "already_final.deposit", False, False),
+        ("bunga bank", "non_object", "already_final.bank", False, False),
+        ("dividen", "non_object", "already_final.dividend", False, False),
+        ("hadiah undian", "non_object", "already_final.prize", False, False),
+        ("hadiah lomba", None, "", False, False),
+        ("pemberian orang tua", "non_object", "non_object.parents", False, False),
+    ],
+)
+def test_income_matrix_pins_today_category_base_and_cap(
+    description, category, rule_id, in_base, in_cap, ruleset
+):
+    """Pin today's category, the 0.5% base, and the Rp4.8bn test. No rule change.
+
+    ``hadiah lomba`` is a competition prize, not a lottery. It stays
+    clarification and is not passed to the engine. ``hadiah undian`` is the
+    only prize phrase that classifies.
+    """
+    got_category, got_rule, _, needs_clarification, _ = classify(description)
+    profile = TaxProfile(is_new_taxpayer_current_year=True)
+    if category is None:
+        assert needs_clarification is True
+        assert got_rule == ""
+        assert got_category == "usaha"
+        snapshot = compute([], profile, ruleset, "2026-11-01")
+    else:
+        assert needs_clarification is False
+        assert (got_category, got_rule) == (category, rule_id)
+        snapshot = compute(
+            [
+                Transaction(
+                    id="row",
+                    amount=_CAP_PROBE,
+                    date="2026-06-15",
+                    category=got_category,
+                )
+            ],
+            profile,
+            ruleset,
+            "2026-11-01",
+        )
+        totals = {
+            "usaha": snapshot.ytd_usaha_omzet,
+            "pekerjaan_bebas": snapshot.pekerjaan_bebas_total,
+            "already_final": snapshot.already_final_total,
+            "non_object": snapshot.non_object_total,
+        }
+        assert totals[category] == _CAP_PROBE
+        assert all(amount == 0 for name, amount in totals.items() if name != category)
+    assert (snapshot.ytd_usaha_omzet == _CAP_PROBE) is in_base
+    assert (snapshot.final_tax > 0) is in_base
+    assert snapshot.current_year_crossed_cap is in_cap

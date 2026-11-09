@@ -70,5 +70,11 @@
     "condition": "company_unknown",
     "text": "Status perseroan perorangan belum diketahui. Pastikan apakah peredarannya perlu digabung untuk uji batas.",
     "citation": "PP 20/2026 Pasal 57(2)(e)"
+  },
+  {
+    "id": "separate_final_income",
+    "condition": "always",
+    "text": "Penjualan barang atau jasa usaha masuk basis PPh final 0,5% dan uji peredaran bruto Rp 4,8 miliar. Jasa pekerjaan bebas tidak masuk basis 0,5% tetapi masuk uji itu. Sewa tanah atau bangunan dikenai PPh final tersendiri, tidak masuk basis 0,5%, dan tetap masuk uji. Bunga deposito atau tabungan, dividen, dan hadiah undian dikenai PPh final tersendiri; tidak dihitung dalam peredaran bruto usaha. Hadiah lomba atau penghargaan yang bukan undian belum diklasifikasikan dan menunggu klarifikasi. Hibah, warisan, pinjaman yang diterima, dan pemindahan antar rekening sendiri tidak masuk basis 0,5% dan tidak masuk uji peredaran bruto. Kalimat bunga, dividen, dan hadiah undian menggambarkan pencatatan aplikasi saat ini.",
+    "citation": "PP 20/2026 Pasal 56(1), (3) dan Pasal 58(1)(a); UU PPh Pasal 4(2)"
   }
 ]
