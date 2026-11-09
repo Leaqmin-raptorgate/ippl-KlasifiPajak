@@ -417,6 +417,108 @@ def test_tc_ocr_applies_exif_orientation_before_stripping_metadata(client, tmp_p
     assert 274 not in processed.getexif()
 
 
+def test_tc_purge_expired_receipts_deletes_only_unlinked_expired(client, tmp_path, monkeypatch):
+    """FR-06: expired unlinked receipts go; linked and fresh receipts stay."""
+    from app.classify.model_client import FakeModelClient
+    from app.services import receipts
+    from app.services.receipts import purge_expired_receipts
+
+    monkeypatch.setattr(receipts, "RECEIPT_STORAGE_ROOT", tmp_path, raising=False)
+    monkeypatch.setattr(
+        receipts,
+        "get_ocr_client",
+        lambda: FakeModelClient(
+            [
+                {
+                    "amount_idr": 1,
+                    "tx_date": "2026-10-15",
+                    "client_name": "Toko",
+                    "invoice_no": "PURGE-FRESH",
+                },
+                {
+                    "amount_idr": 2,
+                    "tx_date": "2026-10-15",
+                    "client_name": "Toko",
+                    "invoice_no": "PURGE-OLD",
+                },
+                {
+                    "amount_idr": 3,
+                    "tx_date": "2026-10-15",
+                    "client_name": "Toko",
+                    "invoice_no": "PURGE-LINK",
+                },
+            ]
+        ),
+    )
+    user_id = _register_login(client, email="ocr-purge@example.test", username="ocrpurge")
+    _profile(client)
+    _set_paid(user_id)
+    _set_ai_consent(client)
+
+    def upload() -> str:
+        response = client.post(
+            f"{API}/transactions/ocr-upload",
+            files={"file": ("receipt.jpg", _jpeg_with_gps(), "image/jpeg")},
+        )
+        assert response.status_code == 200, response.text
+        return response.json()["image_id"]
+
+    fresh_id = upload()
+    expired_id = upload()
+    linked_id = upload()
+    confirmed = client.post(
+        f"{API}/transactions/ocr-confirm",
+        json={
+            "image_id": linked_id,
+            "confirmed_amount_idr": 54321,
+            "confirmed_tx_date": "2026-10-16",
+            "confirmed_client_name": "PT Nilai Pengguna",
+            "confirmed_description": "Nilai yang dikonfirmasi pengguna",
+            "confirmed_invoice_no": "USER-PURGE-1",
+            "withheld_tax_amount_idr": 0,
+            "source_channel": "corporate_client",
+        },
+    )
+    assert confirmed.status_code == 201, confirmed.text
+
+    db = SessionLocal()
+    try:
+        expired = db.get(ReceiptImage, expired_id)
+        linked = db.get(ReceiptImage, linked_id)
+        fresh = db.get(ReceiptImage, fresh_id)
+        assert expired is not None and linked is not None and fresh is not None
+        expired.expires_at_utc = now_utc() - timedelta(days=1)
+        linked.expires_at_utc = now_utc() - timedelta(days=1)
+        keys = {
+            "fresh": fresh.storage_key,
+            "expired": expired.storage_key,
+            "linked": linked.storage_key,
+        }
+        db.commit()
+    finally:
+        db.close()
+    for key in keys.values():
+        assert (tmp_path / key).is_file()
+
+    db = SessionLocal()
+    try:
+        removed = purge_expired_receipts(db)
+    finally:
+        db.close()
+    assert removed == 1
+
+    db = SessionLocal()
+    try:
+        assert db.get(ReceiptImage, fresh_id) is not None
+        assert db.get(ReceiptImage, expired_id) is None
+        assert db.get(ReceiptImage, linked_id) is not None
+    finally:
+        db.close()
+    assert (tmp_path / keys["fresh"]).is_file()
+    assert not (tmp_path / keys["expired"]).is_file()
+    assert (tmp_path / keys["linked"]).is_file()
+
+
 def test_tc_ocr_confirm_rejects_expired_receipt_without_transaction(client, tmp_path, monkeypatch):
     """FR-06b: an expired receipt is not found and creates no transaction."""
     from app.classify.model_client import FakeModelClient

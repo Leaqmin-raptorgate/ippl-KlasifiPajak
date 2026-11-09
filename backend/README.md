@@ -85,3 +85,15 @@ tax rates and bands do not.
 Workpaper disclaimer (D-07), exact string:
 
 `DOKUMEN KERJA (WORKPAPER) — BUKAN SPT RESMI DAN BUKAN PRODUK DJP/CORETAX.`
+
+## Receipt purge
+
+There is no in-process scheduler. An expired receipt that no transaction links
+to is removed when that same user uploads again, and by this command:
+
+```bash
+PYTHONPATH=backend python -m app.scripts.purge_receipts
+```
+
+The command prints how many rows it deleted. A receipt that a transaction
+still references is kept, including after `expires_at_utc`.
