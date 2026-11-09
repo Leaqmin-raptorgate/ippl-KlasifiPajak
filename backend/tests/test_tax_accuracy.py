@@ -4,13 +4,15 @@ from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 from test_tax_crud_trace_quota import _auth, _profile, _tx
 
 from app.db import SessionLocal
 from app.engine import Profile, Transaction, compute
-from app.models import ClassificationEvent
+from app.models import ClassificationEvent, MonthSnapshot
+from app.models import Profile as ProfileRow
 from app.models import Transaction as TransactionRow
+from app.services import dashboard as dashboard_service
 from app.services.snapshots_store import freeze_today_jakarta
 from app.services.subscription import _is_paid_active
 
@@ -132,6 +134,56 @@ def test_fr05_whitespace_invoice_is_null_for_create_and_update(client):
     with SessionLocal() as db:
         row = db.scalar(select(TransactionRow).where(TransactionRow.id == first.json()["id"]))
         assert row.invoice_no is None and row.invoice_no_norm is None
+
+
+def _snapshot_count(profile_id: str) -> int:
+    with SessionLocal() as db:
+        return int(
+            db.scalar(
+                select(func.count())
+                .select_from(MonthSnapshot)
+                .where(MonthSnapshot.profile_id == profile_id)
+            )
+            or 0
+        )
+
+
+def _checked_through(profile_id: str) -> date | None:
+    with SessionLocal() as db:
+        return db.scalar(
+            select(ProfileRow.snapshot_checked_through).where(ProfileRow.id == profile_id)
+        )
+
+
+def test_empty_profile_dashboard_checks_snapshots_once(client, monkeypatch):
+    """A profile with no transactions is checked once per Jakarta day.
+
+    The second dashboard load must not call rebuild again or insert snapshots.
+    """
+    today = date(2026, 11, 9)
+    calls = {"n": 0}
+    real_rebuild = dashboard_service.rebuild
+
+    def counting_rebuild(*args, **kwargs):
+        calls["n"] += 1
+        return real_rebuild(*args, **kwargs)
+
+    monkeypatch.setattr(dashboard_service, "rebuild", counting_rebuild)
+    with freeze_today_jakarta(today):
+        _auth(client)
+        created = _profile(client)
+        assert created.status_code == 200, created.text
+        profile_id = created.json()["id"]
+        first = client.get("/api/v1/tax/dashboard?tax_year=2026")
+        assert first.status_code == 200, first.text
+        assert _checked_through(profile_id) == today
+        rows_after_first = _snapshot_count(profile_id)
+        calls_after_first = calls["n"]
+        second = client.get("/api/v1/tax/dashboard?tax_year=2026")
+        assert second.status_code == 200, second.text
+        assert calls["n"] == calls_after_first
+        assert _snapshot_count(profile_id) == rows_after_first
+        assert _checked_through(profile_id) == today
 
 
 def test_fr23a_dashboard_refreshes_when_future_date_arrives(client):
