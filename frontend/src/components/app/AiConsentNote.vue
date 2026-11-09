@@ -8,6 +8,14 @@ const session = useSessionStore();
 const sibuk = ref(false);
 const pesan = ref("");
 
+const TEKS_PERSETUJUAN = [
+  "Saya menyetujui pengiriman data ke layanan AI di luar aplikasi, hanya untuk fitur yang saya pakai:",
+  "• Klasifikasi: deskripsi transaksi, nominal, nama klien (hanya jika berbentuk badan usaha), status NIB, kode KBLI, dan kategori transaksi sebelumnya.",
+  "• Baca struk (OCR): seluruh foto struk, termasuk apa pun yang tercetak di dalamnya. Metadata foto dihapus.",
+  "• Asisten: pertanyaan yang saya ketik, serta tanggal, nominal dan kategori transaksi, data profil pajak (termasuk status pasangan dan angka peredaran), dan ringkasan bulanan. Deskripsi transaksi, nomor faktur dan nama klien tidak dikirim ke asisten.",
+  "Saya dapat mencabut persetujuan kapan saja di Profil. Fitur AI tidak dapat dipakai tanpa persetujuan ini.",
+].join("\n");
+
 async function ubah(event: Event) {
   const input = event.target;
   if (!(input instanceof HTMLInputElement)) return;
@@ -29,10 +37,7 @@ async function ubah(event: Event) {
   <div class="catatan">
     <label class="pilihan">
       <input type="checkbox" :checked="session.persetujuanAi" :disabled="sibuk" @change="ubah" />
-      <span>
-        Saya setuju deskripsi transaksi atau foto struk diproses oleh model yang dikonfigurasi.
-        Persetujuan pemrosesan AI diperlukan sebelum fitur ini digunakan.
-      </span>
+      <span class="naskah">{{ TEKS_PERSETUJUAN }}</span>
     </label>
     <p v-if="pesan" class="pesan" role="alert">{{ pesan }}</p>
   </div>
@@ -58,6 +63,10 @@ async function ubah(event: Event) {
 .pilihan input {
   margin-top: 0.1875rem;
   flex: none;
+}
+
+.naskah {
+  white-space: pre-line;
 }
 
 .pesan {
