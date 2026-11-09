@@ -1,5 +1,6 @@
 """Tax eligibility and ledger regression cases (FR-03, FR-10, FR-19, FR-35)."""
 
+from dataclasses import replace
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 
@@ -13,7 +14,8 @@ from app.models import ClassificationEvent, MonthSnapshot
 from app.models import Profile as ProfileRow
 from app.models import Transaction as TransactionRow
 from app.services import dashboard as dashboard_service
-from app.services.snapshots_store import freeze_today_jakarta
+from app.services.dashboard import _prior_combined
+from app.services.snapshots_store import freeze_today_jakarta, profile_to_engine
 from app.services.subscription import _is_paid_active
 
 
@@ -56,6 +58,78 @@ def test_tc_prior_blank_engine(ruleset, new, aggregate, user, spouse, source, gr
     assert result.prior_year_ineligible is ineligible
     if ineligible:
         assert result.final_tax == 0
+
+
+_PRIOR_USER = (1_000_000_000, 200_000_000, 50_000_000)
+_PRIOR_SPOUSE = (300_000_000, 100_000_000, 50_000_000)
+_PRIOR_EMPTY = (None, None, None)
+
+
+def _stored_prior_profile(*, new, aggregate, user, spouse):
+    """ORM-shaped profile. profile_to_engine reads these names and zeros legacy omzet."""
+    return SimpleNamespace(
+        has_selected_article_17=False,
+        spouse_aggregation_active=aggregate,
+        is_new_taxpayer_current_year=new,
+        spouse_current_usaha_idr=0,
+        spouse_current_pekerjaan_bebas_idr=0,
+        spouse_current_already_final_idr=0,
+        prior_user_usaha_idr=user[0],
+        prior_user_pekerjaan_bebas_idr=user[1],
+        prior_user_already_final_idr=user[2],
+        prior_spouse_usaha_idr=spouse[0],
+        prior_spouse_pekerjaan_bebas_idr=spouse[1],
+        prior_spouse_already_final_idr=spouse[2],
+    )
+
+
+@pytest.mark.parametrize(
+    ("new", "aggregate", "user", "spouse", "spouse_in_cap", "amount", "tag"),
+    [
+        (True, False, _PRIOR_EMPTY, _PRIOR_EMPTY, True, 0, "first_year_taxpayer"),
+        (False, False, _PRIOR_EMPTY, _PRIOR_EMPTY, True, 0, "unverifiable"),
+        (False, True, _PRIOR_USER, _PRIOR_SPOUSE, True, 1_700_000_000, "manual_profile"),
+        (False, True, _PRIOR_USER, _PRIOR_SPOUSE, False, 1_250_000_000, "manual_profile"),
+        (
+            False,
+            True,
+            _PRIOR_USER,
+            (300_000_000, None, 0),
+            False,
+            1_250_000_000,
+            "manual_profile",
+        ),
+        (None, False, _PRIOR_EMPTY, _PRIOR_EMPTY, True, 0, "first_year_taxpayer"),
+        (
+            None,
+            False,
+            (5_200_000_000, None, None),
+            _PRIOR_EMPTY,
+            True,
+            5_200_000_000,
+            "manual_profile",
+        ),
+    ],
+)
+def test_prior_year_dashboard_and_engine_agree(
+    ruleset, new, aggregate, user, spouse, spouse_in_cap, amount, tag
+):
+    """FR-19: dashboard and engine share prior-year amount and tag.
+
+    Pasal 58(1)(a) tests last year's gross. Pasal 58(2) adds the spouse only
+    when spouse_in_cap is true. The None flag is the legacy fixture, not a
+    stored profile value.
+    """
+    stored = _stored_prior_profile(new=new, aggregate=aggregate, user=user, spouse=spouse)
+    ruleset = replace(ruleset, spouse_in_cap=spouse_in_cap)
+    dash_amount, dash_tag = _prior_combined(stored, ruleset)
+    result = compute([], profile_to_engine(stored), ruleset)
+    assert (dash_amount, dash_tag) == (
+        result.prior_year_gross_revenue,
+        result.prior_year_resolution_source,
+    )
+    assert dash_amount == amount
+    assert dash_tag == tag
 
 
 def test_tc_prior_blank_profile_api(client):

@@ -150,13 +150,10 @@ def compute(
     normalized = tuple(_normalize(tx) for tx in transactions)
     ordered = tuple(sorted(normalized, key=lambda tx: (tx.date, tx.id)))
 
-    spouse_ytd, spouse_prior = _spouse_figures(profile, ruleset)
-    cap_spouse_prior = spouse_prior if ruleset.spouse_in_cap else 0
+    spouse_ytd, _ = _spouse_figures(profile, ruleset)
     cap_spouse_ytd = spouse_ytd if ruleset.spouse_in_cap else 0
 
-    prior_gross, prior_source = _prior_gross_revenue(profile)
-    if prior_source != PRIOR_YEAR_UNVERIFIABLE:
-        prior_gross += cap_spouse_prior
+    prior_gross, prior_source = _prior_gross_revenue(profile, ruleset.spouse_in_cap)
     prior_ineligible = prior_source == PRIOR_YEAR_UNVERIFIABLE or _over_cap(
         prior_gross, ruleset.eligibility_cap_idr, ruleset.ineligible_when
     )
@@ -225,14 +222,7 @@ def _spouse_figures(profile: Profile, ruleset: Ruleset) -> tuple[int, int]:
         + profile.spouse_current_pekerjaan_bebas_omzet
         + profile.spouse_current_already_final_omzet
     )
-    prior_values = (
-        profile.spouse_prior_year_omzet,
-        profile.prior_spouse_usaha_omzet,
-        profile.prior_spouse_pekerjaan_bebas_omzet,
-        profile.prior_spouse_already_final_omzet,
-    )
-    prior = sum(value for value in prior_values if value is not None)
-    return current, prior
+    return current, _spouse_prior_total(profile)
 
 
 def _allocate(
@@ -283,13 +273,33 @@ def _allocate(
     return tuple(lines)
 
 
-def _prior_gross_revenue(profile: Profile) -> tuple[int, str]:
-    """Prior-year gross revenue that decides scheme eligibility (Pasal 58(1)(a)).
+def _spouse_prior_total(profile: Profile) -> int:
+    """Legacy spouse omzet plus the three prior categories, skipping blanks."""
+    values = (
+        profile.spouse_prior_year_omzet,
+        profile.prior_spouse_usaha_omzet,
+        profile.prior_spouse_pekerjaan_bebas_omzet,
+        profile.prior_spouse_already_final_omzet,
+    )
+    return sum(value for value in values if value is not None)
+
+
+def _prior_gross_revenue(profile: Profile, spouse_in_cap: bool) -> tuple[int, str]:
+    """Prior-year gross that decides scheme eligibility (Pasal 58(1)(a), 58(2)).
 
     Returns the amount and how it was resolved. The three sources are the API
-    spec enum. ``None`` on the new-taxpayer flag is the legacy engine-fixture
-    form and infers the source: any supplied figure means a manually reported
-    profile, no figures at all means a first-year taxpayer.
+    spec enum. ``spouse_in_cap`` is passed in by the caller. This function does
+    not read the ruleset.
+
+    Where the dashboard and the engine disagreed, Pasal 58(1)(a) tests last
+    year's gross and Pasal 58(2) adds the spouse only when ``spouse_in_cap`` is
+    true. A blank spouse figure is not unverifiable when the spouse is outside
+    the cap. A new taxpayer's own prior numbers stay out. The spouse's prior
+    still joins when aggregation and ``spouse_in_cap`` are both true.
+
+    ``None`` on the new-taxpayer flag is the legacy engine-fixture form and
+    infers the source: any supplied figure means a manually reported profile,
+    no figures at all means a first-year taxpayer.
     """
     user_values = (
         profile.prior_year_usaha_omzet,
@@ -302,21 +312,22 @@ def _prior_gross_revenue(profile: Profile) -> tuple[int, str]:
         profile.prior_spouse_already_final_omzet,
     )
     new = profile.is_new_taxpayer_current_year
+    include_spouse = profile.spouse_aggregation_active and spouse_in_cap
     if new is not None:
-        required = (() if new else user_values) + (
-            spouse_values if profile.spouse_aggregation_active else ()
-        )
+        required = (() if new else user_values) + (spouse_values if include_spouse else ())
         if any(value is None for value in required):
             return 0, PRIOR_YEAR_UNVERIFIABLE
-        if new and not profile.spouse_aggregation_active:
+        if new and not include_spouse:
             return 0, PRIOR_YEAR_UNSET
-        return sum(
-            value for value in (() if new else user_values) if value is not None
-        ), PRIOR_YEAR_REPORTED
+        user_sum = 0 if new else sum(value for value in user_values if value is not None)
+        spouse_sum = _spouse_prior_total(profile) if include_spouse else 0
+        return user_sum + spouse_sum, PRIOR_YEAR_REPORTED
     supplied = any(value is not None for value in user_values + spouse_values)
+    spouse_sum = _spouse_prior_total(profile) if include_spouse else 0
     if supplied:
-        return sum(value for value in user_values if value is not None), PRIOR_YEAR_REPORTED
-    return 0, PRIOR_YEAR_UNSET
+        user_sum = sum(value for value in user_values if value is not None)
+        return user_sum + spouse_sum, PRIOR_YEAR_REPORTED
+    return spouse_sum, PRIOR_YEAR_UNSET
 
 
 def _usaha_line(
@@ -521,7 +532,7 @@ def _input_hash(
     that cannot change a result, such as a computation timestamp or
     display-only ``rate_str``, are absent by construction.
     """
-    _, prior_source = _prior_gross_revenue(profile)
+    _, prior_source = _prior_gross_revenue(profile, ruleset.spouse_in_cap)
     new_taxpayer = profile.is_new_taxpayer_current_year
     if not isinstance(new_taxpayer, bool):
         new_taxpayer = prior_source == PRIOR_YEAR_UNSET

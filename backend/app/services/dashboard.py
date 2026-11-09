@@ -5,11 +5,12 @@ from sqlalchemy.orm import Session
 
 from app.api.errors import ApiError
 from app.engine import Ruleset
+from app.engine.compute import _prior_gross_revenue
 from app.models import MonthSnapshot, Profile, User
 from app.services.config import get_config
 from app.services.profile import find_profile
 from app.services.snapshot import DISCLAIMER
-from app.services.snapshots_store import rebuild, today_jakarta
+from app.services.snapshots_store import profile_to_engine, rebuild, today_jakarta
 from app.services.transactions import provisional_usaha_total
 
 
@@ -47,7 +48,7 @@ def dashboard(db: Session, user: User, tax_year: int, ruleset: Ruleset) -> dict:
 
     status = rows[-1].scheme_eligibility_status if rows else "scheme_eligible"
     next_year = rows[-1].next_year_ineligible if rows else False
-    prior_source = rows[-1].prior_year_resolution_source if rows else "first_year_taxpayer"
+    prior_amount, prior_tag = _prior_combined(profile, ruleset)
     split_month = next((row.month_key for row in rows if row.porsi_kena_idr > 0), None)
     remaining = max(0, ruleset.exemption_band_idr - usaha_ytd)
     annotation = next((row.annotation for row in rows if row.annotation), "")
@@ -80,8 +81,8 @@ def dashboard(db: Session, user: User, tax_year: int, ruleset: Ruleset) -> dict:
             },
             "eligibility_prior_year_cap_4_8m": {
                 "limit_idr": ruleset.eligibility_cap_idr,
-                "combined_prior_year_gross_idr": _prior_combined(profile, ruleset),
-                "resolution_source": prior_source,
+                "combined_prior_year_gross_idr": prior_amount,
+                "resolution_source": prior_tag,
                 "status": status,
             },
             "monitoring_current_year_cap_4_8m": {
@@ -135,25 +136,9 @@ def dashboard(db: Session, user: User, tax_year: int, ruleset: Ruleset) -> dict:
     }
 
 
-def _prior_combined(profile: Profile, ruleset: Ruleset) -> int:
-    user_values = (
-        profile.prior_user_usaha_idr,
-        profile.prior_user_pekerjaan_bebas_idr,
-        profile.prior_user_already_final_idr,
-    )
-    spouse_values = (
-        profile.prior_spouse_usaha_idr,
-        profile.prior_spouse_pekerjaan_bebas_idr,
-        profile.prior_spouse_already_final_idr,
-    )
-    required = (() if profile.is_new_taxpayer_current_year else user_values) + (
-        spouse_values if profile.spouse_aggregation_active and ruleset.spouse_in_cap else ()
-    )
-    return (
-        sum(value for value in required if value is not None)
-        if all(value is not None for value in required)
-        else 0
-    )
+def _prior_combined(profile: Profile, ruleset: Ruleset) -> tuple[int, str]:
+    """Amount and source tag from the engine prior-year function (FR-19)."""
+    return _prior_gross_revenue(profile_to_engine(profile), ruleset.spouse_in_cap)
 
 
 def refresh_if_due(db: Session, profile: Profile, ruleset: Ruleset) -> None:
