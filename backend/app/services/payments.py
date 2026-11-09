@@ -23,11 +23,15 @@ PLAN_ID = "monthly_25k"
 PLAN_AMOUNT_IDR = 25_000
 
 
+def _is_production() -> bool:
+    return os.environ.get("MIDTRANS_IS_PRODUCTION", "false").lower() == "true"
+
+
 def get_gateway_adapter() -> MidtransAdapter:
     """Construct the configured gateway; missing keys fail closed on use."""
     return MidtransAdapter(
         server_key=os.environ.get("MIDTRANS_SERVER_KEY", ""),
-        is_production=os.environ.get("MIDTRANS_IS_PRODUCTION", "false").lower() == "true",
+        is_production=_is_production(),
     )
 
 
@@ -149,7 +153,7 @@ def process_notification(db: Session, payload: dict[str, Any]) -> dict:
     # Always use the real verifier, even when order creation uses a fake gateway.
     verifier = MidtransAdapter(
         server_key=os.environ.get("MIDTRANS_SERVER_KEY", ""),
-        is_production=os.environ.get("MIDTRANS_IS_PRODUCTION", "false").lower() == "true",
+        is_production=_is_production(),
     )
     if not verifier.verify_notification(payload):
         raise ApiError(401, "INVALID_WEBHOOK_SIGNATURE", "Tanda tangan pembayaran tidak sah.")
