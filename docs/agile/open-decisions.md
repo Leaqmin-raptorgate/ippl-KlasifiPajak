@@ -62,6 +62,7 @@ requirements to close an OD-*.
 ## Decisions for the proposed SRS v2.8 changes
 
 - D-12: Use the developer-supplied 9router endpoint, with `AI_BASE_URL=https://9router.putrahomelab.com/v1`; model selection and live compatibility await evaluation.
+- Data leaves the application for the configured AI host (`AI_BASE_URL`).
 - D-13: A failed recalculation rolls back the entire transaction and retains previous figures.
 - D-14: Withholding status is `nihil` when equal, `kurang_potong` below, and `belum_diperhitungkan` above tax.
 - D-15: Developer confirmed on 8 November 2026: demo freeze is Friday 27 November 2026, 18:00 Asia/Makassar.
