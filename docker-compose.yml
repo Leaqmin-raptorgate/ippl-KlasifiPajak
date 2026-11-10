@@ -18,7 +18,11 @@ services:
       retries: 20
 
   test:
-    build: .
+    # Dev requirements (openpyxl and other test-only imports); api and migrate skip them.
+    build:
+      context: .
+      args:
+        INSTALL_DEV: "true"
     environment:
       APP_ENV: test
       # pytest create_all needs DDL on the test schema (MYSQL_USER grants).
