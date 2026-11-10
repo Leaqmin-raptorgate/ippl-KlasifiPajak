@@ -10,6 +10,7 @@ from app.api.errors import ApiError
 from app.engine import Ruleset
 from app.models import User
 from app.services.dashboard import dashboard
+from app.services.guidance_conditions import profile_guidance_conditions
 from app.services.profile import find_profile
 from app.services.snapshot import DISCLAIMER
 
@@ -38,17 +39,7 @@ def guidance(db: Session, user: User, ruleset: Ruleset) -> dict:
     monitoring = dashboard(db, user, ruleset.tax_year, ruleset, refresh=False)["thresholds"][
         "monitoring_current_year_cap_4_8m"
     ]
-    conditions = {"always", profile.spouse_tax_status}
-    if profile.has_selected_article_17:
-        conditions.add("article17")
-    elif profile.has_selected_article_17 is None:
-        conditions.add("article17_unknown")
-    if profile.has_sole_proprietor_company:
-        conditions.add("company")
-    elif profile.has_sole_proprietor_company is None:
-        conditions.add("company_unknown")
-    if profile.is_new_taxpayer_current_year is None:
-        conditions.add("new_taxpayer_unknown")
+    conditions = profile_guidance_conditions(profile)
     if monitoring["cap_warning"]:
         conditions.add("cap_warning")
     return {
