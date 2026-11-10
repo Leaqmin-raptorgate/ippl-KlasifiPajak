@@ -7,9 +7,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONPATH=/app/backend
 
-COPY requirements.txt pyproject.toml .env.example ./
+# The test service sets INSTALL_DEV=true to add requirements-dev.txt
+# (openpyxl and other test-only imports). api and migrate keep the default.
+ARG INSTALL_DEV=false
+
+COPY requirements.txt requirements-dev.txt pyproject.toml .env.example ./
 RUN pip install --no-cache-dir -r requirements.txt \
     && useradd --create-home --uid 10001 --shell /usr/sbin/nologin appuser
+RUN if [ "$INSTALL_DEV" = "true" ]; then pip install --no-cache-dir -r requirements-dev.txt; fi
 
 COPY backend ./backend
 # CI helper scripts (pip-audit severity gate) are exercised by backend/tests.
