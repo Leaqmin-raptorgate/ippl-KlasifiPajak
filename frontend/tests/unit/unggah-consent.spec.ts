@@ -68,7 +68,12 @@ describe("receipt upload without consent", () => {
     expect(upload).not.toHaveBeenCalled();
     expect(wrapper.text()).toContain("Persetujuan pemrosesan AI diperlukan");
 
-    session.user = { user_id: "u", email: "a@b.test", username: "a", ai_consent_at: "2026-11-01T00:00:00Z" };
+    session.user = {
+      user_id: "u",
+      email: "a@b.test",
+      username: "a",
+      ai_consent_at: "2026-11-01T00:00:00Z",
+    };
     await flushPromises();
 
     expect(upload).toHaveBeenCalledOnce();
@@ -93,7 +98,12 @@ describe("receipt upload without consent", () => {
     const confirm = vi.spyOn(store, "konfirmasiStruk");
     const create = vi.spyOn(store, "buat").mockResolvedValue({ id: "tx-1" } as never);
     const session = useSessionStore();
-    session.user = { user_id: "u", email: "a@b.test", username: "a", ai_consent_at: "2026-11-01T00:00:00Z" };
+    session.user = {
+      user_id: "u",
+      email: "a@b.test",
+      username: "a",
+      ai_consent_at: "2026-11-01T00:00:00Z",
+    };
 
     const router = createRouter({
       history: createMemoryHistory(),
@@ -114,8 +124,10 @@ describe("receipt upload without consent", () => {
     async function pick(file: File) {
       const realCreate = document.createElement.bind(document);
       const input = realCreate("input");
-      const spy = vi.spyOn(document, "createElement").mockImplementation(((tag: string) =>
-        tag === "input" ? input : realCreate(tag)) as typeof document.createElement);
+      const spy = vi
+        .spyOn(document, "createElement")
+        .mockImplementation(((tag: string) =>
+          tag === "input" ? input : realCreate(tag)) as typeof document.createElement);
       await wrapper.get(".drop").trigger("click");
       spy.mockRestore();
       Object.defineProperty(input, "files", { configurable: true, value: [file] });
@@ -148,7 +160,12 @@ describe("receipt upload without consent", () => {
     vi.spyOn(useProfilStore(), "muat").mockResolvedValue(undefined);
     vi.spyOn(useKuotaStore(), "muat").mockResolvedValue(undefined);
     const upload = vi.spyOn(useTransaksiStore(), "unggahStruk");
-    useSessionStore().user = { user_id: "u", email: "a@b.test", username: "a", ai_consent_at: "2026-11-01T00:00:00Z" };
+    useSessionStore().user = {
+      user_id: "u",
+      email: "a@b.test",
+      username: "a",
+      ai_consent_at: "2026-11-01T00:00:00Z",
+    };
     const router = createRouter({
       history: createMemoryHistory(),
       routes: [
@@ -166,8 +183,10 @@ describe("receipt upload without consent", () => {
 
     const realCreate = document.createElement.bind(document);
     const input = realCreate("input");
-    const spy = vi.spyOn(document, "createElement").mockImplementation(((tag: string) =>
-      tag === "input" ? input : realCreate(tag)) as typeof document.createElement);
+    const spy = vi
+      .spyOn(document, "createElement")
+      .mockImplementation(((tag: string) =>
+        tag === "input" ? input : realCreate(tag)) as typeof document.createElement);
     await wrapper.get(".drop").trigger("click");
     spy.mockRestore();
     Object.defineProperty(input, "files", {

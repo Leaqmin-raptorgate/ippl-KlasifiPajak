@@ -8,10 +8,7 @@ import DasborPage from "@/pages/DasborPage.vue";
 import { usePajakStore } from "@/stores/pajak";
 import { useTransaksiStore } from "@/stores/transaksi";
 
-async function renderDashboard(
-  status: string,
-  tweak?: (dashboard: Dashboard) => void,
-) {
+async function renderDashboard(status: string, tweak?: (dashboard: Dashboard) => void) {
   const pinia = createPinia();
   setActivePinia(pinia);
   const pajak = usePajakStore();

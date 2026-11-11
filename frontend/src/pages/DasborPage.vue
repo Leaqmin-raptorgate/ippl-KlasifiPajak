@@ -256,8 +256,8 @@ async function unduh() {
       <p class="cap-warning-title">Omzet gabungan mendekati batas tahun berjalan</p>
       <p>
         Omzet gabungan tercatat {{ rupiah(tahun.ytd_combined_gross_idr) }} atau
-        {{ persenGabungan }}% dari batas {{ rupiah(tahun.limit_idr) }}. Peringatan ini
-        tidak mengubah status kelayakan atau angka pajak.
+        {{ persenGabungan }}% dari batas {{ rupiah(tahun.limit_idr) }}. Peringatan ini tidak
+        mengubah status kelayakan atau angka pajak.
       </p>
     </AppCard>
 

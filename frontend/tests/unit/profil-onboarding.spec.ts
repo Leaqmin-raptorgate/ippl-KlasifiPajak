@@ -138,7 +138,8 @@ describe("FR-48 spouse and prior-year answers", () => {
       spouse_tax_status: "unknown",
       spouse_aggregation_active: true,
     });
-    const saveButton = () => wrapper.findAll("button").find((button) => button.text() === "Simpan")!;
+    const saveButton = () =>
+      wrapper.findAll("button").find((button) => button.text() === "Simpan")!;
     expect(wrapper.text()).toContain("status perpajakan pasangan belum diketahui");
     expect(saveButton().attributes("disabled")).toBeDefined();
     await saveButton().trigger("click");
