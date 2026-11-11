@@ -58,7 +58,11 @@ depends on migrate completing successfully. Schema is **not** created via
 docker compose up mysql migrate api   # migrate is one-shot; api on http://127.0.0.1:8000
 # or simply:
 docker compose up api                 # pulls mysql + migrate via depends_on
+docker compose up frontend            # vite dev server on http://127.0.0.1:5173
 ```
+
+First-time setup, refreshing `node_modules` after a lockfile change and host
+permission caveats are in [frontend/README.md](frontend/README.md#running-with-docker-compose).
 
 Against a virtualenv (MySQL already migrated):
 
