@@ -3,7 +3,7 @@
 from datetime import date
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
 
 SourceChannel = Literal["marketplace", "corporate_client", "retail", "other"]
 
@@ -15,11 +15,18 @@ class TransactionCreate(BaseModel):
 
     amount_idr: StrictInt = Field(gt=0)
     tx_date: date
-    client_name: str = ""
-    description: str = ""
-    invoice_no: str | None = None
+    client_name: str = Field(min_length=1, max_length=255)
+    description: str = Field(min_length=1, max_length=255)
+    invoice_no: str | None = Field(default=None, max_length=64)
     withheld_tax_amount_idr: StrictInt = Field(default=0, ge=0)
     source_channel: SourceChannel = "other"
+
+    @field_validator("client_name", "description")
+    @classmethod
+    def required_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Kolom wajib diisi.")
+        return value
 
 
 class ClassificationOut(BaseModel):
@@ -103,12 +110,19 @@ class TransactionUpdate(BaseModel):
 
     amount_idr: StrictInt = Field(gt=0)
     tx_date: date
-    client_name: str = ""
-    description: str = ""
-    invoice_no: str | None = None
+    client_name: str = Field(min_length=1, max_length=255)
+    description: str = Field(min_length=1, max_length=255)
+    invoice_no: str | None = Field(default=None, max_length=64)
     withheld_tax_amount_idr: StrictInt = Field(default=0, ge=0)
     source_channel: SourceChannel = "other"
     version: int = Field(ge=1)
+
+    @field_validator("client_name", "description")
+    @classmethod
+    def required_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Kolom wajib diisi.")
+        return value
 
 
 class OverrideIn(BaseModel):

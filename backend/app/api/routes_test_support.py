@@ -1,7 +1,8 @@
 """Test-support routes (API §5.31 and §5.32). Mounted only when APP_ENV=test.
 
-Fail-closed: each handler also refuses non-loopback callers using
-``request.client.host`` only — never ``X-Forwarded-For`` (ARGON-4 / G-28).
+Password reset refuses unless both the TCP peer and the local server host
+are loopback. The subscription override checks ``request.client.host`` only
+and also accepts Starlette's ``testclient``. ``X-Forwarded-For`` is ignored.
 """
 
 from __future__ import annotations
@@ -46,9 +47,27 @@ def _is_test_env() -> bool:
 
 
 def _is_loopback(request: Request) -> bool:
-    """Judge loopback from the peer address only — never from XFF."""
+    """Require a loopback peer and a loopback server host. Never trust XFF."""
     host = request.client.host if request.client else None
-    return host in _LOOPBACK_HOSTS
+    server = request.scope.get("server")
+    server_host = server[0] if server else None
+    return host in _LOOPBACK_HOSTS and server_host in _LOOPBACK_HOSTS
+
+
+def refuse_non_loopback_test_bind(host: str | None) -> None:
+    """Refuse a non-loopback listen host taken from the environment (API §5.31).
+
+    Docker and local launches set ``BIND_HOST`` to the address the process
+    binds. ``APP_ENV=test`` with any other host stops startup. An empty value
+    is ignored: TestClient does not listen, and the development Compose
+    service is ``APP_ENV=development`` with test routes unmounted.
+    """
+    if os.environ.get("APP_ENV") != "test":
+        return
+    if host is None or not str(host).strip():
+        return
+    if str(host).strip() not in _LOOPBACK_HOSTS:
+        raise RuntimeError("APP_ENV=test refuses a non-loopback listen host.")
 
 
 # Peer hosts accepted by the subscription override. ``testclient`` is Starlette's

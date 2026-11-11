@@ -6,7 +6,7 @@ Thin by rule: validate, call one service, return. No route builds a query.
 import ipaddress
 import os
 
-from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, Response
 from sqlalchemy.orm import Session
 
 from app.api.deps import AuthContext, current_session, get_settings
@@ -221,10 +221,13 @@ def me(context: AuthContext = Depends(current_session)) -> MeOut:
 def password_reset_request(
     payload: PasswordResetRequestIn,
     request: Request,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> MessageOut:
     # Discard plaintext; never leak account existence (API §5.4).
-    auth_service.request_password_reset(db, payload, client_ip=_client_ip(request))
+    auth_service.request_password_reset(
+        db, payload, client_ip=_client_ip(request), background_tasks=background_tasks
+    )
     return MessageOut(message=GENERIC_RESET_MESSAGE)
 
 
@@ -333,12 +336,15 @@ def list_transactions(
 @router.post("/transactions", status_code=201, response_model=TransactionOut)
 def create_transaction(
     payload: TransactionCreate,
+    background: BackgroundTasks,
     context: AuthContext = Depends(current_session),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> TransactionOut:
     ruleset = active_ruleset(settings.ruleset_path)
-    return transaction_service.create_transaction(db, context.user, payload, ruleset)
+    return transaction_service.create_transaction(
+        db, context.user, payload, ruleset, background=background
+    )
 
 
 @router.get("/transactions/{transaction_id}", response_model=TransactionOut)

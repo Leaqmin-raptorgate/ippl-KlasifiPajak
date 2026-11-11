@@ -28,7 +28,7 @@ FREE_AI_LIMIT = 10
 FREE_ASSISTANT_LIMIT = 15
 
 
-def _is_paid_active(user: User, now: datetime | None = None) -> bool:
+def is_paid_active(user: User, now: datetime | None = None) -> bool:
     instant = now or now_utc()
     # API §2.6: active at exactly valid_until_utc, inactive after that instant.
     return bool(
@@ -39,7 +39,7 @@ def _is_paid_active(user: User, now: datetime | None = None) -> bool:
 def subscription_status(user: User, has_pending_order: bool = False) -> dict:
     """FR-35: derive the tier from paid_flag and the validity instant."""
     now = now_utc()
-    if _is_paid_active(user, now):
+    if is_paid_active(user, now):
         tier = "berbayar"
         active = True
     elif has_pending_order:
@@ -167,7 +167,7 @@ def quotas(db: Session, user: User, ruleset: Ruleset) -> dict:
     """FR-34, FR-39: calendar-month counters in Asia/Jakarta."""
     month_key, reset = _jakarta_month_key()
     row, created = _ensure_counter(db, user, month_key)
-    paid = _is_paid_active(user)
+    paid = is_paid_active(user)
     ai_limit = ruleset.quota_ai_classification if paid else FREE_AI_LIMIT
     chat_limit = ruleset.quota_assistant_chat if paid else FREE_ASSISTANT_LIMIT
     ai_used = int(row.ai_classification_used)

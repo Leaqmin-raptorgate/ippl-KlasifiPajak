@@ -16,7 +16,7 @@ from app.models import Transaction as TransactionRow
 from app.services import dashboard as dashboard_service
 from app.services.dashboard import _prior_combined
 from app.services.snapshots_store import freeze_today_jakarta, profile_to_engine
-from app.services.subscription import _is_paid_active
+from app.services.subscription import is_paid_active
 
 
 @pytest.mark.parametrize(
@@ -260,6 +260,39 @@ def test_empty_profile_dashboard_checks_snapshots_once(client, monkeypatch):
         assert _checked_through(profile_id) == today
 
 
+@pytest.mark.parametrize(
+    "field,value",
+    [("client_name", "x" * 256), ("description", "x" * 256), ("invoice_no", "x" * 65)],
+)
+def test_fr05_long_transaction_fields_return_field_errors(client, field, value):
+    """FR-05: an over-long transaction field is rejected.
+
+    The shared envelope has code and message only. The field name is in the
+    message. There is no field or field_errors key.
+    """
+    _auth(client)
+    assert _profile(client).status_code == 200
+    response = _tx(client, **{field: value})
+    assert response.status_code == 422, response.text
+    error = response.json()["error"]
+    assert error["code"] == "VALIDATION_ERROR"
+    assert field in error["message"]
+    assert "field" not in error and "field_errors" not in error
+
+
+@pytest.mark.parametrize("field", ["client_name", "description"])
+def test_fr05_blank_required_transaction_fields_rejected(client, field):
+    """FR-05: a required transaction field cannot be blank."""
+    _auth(client)
+    assert _profile(client).status_code == 200
+    response = _tx(client, **{field: "   "})
+    assert response.status_code == 422, response.text
+    error = response.json()["error"]
+    assert error["code"] == "VALIDATION_ERROR"
+    assert field in error["message"]
+    assert "field" not in error and "field_errors" not in error
+
+
 def test_fr23a_dashboard_refreshes_when_future_date_arrives(client):
     with freeze_today_jakarta(date(2026, 11, 2)):
         _auth(client)
@@ -317,8 +350,8 @@ def test_fr03_invalid_profile_fields_return_field_errors(client, field, value):
 def test_fr35_subscription_active_at_expiry_boundary():
     instant = datetime(2026, 11, 7, 12, 0)
     user = SimpleNamespace(paid_flag=True, valid_until_utc=instant)
-    assert _is_paid_active(user, instant) is True
-    assert _is_paid_active(user, instant + timedelta(microseconds=1)) is False
+    assert is_paid_active(user, instant) is True
+    assert is_paid_active(user, instant + timedelta(microseconds=1)) is False
 
 
 @pytest.mark.parametrize("environment", ["development", "production"])
