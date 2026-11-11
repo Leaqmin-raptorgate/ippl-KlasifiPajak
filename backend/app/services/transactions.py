@@ -227,6 +227,39 @@ def list_transactions(
     )
 
 
+# One wording for the manual path and the receipt-confirm path (same error code).
+DUPLICATE_INVOICE_MESSAGE = (
+    "Nomor faktur ini sudah tercatat untuk klien, nominal, dan tanggal yang sama."
+)
+
+
+def find_duplicate_invoice_id(
+    db: Session,
+    *,
+    user_id: str,
+    client_norm: str,
+    invoice_norm: str,
+    amount_idr: int,
+    tx_date: date,
+    exclude_id: str | None = None,
+) -> str | None:
+    """Return a row that already has this client, invoice, amount, and date.
+
+    ``exclude_id`` leaves out the row being edited, so an update that keeps
+    its own key is not reported as its own duplicate.
+    """
+    conditions = [
+        TransactionRow.user_id == user_id,
+        TransactionRow.client_name_norm == client_norm,
+        TransactionRow.invoice_no_norm == invoice_norm,
+        TransactionRow.amount_idr == amount_idr,
+        TransactionRow.tx_date == tx_date,
+    ]
+    if exclude_id is not None:
+        conditions.append(TransactionRow.id != exclude_id)
+    return db.scalar(select(TransactionRow.id).where(*conditions))
+
+
 def create_transaction(
     db: Session,
     user: User,
@@ -262,20 +295,19 @@ def create_transaction(
     invoice_norm = normalize_text(payload.invoice_no) if payload.invoice_no else None
     invoice_norm = invoice_norm or None
     if invoice_norm:
-        duplicate = db.scalar(
-            select(TransactionRow.id).where(
-                TransactionRow.user_id == user.id,
-                TransactionRow.client_name_norm == client_norm,
-                TransactionRow.invoice_no_norm == invoice_norm,
-                TransactionRow.amount_idr == payload.amount_idr,
-                TransactionRow.tx_date == payload.tx_date,
-            )
+        duplicate = find_duplicate_invoice_id(
+            db,
+            user_id=user.id,
+            client_norm=client_norm,
+            invoice_norm=invoice_norm,
+            amount_idr=payload.amount_idr,
+            tx_date=payload.tx_date,
         )
         if duplicate is not None:
             raise ApiError(
                 409,
                 "DUPLICATE_INVOICE_TRANSACTION",
-                "Nomor faktur ini sudah tercatat untuk klien, nominal, dan tanggal yang sama.",
+                DUPLICATE_INVOICE_MESSAGE,
             )
 
     category, rule_id, confidence, requires_clarification, citation = classify(
@@ -512,21 +544,20 @@ def update_transaction(
     invoice_norm = normalize_text(payload.invoice_no) if payload.invoice_no else None
     invoice_norm = invoice_norm or None
     if invoice_norm:
-        duplicate = db.scalar(
-            select(TransactionRow.id).where(
-                TransactionRow.user_id == user.id,
-                TransactionRow.client_name_norm == client_norm,
-                TransactionRow.invoice_no_norm == invoice_norm,
-                TransactionRow.amount_idr == payload.amount_idr,
-                TransactionRow.tx_date == payload.tx_date,
-                TransactionRow.id != row.id,
-            )
+        duplicate = find_duplicate_invoice_id(
+            db,
+            user_id=user.id,
+            client_norm=client_norm,
+            invoice_norm=invoice_norm,
+            amount_idr=payload.amount_idr,
+            tx_date=payload.tx_date,
+            exclude_id=row.id,
         )
         if duplicate is not None:
             raise ApiError(
                 409,
                 "DUPLICATE_INVOICE_TRANSACTION",
-                "Nomor faktur ini sudah tercatat untuk klien, nominal, dan tanggal yang sama.",
+                DUPLICATE_INVOICE_MESSAGE,
             )
 
     # Conditional UPDATE claims the version slot; rowcount==0 → 409.

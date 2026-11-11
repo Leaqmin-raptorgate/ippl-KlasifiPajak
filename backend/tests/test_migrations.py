@@ -187,7 +187,7 @@ def test_tc_hard_12_alembic_upgrade_empty_to_head_and_downgrade(monkeypatch):
     engine = create_engine(migrate_url, pool_pre_ping=True)
     with engine.connect() as conn:
         version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
-        assert version == "c45af872b930"
+        assert version == "d8f0a1c64e27"
         tables = {row[0] for row in conn.execute(text("SHOW TABLES")).fetchall()}
     engine.dispose()
     for required in (
@@ -202,6 +202,265 @@ def test_tc_hard_12_alembic_upgrade_empty_to_head_and_downgrade(monkeypatch):
         "alembic_version",
     ):
         assert required in tables
+
+
+def test_model_new_taxpayer_nullable_and_receipt_image_unique():
+    """ORM agrees with the migration: unanswered flag is nullable, receipt index is unique."""
+    from app.models import Profile as ProfileRow
+    from app.models import Transaction as TransactionRow
+
+    column = ProfileRow.__table__.c.is_new_taxpayer_current_year
+    assert column.nullable is True
+    assert column.default is None
+    assert column.server_default is None
+
+    from sqlalchemy import UniqueConstraint
+
+    image = TransactionRow.__table__.c.image_id
+    assert image.nullable is True
+    image_indexes = [
+        index
+        for index in TransactionRow.__table__.indexes
+        if index.name == "uq_transactions_image_id"
+    ]
+    assert image_indexes == []
+    constraints = [
+        constraint
+        for constraint in TransactionRow.__table__.constraints
+        if constraint.name == "uq_transactions_image_id"
+    ]
+    assert len(constraints) == 1
+    assert isinstance(constraints[0], UniqueConstraint)
+    assert [column.name for column in constraints[0].columns] == ["image_id"]
+    fks = list(image.foreign_keys)
+    assert len(fks) == 1
+    assert fks[0].column.table.name == "receipt_images"
+
+
+def _upgrade(monkeypatch: pytest.MonkeyPatch, revision: str) -> str:
+    migrate_url = _migrate_test_url()
+    if not _mysql_reachable(migrate_url):
+        pytest.skip(f"MySQL not reachable for migrate test URL={migrate_url}")
+    cfg = _alembic_config(migrate_url, monkeypatch)
+    old = os.getcwd()
+    try:
+        os.chdir(BACKEND_ROOT)
+        command.upgrade(cfg, revision)
+    finally:
+        os.chdir(old)
+    return migrate_url
+
+
+def test_new_taxpayer_column_nullable_and_receipt_index_unique(monkeypatch):
+    """Upgrade leaves the flag nullable, keeps an explicit false, and uniques the receipt."""
+    migrate_url = _migrate_test_url()
+    if not _mysql_reachable(migrate_url):
+        pytest.skip(f"MySQL not reachable for migrate test URL={migrate_url}")
+    _wipe_schema(migrate_url)
+    _upgrade(monkeypatch, "c45af872b930")
+    engine = create_engine(migrate_url, pool_pre_ping=True)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO users
+                  (id, email, email_norm, username, username_norm, password_hash,
+                   paid_flag, created_at)
+                VALUES
+                  ('u-nt', 'nt@ex.com', 'nt@ex.com', 'ntuser', 'ntuser', 'x', 0,
+                   UTC_TIMESTAMP(6))
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO profiles
+                  (id, user_id, tax_year, name, entity_type, nib_status, kbli_code,
+                   business_description, marital_status, spouse_aggregation_active,
+                   is_new_taxpayer_current_year, version, spouse_current_usaha_idr,
+                   spouse_current_pekerjaan_bebas_idr, spouse_current_already_final_idr)
+                VALUES
+                  ('p-nt', 'u-nt', 2026, '', 'orang_pribadi', 'unknown', '',
+                   '', 'unknown', 0, 0, 1, 0, 0, 0)
+                """
+            )
+        )
+    engine.dispose()
+
+    _upgrade(monkeypatch, "head")
+    engine = create_engine(migrate_url, pool_pre_ping=True)
+    with engine.begin() as conn:
+        nullable, default = conn.execute(
+            text(
+                """
+                SELECT IS_NULLABLE, COLUMN_DEFAULT
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = 'profiles'
+                  AND COLUMN_NAME = 'is_new_taxpayer_current_year'
+                """
+            )
+        ).one()
+        assert nullable == "YES"
+        assert default is None
+        stored = conn.execute(
+            text("SELECT is_new_taxpayer_current_year FROM profiles WHERE id = 'p-nt'")
+        ).scalar()
+        assert stored == 0
+        indexes = {
+            row[0]: row[1]
+            for row in conn.execute(
+                text(
+                    """
+                    SELECT INDEX_NAME, NON_UNIQUE
+                    FROM information_schema.STATISTICS
+                    WHERE TABLE_SCHEMA = DATABASE()
+                      AND TABLE_NAME = 'transactions'
+                      AND COLUMN_NAME = 'image_id'
+                    """
+                )
+            ).fetchall()
+        }
+        assert indexes == {"uq_transactions_image_id": 0}
+        fk = conn.execute(
+            text(
+                """
+                SELECT REFERENCED_TABLE_NAME
+                FROM information_schema.KEY_COLUMN_USAGE
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = 'transactions'
+                  AND COLUMN_NAME = 'image_id'
+                  AND REFERENCED_TABLE_NAME IS NOT NULL
+                """
+            )
+        ).scalar()
+        assert fk == "receipt_images"
+        conn.execute(
+            text("UPDATE profiles SET is_new_taxpayer_current_year = NULL WHERE id = 'p-nt'")
+        )
+    engine.dispose()
+
+    cfg = _alembic_config(migrate_url, monkeypatch)
+    old = os.getcwd()
+    try:
+        os.chdir(BACKEND_ROOT)
+        command.downgrade(cfg, "-1")
+    finally:
+        os.chdir(old)
+    engine = create_engine(migrate_url, pool_pre_ping=True)
+    with engine.connect() as conn:
+        nullable = conn.execute(
+            text(
+                """
+                SELECT IS_NULLABLE
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = 'profiles'
+                  AND COLUMN_NAME = 'is_new_taxpayer_current_year'
+                """
+            )
+        ).scalar()
+        assert nullable == "NO"
+        stored = conn.execute(
+            text("SELECT is_new_taxpayer_current_year FROM profiles WHERE id = 'p-nt'")
+        ).scalar()
+        assert stored == 0
+        indexes = {
+            row[0]: row[1]
+            for row in conn.execute(
+                text(
+                    """
+                    SELECT INDEX_NAME, NON_UNIQUE
+                    FROM information_schema.STATISTICS
+                    WHERE TABLE_SCHEMA = DATABASE()
+                      AND TABLE_NAME = 'transactions'
+                      AND COLUMN_NAME = 'image_id'
+                    """
+                )
+            ).fetchall()
+        }
+        assert indexes.get("ix_transactions_image_id") == 1
+        assert "uq_transactions_image_id" not in indexes
+    engine.dispose()
+
+
+def test_receipt_unique_upgrade_refuses_duplicate_image_ids(monkeypatch):
+    """Upgrade names duplicate receipt ids and does not delete them."""
+    migrate_url = _migrate_test_url()
+    if not _mysql_reachable(migrate_url):
+        pytest.skip(f"MySQL not reachable for migrate test URL={migrate_url}")
+    _wipe_schema(migrate_url)
+    _upgrade(monkeypatch, "c45af872b930")
+    engine = create_engine(migrate_url, pool_pre_ping=True)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO users
+                  (id, email, email_norm, username, username_norm, password_hash,
+                   paid_flag, created_at)
+                VALUES
+                  ('u-dup', 'dup@ex.com', 'dup@ex.com', 'dupuser', 'dupuser', 'x', 0,
+                   UTC_TIMESTAMP(6))
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO receipt_images
+                  (id, user_id, storage_key, mime_type, size_bytes, created_at, expires_at_utc)
+                VALUES
+                  ('img-dup', 'u-dup', 'k', 'image/jpeg', 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO transactions
+                  (id, user_id, image_id, tx_date, amount_idr, withheld_tax_amount_idr,
+                   client_name, client_name_norm, description, source_channel, category,
+                   source, confidence, rule_id, requires_clarification, version)
+                VALUES
+                  ('t1', 'u-dup', 'img-dup', '2026-01-01', 1, 0, '', '', '', 'other',
+                   'usaha', 'user', 0, '', 0, 1),
+                  ('t2', 'u-dup', 'img-dup', '2026-01-02', 1, 0, '', '', '', 'other',
+                   'usaha', 'user', 0, '', 0, 1)
+                """
+            )
+        )
+    engine.dispose()
+
+    cfg = _alembic_config(migrate_url, monkeypatch)
+    old = os.getcwd()
+    try:
+        os.chdir(BACKEND_ROOT)
+        with pytest.raises(Exception, match="img-dup"):
+            command.upgrade(cfg, "head")
+    finally:
+        os.chdir(old)
+
+    engine = create_engine(migrate_url, pool_pre_ping=True)
+    with engine.connect() as conn:
+        count = conn.execute(
+            text("SELECT COUNT(*) FROM transactions WHERE image_id = 'img-dup'")
+        ).scalar()
+        assert count == 2
+        nullable = conn.execute(
+            text(
+                """
+                SELECT IS_NULLABLE
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = 'profiles'
+                  AND COLUMN_NAME = 'is_new_taxpayer_current_year'
+                """
+            )
+        ).scalar()
+        assert nullable == "NO"
+    engine.dispose()
 
 
 def test_tc_hard_23_app_vs_migrate_mysql_grants_in_init_sql():
@@ -646,7 +905,8 @@ def test_payment_event_downgrade_refuses_duplicate_normalized_status(monkeypatch
     old = os.getcwd()
     try:
         os.chdir(BACKEND_ROOT)
-        command.upgrade(cfg, "head")
+        # Pinned: the test is about c45af872b930, and later revisions move head.
+        command.upgrade(cfg, "c45af872b930")
     finally:
         os.chdir(old)
 

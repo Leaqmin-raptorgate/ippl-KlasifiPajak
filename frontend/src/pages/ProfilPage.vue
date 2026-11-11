@@ -52,7 +52,7 @@ const draft = reactive({
   has_selected_article_17: "",
   has_sole_proprietor_company: "",
   receives_salary: "",
-  is_new_taxpayer_current_year: false,
+  is_new_taxpayer_current_year: "",
   spouse_current_usaha_idr: "0",
   spouse_current_pekerjaan_bebas_idr: "0",
   spouse_current_already_final_idr: "0",
@@ -113,6 +113,11 @@ function labelNib(status?: string, masked?: string | null): string {
 }
 
 function formatNilaiJejak(field: string, val?: string | null): string {
+  if (field === "is_new_taxpayer_current_year") {
+    if (val === "True" || val === "true") return "Ya";
+    if (val === "False" || val === "false") return "Tidak";
+    return "Belum tahu";
+  }
   if (!val || val === "kosong") return "kosong";
   if (field === "nib_status") {
     if (val === "no_nib") return "Tidak punya NIB";
@@ -197,7 +202,8 @@ function mulaiUbah() {
   draft.has_sole_proprietor_company =
     p?.has_sole_proprietor_company == null ? "" : p.has_sole_proprietor_company ? "yes" : "no";
   draft.receives_salary = p?.receives_salary == null ? "" : p.receives_salary ? "yes" : "no";
-  draft.is_new_taxpayer_current_year = p?.is_new_taxpayer_current_year ?? false;
+  draft.is_new_taxpayer_current_year =
+    p?.is_new_taxpayer_current_year == null ? "" : p.is_new_taxpayer_current_year ? "yes" : "no";
   draft.spouse_current_usaha_idr = uang(p?.spouse_current_usaha_idr ?? 0);
   draft.spouse_current_pekerjaan_bebas_idr = uang(p?.spouse_current_pekerjaan_bebas_idr ?? 0);
   draft.spouse_current_already_final_idr = uang(p?.spouse_current_already_final_idr ?? 0);
@@ -325,7 +331,7 @@ async function simpanData() {
     has_selected_article_17: booleanJawaban(draft.has_selected_article_17),
     has_sole_proprietor_company: booleanJawaban(draft.has_sole_proprietor_company),
     receives_salary: booleanJawaban(draft.receives_salary),
-    is_new_taxpayer_current_year: draft.is_new_taxpayer_current_year,
+    is_new_taxpayer_current_year: booleanJawaban(draft.is_new_taxpayer_current_year),
     spouse_current_usaha_idr: spouseUsaha.value,
     spouse_current_pekerjaan_bebas_idr: spousePekerjaanBebas.value,
     spouse_current_already_final_idr: spouseFinal.value,
@@ -511,6 +517,17 @@ async function jalankanHapus() {
         >
           <AppSelect id="p-gaji" v-model="draft.receives_salary" :options="jawabanOpsi" />
         </AppField>
+        <AppField
+          label="Wajib pajak baru tahun ini?"
+          for-id="p-wpbaru"
+          hint="Belum tahu dapat dibiarkan kosong."
+        >
+          <AppSelect
+            id="p-wpbaru"
+            v-model="draft.is_new_taxpayer_current_year"
+            :options="jawabanOpsi"
+          />
+        </AppField>
         <AppField label="Omzet usaha pasangan tahun ini" for-id="p-su">
           <AppInput id="p-su" v-model="draft.spouse_current_usaha_idr" mono inputmode="numeric" />
         </AppField>
@@ -575,12 +592,6 @@ async function jalankanHapus() {
             Simpan
           </AppButton>
         </div>
-        <p class="demo-cat">
-          <label>
-            <input v-model="draft.is_new_taxpayer_current_year" type="checkbox" />
-            Wajib pajak baru tahun ini
-          </label>
-        </p>
       </div>
     </AppCard>
 

@@ -110,6 +110,7 @@ describe("FR-48 spouse and prior-year answers", () => {
     expect(save).toHaveBeenCalledOnce();
     const payload = save.mock.calls[0]![0] as unknown as Record<string, unknown>;
     expect(payload.spouse_tax_status).toBe("unknown");
+    expect(payload.is_new_taxpayer_current_year).toBe(false);
     for (const owner of ["user", "spouse"]) {
       for (const category of ["usaha", "pekerjaan_bebas", "already_final"]) {
         expect(payload[`prior_${owner}_${category}_idr`]).toBeNull();
@@ -131,6 +132,42 @@ describe("FR-48 spouse and prior-year answers", () => {
     const alert = wrapper.find("[role='alert']");
     expect(alert.exists()).toBe(true);
     expect(alert.text()).toContain("tidak valid");
+  });
+
+  it("keeps a loaded unanswered new-taxpayer answer null on save", async () => {
+    const { wrapper, save } = await mountProfile(true, { is_new_taxpayer_current_year: null });
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text() === "Simpan")!
+      .trigger("click");
+    await flushPromises();
+    expect(save).toHaveBeenCalledOnce();
+    const payload = save.mock.calls[0]![0] as unknown as Record<string, unknown>;
+    expect(payload.is_new_taxpayer_current_year).toBeNull();
+  });
+
+  it("sends true when the loaded new-taxpayer answer is yes", async () => {
+    const { wrapper, save } = await mountProfile(true, { is_new_taxpayer_current_year: true });
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text() === "Simpan")!
+      .trigger("click");
+    await flushPromises();
+    expect(save).toHaveBeenCalledOnce();
+    const payload = save.mock.calls[0]![0] as unknown as Record<string, unknown>;
+    expect(payload.is_new_taxpayer_current_year).toBe(true);
+  });
+
+  it("sends null when a first profile leaves the new-taxpayer answer blank", async () => {
+    const { wrapper, save } = await mountProfile(false);
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text() === "Simpan")!
+      .trigger("click");
+    await flushPromises();
+    expect(save).toHaveBeenCalledOnce();
+    const payload = save.mock.calls[0]![0] as unknown as Record<string, unknown>;
+    expect(payload.is_new_taxpayer_current_year).toBeNull();
   });
 
   it("blocks Save until a spouse status is chosen when aggregation is on but status is unknown (R18-W2)", async () => {

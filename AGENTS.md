@@ -61,7 +61,7 @@ Putra. It supersedes v1.0, v2.5 and v2.6. Its ids include `FR-01` through
 >   the source SRS.
 > - The schema of record is ERD **r3** (D-11 `month_snapshots.version`).
 >   r3 was `76fcdbc4af30`. Later revisions are proposed r4 changes.
->   Run `alembic heads` for the current head.
+>   The current head is `d8f0a1c64e27`; run `alembic heads` to confirm.
 > - Do not add `TODO(SRS-COMMIT)` markers. Every id cited here has a source
 >   of record.
 > - Disclaimer lock (D-07):

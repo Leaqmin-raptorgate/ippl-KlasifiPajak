@@ -144,7 +144,7 @@ class ProfileUpdate(BaseModel):
     has_sole_proprietor_company: bool | None = None
     receives_salary: bool | None = None
     spouse_aggregation_active: bool = False
-    is_new_taxpayer_current_year: bool = False
+    is_new_taxpayer_current_year: bool | None = None
     spouse_current_usaha_idr: int = Field(default=0, ge=0)
     spouse_current_pekerjaan_bebas_idr: int = Field(default=0, ge=0)
     spouse_current_already_final_idr: int = Field(default=0, ge=0)
@@ -183,7 +183,7 @@ class ProfileOut(BaseModel):
     has_selected_article_17: bool | None
     has_sole_proprietor_company: bool | None
     receives_salary: bool | None
-    is_new_taxpayer_current_year: bool
+    is_new_taxpayer_current_year: bool | None
     version: int
     spouse_current_usaha_idr: int
     spouse_current_pekerjaan_bebas_idr: int

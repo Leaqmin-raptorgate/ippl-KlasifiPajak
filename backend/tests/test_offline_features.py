@@ -350,6 +350,240 @@ def test_tc_ocr_strips_gps_owner_get_is_private_and_confirm_uses_user_values(
     assert reconfirm.json()["error"]["code"] == "RECEIPT_ALREADY_CONFIRMED"
 
 
+def test_tc_ocr_second_confirm_of_one_receipt_conflicts_and_delete_removes_it(
+    client, tmp_path, monkeypatch
+):
+    """One receipt confirms once. A second confirm is 409 and creates no row."""
+    from app.classify.model_client import FakeModelClient
+    from app.models import ReceiptImage
+    from app.models import Transaction as TransactionRow
+    from app.services import receipts
+
+    monkeypatch.setattr(receipts, "RECEIPT_STORAGE_ROOT", tmp_path, raising=False)
+    monkeypatch.setattr(
+        receipts,
+        "get_ocr_client",
+        lambda: FakeModelClient(
+            [
+                {
+                    "amount_idr": None,
+                    "tx_date": None,
+                    "client_name": None,
+                    "invoice_no": None,
+                }
+            ]
+        ),
+    )
+    user_id = _register_login(client, email="ocr-once@example.test", username="ocronce")
+    _profile(client)
+    _set_paid(user_id)
+    _set_ai_consent(client)
+    uploaded = client.post(
+        f"{API}/transactions/ocr-upload",
+        files={"file": ("receipt.jpg", _jpeg_with_gps(), "image/jpeg")},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    image_id = uploaded.json()["image_id"]
+    # A different invoice so the rejection is the receipt, not the duplicate-invoice rule.
+    first_body = {
+        "image_id": image_id,
+        "confirmed_amount_idr": 54321,
+        "confirmed_tx_date": "2026-10-16",
+        "confirmed_client_name": "PT Nilai Pengguna",
+        "confirmed_description": "Nilai yang dikonfirmasi pengguna",
+        "confirmed_invoice_no": "USER-ONCE-1",
+        "withheld_tax_amount_idr": 0,
+        "source_channel": "corporate_client",
+    }
+    confirmed = client.post(f"{API}/transactions/ocr-confirm", json=first_body)
+    assert confirmed.status_code == 201, confirmed.text
+    transaction = confirmed.json().get("transaction", confirmed.json())
+    assert transaction["amount_idr"] == 54321
+    assert transaction["tx_date"] == "2026-10-16"
+    assert transaction["client_name"] == "PT Nilai Pengguna"
+    assert transaction["invoice_no"] == "USER-ONCE-1"
+    assert client.get(f"{API}/transactions/receipt-images/{image_id}").status_code == 200
+
+    db = SessionLocal()
+    try:
+        count = len(
+            db.scalars(select(TransactionRow).where(TransactionRow.user_id == user_id)).all()
+        )
+    finally:
+        db.close()
+    assert count == 1
+
+    again = client.post(
+        f"{API}/transactions/ocr-confirm",
+        json={
+            **first_body,
+            "confirmed_amount_idr": 1000,
+            "confirmed_invoice_no": "USER-ONCE-2",
+        },
+    )
+    assert again.status_code == 409, again.text
+    assert again.json()["error"]["code"] == "RECEIPT_ALREADY_CONFIRMED"
+
+    db = SessionLocal()
+    try:
+        rows = db.scalars(select(TransactionRow).where(TransactionRow.user_id == user_id)).all()
+        assert len(rows) == count
+        assert db.get(ReceiptImage, image_id) is not None
+    finally:
+        db.close()
+
+    deleted = client.delete(f"{API}/transactions/{transaction['id']}")
+    assert deleted.status_code == 200, deleted.text
+    db = SessionLocal()
+    try:
+        assert db.get(ReceiptImage, image_id) is None
+        assert db.get(TransactionRow, transaction["id"]) is None
+    finally:
+        db.close()
+    assert client.get(f"{API}/transactions/receipt-images/{image_id}").status_code == 404
+    assert not [path for path in tmp_path.rglob("*") if path.is_file()]
+
+
+def test_tc_ocr_confirm_race_past_invoice_precheck_is_duplicate_invoice(
+    client, tmp_path, monkeypatch
+):
+    """A lost invoice race is the invoice conflict, not a receipt conflict.
+
+    The duplicate pre-check is forced to miss, so the second receipt hits the
+    ``duplicate_key`` unique index. That must stay ``DUPLICATE_INVOICE_TRANSACTION``.
+    """
+    from app.classify.model_client import FakeModelClient
+    from app.models import Transaction as TransactionRow
+    from app.services import receipts
+    from app.services import transactions as tx_services
+
+    monkeypatch.setattr(receipts, "RECEIPT_STORAGE_ROOT", tmp_path, raising=False)
+    monkeypatch.setattr(
+        receipts,
+        "get_ocr_client",
+        lambda: FakeModelClient(
+            [
+                {
+                    "amount_idr": None,
+                    "tx_date": None,
+                    "client_name": None,
+                    "invoice_no": None,
+                },
+                {
+                    "amount_idr": None,
+                    "tx_date": None,
+                    "client_name": None,
+                    "invoice_no": None,
+                },
+            ]
+        ),
+    )
+    user_id = _register_login(client, email="ocr-race@example.test", username="ocrrace")
+    _profile(client)
+    _set_paid(user_id)
+    _set_ai_consent(client)
+
+    def _upload() -> str:
+        uploaded = client.post(
+            f"{API}/transactions/ocr-upload",
+            files={"file": ("receipt.jpg", _jpeg_with_gps(), "image/jpeg")},
+        )
+        assert uploaded.status_code == 200, uploaded.text
+        return uploaded.json()["image_id"]
+
+    first_image = _upload()
+    second_image = _upload()
+    assert first_image != second_image
+    body = {
+        "confirmed_amount_idr": 54321,
+        "confirmed_tx_date": "2026-10-16",
+        "confirmed_client_name": "PT Nilai Pengguna",
+        "confirmed_description": "Nilai yang dikonfirmasi pengguna",
+        "confirmed_invoice_no": "USER-RACE-1",
+        "withheld_tax_amount_idr": 0,
+        "source_channel": "corporate_client",
+    }
+    first = client.post(
+        f"{API}/transactions/ocr-confirm",
+        json={**body, "image_id": first_image},
+    )
+    assert first.status_code == 201, first.text
+
+    calls = {"n": 0}
+
+    def _miss_precheck(*_args, **_kwargs):
+        calls["n"] += 1
+        return None
+
+    monkeypatch.setattr(tx_services, "find_duplicate_invoice_id", _miss_precheck)
+    again = client.post(
+        f"{API}/transactions/ocr-confirm",
+        json={**body, "image_id": second_image},
+    )
+    assert calls["n"] >= 1
+    assert again.status_code == 409, again.text
+    assert again.json()["error"]["code"] == "DUPLICATE_INVOICE_TRANSACTION"
+    assert again.json()["error"]["code"] != "RECEIPT_ALREADY_CONFIRMED"
+
+    db = SessionLocal()
+    try:
+        rows = db.scalars(select(TransactionRow).where(TransactionRow.user_id == user_id)).all()
+        assert len(rows) == 1
+        assert rows[0].image_id == first_image
+    finally:
+        db.close()
+
+
+def test_duplicate_invoice_integrity_keeps_other_1062s():
+    """1062 maps to the invoice code only when the constraint name is cited."""
+    import pymysql
+    from sqlalchemy.exc import IntegrityError
+
+    from app.services.receipts import _is_duplicate_invoice_integrity
+
+    cited = IntegrityError(
+        "INSERT",
+        {},
+        pymysql.err.IntegrityError(
+            1062,
+            "Duplicate entry 'abc' for key 'transactions.uq_transactions_duplicate_key'",
+        ),
+    )
+    other_key = IntegrityError(
+        "INSERT",
+        {},
+        pymysql.err.IntegrityError(
+            1062, "Duplicate entry 'abc' for key 'uq_transactions_image_id'"
+        ),
+    )
+    bare = IntegrityError(
+        "INSERT",
+        {},
+        pymysql.err.IntegrityError(1062, "Duplicate entry 'abc'"),
+    )
+
+    class _TextOnly(Exception):
+        def __str__(self) -> str:
+            return "rejected uq_transactions_duplicate_key"
+
+    class _HiddenText(Exception):
+        def __init__(self) -> None:
+            super().__init__(
+                1062,
+                "Duplicate entry 'abc' for key 'uq_transactions_duplicate_key'",
+            )
+
+        def __str__(self) -> str:
+            return "duplicate"
+
+    assert _is_duplicate_invoice_integrity(cited) is True
+    assert _is_duplicate_invoice_integrity(other_key) is False
+    assert _is_duplicate_invoice_integrity(bare) is False
+    # Driver text that names the key but carries no 1062 code is not a match.
+    assert _is_duplicate_invoice_integrity(IntegrityError("INSERT", {}, _TextOnly())) is False
+    assert _is_duplicate_invoice_integrity(IntegrityError("INSERT", {}, _HiddenText())) is True
+
+
 def test_tc_ocr_rejects_image_just_above_pixel_cap(client, tmp_path, monkeypatch):
     """FR-06: a decode just above 40_000_000 pixels uses the existing bomb error."""
     from app.services import receipts

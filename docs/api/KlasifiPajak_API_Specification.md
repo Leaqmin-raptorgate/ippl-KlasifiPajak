@@ -564,7 +564,7 @@ The confirmation string is exact. Order of writes: set `user_id` and other perso
 
 ### 5.7 `GET /profiles/{tax_year}`
 
-`200` returns the profile, `version`, masked NIB, `spouse_tax_status`, the nullable answers `has_selected_article_17`, `has_sole_proprietor_company` and `receives_salary`, the six prior-year integers (each an integer or `null`), the three spouse current-year integers, `is_new_taxpayer_current_year`, `spouse_aggregation_active`, and `audit_trail` entries of `changed_at`, `field`, `old_value`, `new_value`.
+`200` returns the profile, `version`, masked NIB, `spouse_tax_status`, the nullable answers `has_selected_article_17`, `has_sole_proprietor_company` and `receives_salary`, the six prior-year integers (each an integer or `null`), the three spouse current-year integers, `is_new_taxpayer_current_year` (`true`, `false`, or `null` when the question is unanswered, for example `"is_new_taxpayer_current_year": null`), `spouse_aggregation_active`, and `audit_trail` entries of `changed_at`, `field`, `old_value`, `new_value`. An update that omits `is_new_taxpayer_current_year` resets it to unanswered.
 
 `404` `PROFILE_NOT_FOUND`: "Profil untuk tahun pajak yang dipilih belum dibuat."
 
@@ -572,7 +572,7 @@ The confirmation string is exact. Order of writes: set `user_id` and other perso
 
 Accepts the same business fields as the GET body, plus `version`, with `nib_last_4` instead of `nib_masked`. Rejects `entity_type` other than `orang_pribadi` and a `nib_last_4` that is not four digits. The update matches `version` and then increments it.
 
-The six prior-year amounts are nullable; `null` means unanswered and `0` is an explicit amount. FR-48 onboarding also records `spouse_tax_status` and nullable yes/no answers `has_selected_article_17`, `has_sole_proprietor_company`, and `receives_salary`; the existing `is_new_taxpayer_current_year` records the fourth answer. Null means unknown. These profile fields are implemented; integration of the proposed requirements into the source SRS remains pending.
+The six prior-year amounts are nullable; `null` means unanswered and `0` is an explicit amount. FR-48 onboarding records `spouse_tax_status` and nullable yes/no answers `has_selected_article_17`, `has_sole_proprietor_company`, `receives_salary`, and `is_new_taxpayer_current_year`. For each of those yes/no answers, `null` means unanswered and is not stored or read as `false`. An update that omits `is_new_taxpayer_current_year` resets it to unanswered. Omitting it on create leaves it unanswered. An unanswered value is not a new taxpayer: missing prior-year user figures resolve as `unverifiable`, and all three user figures present resolve as `manual_profile`, the same as an explicit `false`. These profile fields are implemented; integration of the proposed requirements into the source SRS remains pending.
 
 `PUT` replaces the whole business profile. A field left out of the body takes its default, which is `null` for the three yes/no answers and the six prior-year amounts, `unknown` for `nib_status`, `marital_status` and `spouse_tax_status`, and `0` or `false` elsewhere, and a changed value writes an audit row. A client that edits one field must send the others it read.
 
@@ -720,6 +720,8 @@ Session required. Ownership check: load `receipt_images` by `image_id` and requi
 Paid gate. Body contains `image_id` and the confirmed fields (`confirmed_amount_idr`, `confirmed_tx_date`, `confirmed_client_name`, `confirmed_description`, `confirmed_invoice_no`, `withheld_tax_amount_idr`, `source_channel`). The stored row uses the confirmed values and follows the same date, duplicate, NIB, and classification rules as `POST /transactions`.
 
 `201` returns the captured transaction and `image_id`.
+
+One receipt image confirms into exactly one transaction. A second confirm of the same `image_id` returns `409` `RECEIPT_ALREADY_CONFIRMED`: "Struk ini sudah dikonfirmasi menjadi satu transaksi." No second transaction is created.
 
 ### 5.16 `GET /transactions/{id}/clarification`
 

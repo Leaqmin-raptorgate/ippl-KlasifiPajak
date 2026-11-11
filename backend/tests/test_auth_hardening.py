@@ -1370,6 +1370,32 @@ def test_argon4_test_support_password_reset_token_loopback_and_fail_closed(clien
     monkeypatch.setenv("APP_ENV", "test")
 
 
+def test_argon4_bind_host_refuses_non_loopback_and_ignores_empty(monkeypatch):
+    """APP_ENV=test refuses BIND_HOST=0.0.0.0. An empty value does not listen."""
+    from app.api.routes_test_support import refuse_non_loopback_test_bind
+
+    monkeypatch.setenv("APP_ENV", "test")
+    with pytest.raises(RuntimeError, match="non-loopback"):
+        refuse_non_loopback_test_bind("0.0.0.0")
+    refuse_non_loopback_test_bind("127.0.0.1")
+    refuse_non_loopback_test_bind(None)
+    refuse_non_loopback_test_bind("  ")
+    monkeypatch.setenv("APP_ENV", "development")
+    refuse_non_loopback_test_bind("0.0.0.0")
+
+
+def test_argon4_scope_server_stays_404_when_bind_host_claims_loopback(monkeypatch):
+    """A non-loopback ASGI server host is 404 even if BIND_HOST says loopback."""
+    monkeypatch.setenv("BIND_HOST", "127.0.0.1")
+    remote_server = TestClient(app, base_url="http://0.0.0.0:8000", client=("127.0.0.1", 50000))
+    denied = remote_server.post(
+        "/api/v1/test-support/password-reset-token",
+        json={"email": AUTH["email"]},
+    )
+    assert denied.status_code == 404
+    assert denied.content == b""
+
+
 def test_argon5_revoke_other_sessions_skips_expired(client):
     """ARGON-5: revoked_count matches GET /auth/sessions (ignores expired rows)."""
     assert _register(client).status_code == 201

@@ -223,6 +223,50 @@ def test_duplicate_invoice_is_rejected(client):
     assert duplicate.json()["error"]["code"] == "DUPLICATE_INVOICE_TRANSACTION"
 
 
+def test_update_onto_existing_invoice_matches_create_collision(client):
+    """F20-2: an edit that lands on another row's key gets the create 409."""
+    _authenticated(client)
+    assert _profile(client).status_code == 200
+    assert _transaction(client).status_code == 201
+    create_collision = _transaction(client)
+    assert create_collision.status_code == 409
+
+    other = _transaction(client, invoice_no="INV-2026-105")
+    assert other.status_code == 201
+    other_body = other.json()
+    update_collision = client.put(
+        f"/api/v1/transactions/{other_body['id']}",
+        json={
+            "amount_idr": 12_500_000,
+            "tx_date": "2026-10-15",
+            "client_name": "PT Sumber Makmur",
+            "description": "Penjualan sembako",
+            "invoice_no": "INV-2026-104",
+            "withheld_tax_amount_idr": 62_500,
+            "source_channel": "corporate_client",
+            "version": other_body["version"],
+        },
+    )
+    assert update_collision.status_code == create_collision.status_code == 409
+    assert update_collision.json() == create_collision.json()
+    assert update_collision.json()["error"]["code"] == "DUPLICATE_INVOICE_TRANSACTION"
+
+    kept = client.put(
+        f"/api/v1/transactions/{other_body['id']}",
+        json={
+            "amount_idr": 12_500_000,
+            "tx_date": "2026-10-15",
+            "client_name": "PT Sumber Makmur",
+            "description": "Penjualan sembako (diubah)",
+            "invoice_no": "INV-2026-105",
+            "withheld_tax_amount_idr": 62_500,
+            "source_channel": "corporate_client",
+            "version": other_body["version"],
+        },
+    )
+    assert kept.status_code == 200, kept.text
+
+
 def test_transaction_requires_a_profile_and_a_2026_date(client):
     _authenticated(client)
     assert _transaction(client).status_code == 422

@@ -100,3 +100,25 @@ PYTHONPATH=backend python -m app.scripts.purge_receipts
 
 The command prints how many rows it deleted. A receipt that a transaction
 still references is kept, including after `expires_at_utc`.
+
+## Classifier evaluation
+
+The offline scorer is `backend/scripts/evaluate_classifier.py`. It scores the rule table in `app.classify.rules` only. It does not call a model.
+
+From `Project/`:
+
+```bash
+PYTHONPATH=backend .venv/bin/python backend/scripts/evaluate_classifier.py REVIEW.xlsx
+PYTHONPATH=backend .venv/bin/python backend/scripts/evaluate_classifier.py HELD.xlsx
+```
+
+The workbook `Review` sheet has a header row that starts with `id`. Row meaning:
+
+- `approved` or `corrected`, with `final_label` and a reviewer: labelled, and scored.
+- `needs_clarification` with a reviewer: the classifier should ask (FR-14), not pick a category.
+- `exclude` with a reviewer and a `review_note`: listed, not scored.
+- No reviewer: unreviewed. Scoring refuses unless `--allow-partial`.
+
+Measured on 2026-11-09 for the rules-only tier (rules hash `c8ae779fc0ed`): dev accuracy 91/98 (0.93) and coverage 92/98 (0.94); held-out accuracy 23/49 (0.47), coverage 27/49 (0.55), and accuracy on decided rows 0.85. The held-out score comes from a separate workbook (`heldout_v1.xlsx`), not from the dev workbook. The labels were drafted by the same author who tuned the rules, and the developer has not checked them. The held-out figure is indicative. Further tuning needs a new held-out set (v2). Do not tune these rules against `heldout_v1`.
+
+The dev workbook is `../outputs/label-review-20261108/candidate_label_review_CLAUDE_DRAFT.xlsx` (SHA-256 `ffd7ad1c5838891fd6cf55c9d7f9601d05fd8ba6453ab6f803a367a6cff37a7f`). The held-out workbook is `../outputs/label-review-20261108/heldout_v1.xlsx` (SHA-256 `45bfdc46d5763de555b979687122df3246c62d8be6e2f899e336f7f5c7126f3d`). Both sit outside this repository, beside `Project/`. They are not committed. The held-out labels stay out of the repo unless the developer asks to add them.

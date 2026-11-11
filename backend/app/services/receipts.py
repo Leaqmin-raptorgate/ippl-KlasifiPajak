@@ -22,6 +22,7 @@ from typing import Any
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.errors import ApiError
@@ -37,6 +38,8 @@ log = logging.getLogger(__name__)
 RECEIPT_STORAGE_ROOT = os.environ.get("RECEIPT_STORAGE_ROOT", "/var/lib/klasifipajak/receipts")
 
 _MAX_BYTES = 8 * 1024 * 1024
+_DUPLICATE_INVOICE_KEY = "uq_transactions_duplicate_key"
+_MYSQL_DUP_ENTRY = 1062
 # Set before every decode. Below Pillow's default bomb ceiling so a
 # process-wide None cannot turn the check off. About 8000 x 5000.
 _MAX_IMAGE_PIXELS = 40_000_000
@@ -50,6 +53,7 @@ _SIZE_MESSAGE = "Ukuran berkas melebihi batas maksimum 8 MB."
 _TYPE_MESSAGE = "Berkas harus berupa JPEG atau PNG."
 _RATE_MESSAGE = "Terlalu banyak unggahan struk. Coba lagi dalam satu jam."
 _NOT_FOUND = "Transaksi tidak ditemukan."
+_ALREADY_CONFIRMED = "Struk ini sudah dikonfirmasi menjadi satu transaksi."
 
 _JPEG_MAGIC = b"\xff\xd8\xff"
 _PNG_MAGIC = b"\x89PNG"
@@ -183,6 +187,19 @@ def receipt_bytes(db: Session, user: User, image_id: str) -> tuple[bytes, str]:
     return data, image.mime_type
 
 
+def _is_duplicate_invoice_integrity(exc: IntegrityError) -> bool:
+    """True for the invoice unique key, not for every MySQL duplicate.
+
+    MySQL error 1062 names the violated key in its message, so the code and the
+    key name must both match. Driver text without a 1062 code is not a match.
+    """
+    orig = getattr(exc, "orig", exc)
+    args = getattr(orig, "args", ()) or ()
+    if len(args) < 2 or args[0] != _MYSQL_DUP_ENTRY:
+        return False
+    return _DUPLICATE_INVOICE_KEY in str(args[1])
+
+
 def confirm_receipt(
     db: Session,
     user: User,
@@ -216,12 +233,12 @@ def confirm_receipt(
     now = now_utc()
     if image is None or (image.expires_at_utc is not None and image.expires_at_utc < now):
         raise ApiError(404, "TRANSACTION_NOT_FOUND", _NOT_FOUND)
-    existing = db.scalar(select(TransactionRow.id).where(TransactionRow.image_id == image.id))
-    if existing is not None:
-        raise ApiError(409, "RECEIPT_ALREADY_CONFIRMED", "Struk sudah dikaitkan dengan transaksi.")
+    taken = db.scalar(select(TransactionRow.id).where(TransactionRow.image_id == image.id))
+    if taken is not None:
+        raise ApiError(409, "RECEIPT_ALREADY_CONFIRMED", _ALREADY_CONFIRMED)
 
     from app.schemas.transaction import TransactionCreate
-    from app.services.transactions import create_transaction
+    from app.services.transactions import DUPLICATE_INVOICE_MESSAGE, create_transaction
 
     payload = TransactionCreate(
         amount_idr=confirmed_amount_idr,
@@ -232,9 +249,27 @@ def confirm_receipt(
         withheld_tax_amount_idr=withheld_tax_amount_idr,
         source_channel=source_channel,
     )
-    created = create_transaction(
-        db, user, payload, ruleset, background=background, image_id=image.id
-    )
+    image_pk = image.id
+    try:
+        # Link the receipt before the insert commits, so a second confirm
+        # cannot leave a transaction that has no image_id.
+        created = create_transaction(
+            db, user, payload, ruleset, background=background, image_id=image_pk
+        )
+    except IntegrityError as exc:
+        db.rollback()
+        # A concurrent confirm of this same image wins the unique index.
+        # A concurrent invoice duplicate must keep its own error code.
+        taken_after = db.scalar(
+            select(TransactionRow.id).where(TransactionRow.image_id == image_pk)
+        )
+        if taken_after is not None:
+            raise ApiError(409, "RECEIPT_ALREADY_CONFIRMED", _ALREADY_CONFIRMED) from None
+        if _is_duplicate_invoice_integrity(exc):
+            raise ApiError(
+                409, "DUPLICATE_INVOICE_TRANSACTION", DUPLICATE_INVOICE_MESSAGE
+            ) from None
+        raise
     return {"image_id": image.id, "transaction": created.model_dump(mode="json")}
 
 

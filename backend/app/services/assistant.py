@@ -34,6 +34,7 @@ from app.config.settings import Settings
 from app.logging_redaction import get_logger
 from app.models import ClassificationEvent, MonthSnapshot, Profile, QuotaCounter, Transaction, User
 from app.security import iso_utc, new_id, now_utc
+from app.services.guidance_conditions import profile_guidance_conditions
 from app.services.subscription import FREE_ASSISTANT_LIMIT, _jakarta_month_key, is_paid_active
 
 log = get_logger("app.assistant")
@@ -472,7 +473,7 @@ def _profile_dict(row: Profile) -> dict[str, Any]:
         "nib_status": row.nib_status,
         "kbli_code": row.kbli_code,
         "spouse_tax_status": row.spouse_tax_status,
-        "is_new_taxpayer_current_year": bool(row.is_new_taxpayer_current_year),
+        "is_new_taxpayer_current_year": row.is_new_taxpayer_current_year,
         "has_selected_article_17": row.has_selected_article_17,
         "has_sole_proprietor_company": row.has_sole_proprietor_company,
         "receives_salary": row.receives_salary,
@@ -510,15 +511,7 @@ def _guidance_for(rows: list[Profile]) -> list[dict[str, str]]:
         return []
     conditions = {"always"}
     for row in rows:
-        conditions.add(row.spouse_tax_status)
-        if row.has_selected_article_17 is True:
-            conditions.add("article17")
-        elif row.has_selected_article_17 is None:
-            conditions.add("article17_unknown")
-        if row.has_sole_proprietor_company is True:
-            conditions.add("company")
-        elif row.has_sole_proprietor_company is None:
-            conditions.add("company_unknown")
+        conditions |= profile_guidance_conditions(row)
     selected = []
     for item in items:
         if not isinstance(item, dict) or item.get("condition") not in conditions:

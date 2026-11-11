@@ -111,6 +111,7 @@ def profile_to_engine(profile: ProfileRow) -> EngineProfile:
         prior_year_pekerjaan_bebas_omzet=profile.prior_user_pekerjaan_bebas_idr,
         prior_year_already_final_omzet=profile.prior_user_already_final_idr,
         is_new_taxpayer_current_year=profile.is_new_taxpayer_current_year,
+        new_taxpayer_unknown=profile.is_new_taxpayer_current_year is None,
         spouse_current_pekerjaan_bebas_omzet=profile.spouse_current_pekerjaan_bebas_idr,
         spouse_current_already_final_omzet=profile.spouse_current_already_final_idr,
         prior_spouse_usaha_omzet=profile.prior_spouse_usaha_idr,
