@@ -35,7 +35,6 @@ from app.security import new_id, now_utc
 RECEIPT_STORAGE_ROOT = os.environ.get("RECEIPT_STORAGE_ROOT", "/var/lib/klasifipajak/receipts")
 
 _MAX_BYTES = 8 * 1024 * 1024
-_DUPLICATE_INVOICE = "Nomor faktur ini sudah tercatat untuk klien, nominal, dan tanggal yang sama."
 _DUPLICATE_INVOICE_KEY = "uq_transactions_duplicate_key"
 _MYSQL_DUP_ENTRY = 1062
 # Set before every decode. Below Pillow's default bomb ceiling so a
@@ -188,17 +187,14 @@ def receipt_bytes(db: Session, user: User, image_id: str) -> tuple[bytes, str]:
 def _is_duplicate_invoice_integrity(exc: IntegrityError) -> bool:
     """True for the invoice unique key, not for every MySQL duplicate.
 
-    The driver text is still matched as a substring. Error 1062 counts only
-    when that message also cites ``uq_transactions_duplicate_key``.
+    MySQL error 1062 names the violated key in its message, so the code and the
+    key name must both match. Driver text without a 1062 code is not a match.
     """
     orig = getattr(exc, "orig", exc)
-    if _DUPLICATE_INVOICE_KEY in str(orig):
-        return True
     args = getattr(orig, "args", ()) or ()
-    if not args or args[0] != _MYSQL_DUP_ENTRY:
+    if len(args) < 2 or args[0] != _MYSQL_DUP_ENTRY:
         return False
-    message = args[1] if len(args) > 1 else ""
-    return _DUPLICATE_INVOICE_KEY in str(message)
+    return _DUPLICATE_INVOICE_KEY in str(args[1])
 
 
 def confirm_receipt(
@@ -230,7 +226,7 @@ def confirm_receipt(
         raise ApiError(409, "RECEIPT_ALREADY_CONFIRMED", _ALREADY_CONFIRMED)
 
     from app.schemas.transaction import TransactionCreate
-    from app.services.transactions import create_transaction
+    from app.services.transactions import DUPLICATE_INVOICE_MESSAGE, create_transaction
 
     payload = TransactionCreate(
         amount_idr=confirmed_amount_idr,
@@ -256,7 +252,9 @@ def confirm_receipt(
         if taken_after is not None:
             raise ApiError(409, "RECEIPT_ALREADY_CONFIRMED", _ALREADY_CONFIRMED) from None
         if _is_duplicate_invoice_integrity(exc):
-            raise ApiError(409, "DUPLICATE_INVOICE_TRANSACTION", _DUPLICATE_INVOICE) from None
+            raise ApiError(
+                409, "DUPLICATE_INVOICE_TRANSACTION", DUPLICATE_INVOICE_MESSAGE
+            ) from None
         raise
     return {"image_id": image.id, "transaction": created.model_dump(mode="json")}
 

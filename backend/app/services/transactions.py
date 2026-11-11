@@ -227,6 +227,12 @@ def list_transactions(
     )
 
 
+# One wording for the manual path and the receipt-confirm path (same error code).
+DUPLICATE_INVOICE_MESSAGE = (
+    "Nomor faktur ini sudah tercatat untuk klien, nominal, dan tanggal yang sama."
+)
+
+
 def find_duplicate_invoice_id(
     db: Session,
     *,
@@ -301,7 +307,7 @@ def create_transaction(
             raise ApiError(
                 409,
                 "DUPLICATE_INVOICE_TRANSACTION",
-                "Nomor faktur ini sudah tercatat untuk klien, nominal, dan tanggal yang sama.",
+                DUPLICATE_INVOICE_MESSAGE,
             )
 
     category, rule_id, confidence, requires_clarification, citation = classify(
@@ -550,7 +556,7 @@ def update_transaction(
             raise ApiError(
                 409,
                 "DUPLICATE_INVOICE_TRANSACTION",
-                "Nomor faktur ini sudah tercatat untuk klien, nominal, dan tanggal yang sama.",
+                DUPLICATE_INVOICE_MESSAGE,
             )
 
     # Conditional UPDATE claims the version slot; rowcount==0 → 409.

@@ -579,7 +579,8 @@ def test_duplicate_invoice_integrity_keeps_other_1062s():
     assert _is_duplicate_invoice_integrity(cited) is True
     assert _is_duplicate_invoice_integrity(other_key) is False
     assert _is_duplicate_invoice_integrity(bare) is False
-    assert _is_duplicate_invoice_integrity(IntegrityError("INSERT", {}, _TextOnly())) is True
+    # Driver text that names the key but carries no 1062 code is not a match.
+    assert _is_duplicate_invoice_integrity(IntegrityError("INSERT", {}, _TextOnly())) is False
     assert _is_duplicate_invoice_integrity(IntegrityError("INSERT", {}, _HiddenText())) is True
 
 
