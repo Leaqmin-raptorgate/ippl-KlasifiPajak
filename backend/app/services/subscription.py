@@ -36,12 +36,15 @@ def _is_paid_active(user: User, now: datetime | None = None) -> bool:
     )
 
 
-def subscription_status(user: User) -> dict:
+def subscription_status(user: User, has_pending_order: bool = False) -> dict:
     """FR-35: derive the tier from paid_flag and the validity instant."""
     now = now_utc()
     if _is_paid_active(user, now):
         tier = "berbayar"
         active = True
+    elif has_pending_order:
+        tier = "pending"
+        active = False
     elif user.paid_flag:
         tier = "kedaluwarsa"
         active = False

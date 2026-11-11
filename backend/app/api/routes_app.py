@@ -54,6 +54,7 @@ from app.services.auth import (
     GENERIC_RESET_MESSAGE,
     RESET_SUCCESS_MESSAGE,
 )
+from app.services.payments import has_pending_order
 from app.services.snapshot import active_ruleset
 
 configure_redacted_logging()
@@ -411,8 +412,11 @@ def get_quotas(
 @router.get("/subscriptions/status")
 def get_subscription_status(
     context: AuthContext = Depends(current_session),
+    db: Session = Depends(get_db),
 ) -> dict:
-    return subscription_service.subscription_status(context.user)
+    return subscription_service.subscription_status(
+        context.user, has_pending_order(db, context.user)
+    )
 
 
 @router.put("/transactions/{transaction_id}", response_model=TransactionOut)
