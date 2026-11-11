@@ -375,13 +375,14 @@ def clarification_for(db: Session, user: User, transaction_id: str) -> Clarifica
             "CLARIFICATION_NOT_REQUIRED",
             "Baris ini sudah terklasifikasi, jadi tidak ada pertanyaan yang menunggu.",
         )
+    # Format the amount alone: a comma in a client name must stay as written.
+    amount = f"{row.amount_idr:,}".replace(",", ".")
     return ClarificationOut(
         transaction_id=row.id,
         provisional_category=row.category,
         question=(
-            f"Penghasilan dari {row.client_name} sebesar Rp {row.amount_idr:,}".replace(",", ".")
-            + ": "
-            + _CLARIFICATION_QUESTION
+            f"Penghasilan{f' dari {row.client_name}' if row.client_name else ''} "
+            f"sebesar Rp {amount}: {_CLARIFICATION_QUESTION}"
         ),
         options=tuple(
             ClarificationOption(value=value, label=label) for value, label in _CATEGORIES

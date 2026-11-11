@@ -159,7 +159,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements-dev.txt
       - name: Bootstrap app/migrate MySQL users (HB-18 / TC-HARD-23)
         run: |
           python - <<'PY'
