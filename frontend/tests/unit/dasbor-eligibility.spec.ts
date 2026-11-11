@@ -8,7 +8,10 @@ import DasborPage from "@/pages/DasborPage.vue";
 import { usePajakStore } from "@/stores/pajak";
 import { useTransaksiStore } from "@/stores/transaksi";
 
-async function renderDashboard(status: string) {
+async function renderDashboard(
+  status: string,
+  tweak?: (dashboard: Dashboard) => void,
+) {
   const pinia = createPinia();
   setActivePinia(pinia);
   const pajak = usePajakStore();
@@ -67,6 +70,7 @@ async function renderDashboard(status: string) {
       },
     ],
   } as Dashboard;
+  tweak?.(pajak.dashboard);
   vi.spyOn(pajak, "muat").mockResolvedValue(undefined);
   vi.spyOn(useTransaksiStore(), "muat").mockResolvedValue(undefined);
   const router = createRouter({
@@ -118,6 +122,33 @@ describe("FR-19 dashboard eligibility", () => {
     const unverifiable = await renderDashboard("unverifiable");
     expect(nilaiKelayakan(ineligible)).toBe("Tidak memenuhi syarat");
     expect(nilaiKelayakan(unverifiable)).toBe("Belum dapat diperiksa");
+  });
+});
+
+describe("dashboard figures (R18-W1, R18-W6)", () => {
+  it("shows the real share of the Rp4,8 M cap, not the warning threshold", async () => {
+    const wrapper = await renderDashboard("scheme_eligible", (dashboard) => {
+      const now = dashboard.thresholds.monitoring_current_year_cap_4_8m;
+      now.ytd_combined_gross_idr = 4_600_000_000;
+      now.cap_warning = true;
+      now.cap_warning_percent = 80;
+    });
+    expect(wrapper.text()).toContain("96%");
+    expect(wrapper.text()).not.toContain("80% dari batas");
+  });
+
+  it("shows a dash and the reason instead of Rp 0 when the prior year is unverifiable", async () => {
+    const wrapper = await renderDashboard("unverifiable");
+    const hero = wrapper.get(".hero");
+    expect(hero.get(".big").text()).toBe("—");
+    expect(hero.text()).toContain("Isi peredaran bruto tahun lalu di Profil");
+  });
+
+  it("still shows the remaining band when the year is eligible", async () => {
+    const wrapper = await renderDashboard("scheme_eligible", (dashboard) => {
+      dashboard.thresholds.pita_500_juta.remaining_free_band_idr = 120_000_000;
+    });
+    expect(wrapper.get(".hero .big").text()).toContain("120.000.000");
   });
 });
 

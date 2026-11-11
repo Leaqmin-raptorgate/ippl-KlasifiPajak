@@ -43,7 +43,7 @@ describe("AiConsentNote", () => {
 
   it("restores the checkbox and shows the message when saving consent fails", async () => {
     const session = useSessionStore();
-    session.persetujuanAi = true;
+    session.user = { user_id: "u", email: "a@b.test", username: "a", ai_consent_at: "2026-11-01T00:00:00Z" };
     const wrapper = mount(AiConsentNote);
     const box = wrapper.get<HTMLInputElement>("input[type='checkbox']");
     expect(box.element.checked).toBe(true);

@@ -11,6 +11,7 @@ import AppPill from "@/components/ui/AppPill.vue";
 import AppSegmented from "@/components/ui/AppSegmented.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
 import AppSheet from "@/components/ui/AppSheet.vue";
+import AiConsentNote from "@/components/app/AiConsentNote.vue";
 import PanduanPanel from "@/components/app/PanduanPanel.vue";
 import WorkpaperNote from "@/components/app/WorkpaperNote.vue";
 import { ApiFailure } from "@/lib/api";
@@ -87,7 +88,11 @@ const FIELD_LABELS: Record<string, string> = {
   kbli_code: "KBLI",
   business_description: "Uraian usaha",
   marital_status: "Status perkawinan",
+  spouse_tax_status: "Status perpajakan pasangan",
   spouse_aggregation_active: "Agregasi Pasal 58",
+  has_selected_article_17: "Memilih tarif umum Pasal 17",
+  has_sole_proprietor_company: "Memiliki Perseroan Perorangan",
+  receives_salary: "Menerima gaji sebagai pegawai",
   is_new_taxpayer_current_year: "Wajib pajak baru",
   spouse_current_usaha_idr: "Omzet usaha pasangan tahun ini",
   spouse_current_pekerjaan_bebas_idr: "Pekerjaan bebas pasangan tahun ini",
@@ -119,7 +124,17 @@ function formatNilaiJejak(field: string, val?: string | null): string {
     if (val === "no") return "Tidak kawin";
     if (val === "unknown") return "Belum diketahui";
   }
-  if (field === "spouse_aggregation_active" || field === "is_new_taxpayer_current_year") {
+  if (field === "spouse_tax_status") {
+    const label = spouseTaxOptions.find((option) => option.value === val)?.label;
+    if (label) return label;
+  }
+  if (
+    field === "spouse_aggregation_active" ||
+    field === "is_new_taxpayer_current_year" ||
+    field === "has_selected_article_17" ||
+    field === "has_sole_proprietor_company" ||
+    field === "receives_salary"
+  ) {
     if (val === "True" || val === "true") return "Ya";
     if (val === "False" || val === "false") return "Tidak";
   }
@@ -157,8 +172,20 @@ function uang(nilai: number) {
   return String(nilai);
 }
 
+/**
+ * A stored profile that says "aggregation on" but "spouse status unknown" is
+ * inconsistent. Saving it untouched would silently switch aggregation off, so
+ * the user must choose a status explicitly. We do not guess which one.
+ */
+const perluPilihPasangan = ref(false);
+const simpanDikunci = computed(
+  () => perluPilihPasangan.value && draft.spouse_tax_status === "unknown",
+);
+
 function mulaiUbah() {
   const p = profil.profile;
+  perluPilihPasangan.value =
+    p?.spouse_tax_status === "unknown" && p?.spouse_aggregation_active === true;
   draft.name = p?.name ?? "";
   draft.nib_status = p?.nib_status || "unknown";
   draft.nib_last_4 = "";
@@ -450,6 +477,10 @@ async function jalankanHapus() {
             v-model="draft.spouse_tax_status"
             :options="spouseTaxOptions"
           />
+          <p v-if="simpanDikunci" class="peringatan-pasangan" role="alert">
+            Agregasi Pasal 58 tercatat aktif, tetapi status perpajakan pasangan belum diketahui.
+            Pilih statusnya dulu sebelum menyimpan.
+          </p>
         </AppField>
         <AppField
           label="Memilih tarif umum Pasal 17?"
@@ -540,7 +571,9 @@ async function jalankanHapus() {
 
         <div class="aksi">
           <AppButton variant="ghost" @click="batalUbah">Batal</AppButton>
-          <AppButton variant="primary" icon="check" @click="simpanData">Simpan</AppButton>
+          <AppButton variant="primary" icon="check" :disabled="simpanDikunci" @click="simpanData">
+            Simpan
+          </AppButton>
         </div>
         <p class="demo-cat">
           <label>
@@ -549,6 +582,10 @@ async function jalankanHapus() {
           </label>
         </p>
       </div>
+    </AppCard>
+
+    <AppCard title="Persetujuan AI" subtitle="Berlaku untuk klasifikasi, baca struk, dan asisten.">
+      <AiConsentNote />
     </AppCard>
 
     <PanduanPanel v-if="profil.profile" />
@@ -1056,5 +1093,10 @@ async function jalankanHapus() {
   font: var(--t-body-sm);
   color: var(--ink-2);
   line-height: 1.5;
+}
+.peringatan-pasangan {
+  margin: var(--s-2) 0 0;
+  color: var(--danger, #b3261e);
+  font-size: var(--t-small, 0.875rem);
 }
 </style>

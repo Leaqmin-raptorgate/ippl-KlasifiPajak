@@ -43,6 +43,7 @@ from app.schemas.transaction import (
     TransactionUpdate,
 )
 from app.security import iso_utc
+from app.services import assistant as assistant_service
 from app.services import auth as auth_service
 from app.services import dashboard as dashboard_service
 from app.services import guidance as guidance_service
@@ -209,12 +210,11 @@ def logout(
 
 @router.get("/auth/me", response_model=MeOut)
 def me(context: AuthContext = Depends(current_session)) -> MeOut:
-    stamp = context.user.ai_consent_at
     return MeOut(
         user_id=context.user.id,
         email=context.user.email,
         username=context.user.username,
-        ai_consent_at=iso_utc(stamp) if stamp is not None else None,
+        ai_consent_at=assistant_service.consent_out(context.user.ai_consent_at)["ai_consent_at"],
     )
 
 

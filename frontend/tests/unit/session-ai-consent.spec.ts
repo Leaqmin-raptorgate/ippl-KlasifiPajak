@@ -62,7 +62,6 @@ describe("session store AI consent from /auth/me", () => {
     apiMock.mockResolvedValueOnce({ user_id: "usr_consent", expires_at: STAMP, token: null });
     apiMock.mockResolvedValueOnce(me(STAMP));
     const session = useSessionStore();
-    session.persetujuanAi = false;
 
     await session.masuk("consent@example.test", "PasswordMinimal10");
 
@@ -75,7 +74,7 @@ describe("session store AI consent from /auth/me", () => {
     apiMock.mockResolvedValueOnce({ user_id: "usr_consent", expires_at: STAMP, token: null });
     apiMock.mockResolvedValueOnce(me(null));
     const session = useSessionStore();
-    session.persetujuanAi = true;
+    session.user = { user_id: "u", email: "a@b.test", username: "a", ai_consent_at: "2026-11-01T00:00:00Z" };
 
     await session.masuk("consent@example.test", "PasswordMinimal10");
 

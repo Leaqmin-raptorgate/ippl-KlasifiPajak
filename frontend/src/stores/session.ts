@@ -14,10 +14,11 @@ export const useSessionStore = defineStore("session", () => {
   const siap = ref(false);
   const sesiBerakhir = ref(false);
   const pesan = ref("");
-  const persetujuanAi = ref(false);
   const theme = ref<Theme>(readTheme());
   let muatJanji: Promise<void> | null = null;
 
+  /** Derived from the account, so it can never disagree with `user.ai_consent_at`. */
+  const persetujuanAi = computed(() => Boolean(user.value?.ai_consent_at));
   const tampilanNama = computed(() => user.value?.username ?? "");
   const inisial = computed(() => tampilanNama.value.trim().charAt(0).toUpperCase() || "?");
 
@@ -27,7 +28,6 @@ export const useSessionStore = defineStore("session", () => {
     muatJanji = (async () => {
       try {
         user.value = await api<Me>("/auth/me");
-        persetujuanAi.value = Boolean(user.value.ai_consent_at);
         sesiBerakhir.value = false;
       } catch (error) {
         user.value = null;
@@ -47,14 +47,13 @@ export const useSessionStore = defineStore("session", () => {
 
   function jatuh(code: string) {
     user.value = null;
-    persetujuanAi.value = false;
+    usePanduanStore().bersihkan();
     siap.value = true;
     sesiBerakhir.value = code === "session_expired" || code === "session_revoked";
   }
 
   async function masuk(identifier: string, password: string) {
     pesan.value = "";
-    persetujuanAi.value = false;
     await api("/auth/login", {
       method: "POST",
       body: JSON.stringify({ identifier, password }),
@@ -79,7 +78,6 @@ export const useSessionStore = defineStore("session", () => {
       /* a dead cookie still leaves the shell */
     }
     user.value = null;
-    persetujuanAi.value = false;
     siap.value = true;
     sesiBerakhir.value = false;
     usePanduanStore().bersihkan();
@@ -90,7 +88,6 @@ export const useSessionStore = defineStore("session", () => {
       method: "PUT",
       body: JSON.stringify({ consent }),
     });
-    persetujuanAi.value = body.consent;
     if (user.value) {
       user.value.ai_consent_at = body.ai_consent_at;
     }
