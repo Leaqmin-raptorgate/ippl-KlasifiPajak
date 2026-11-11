@@ -32,3 +32,24 @@ def test_fr48_unknown_answers_remain_unknown_after_profile_read(client):
     for field in ("has_selected_article_17", "has_sole_proprietor_company", "receives_salary"):
         assert field in response.json()
         assert response.json()[field] is None
+
+
+def test_profile_put_is_full_replace_for_onboarding_answers(client):
+    """PUT replaces the whole profile: an omitted onboarding answer resets to unanswered."""
+    _auth(client)
+    first = _profile(client, has_selected_article_17=True)
+    assert first.status_code == 200, first.text
+    assert first.json()["has_selected_article_17"] is True
+    version = first.json()["version"]
+
+    # Same body without the field, as an older client would send it.
+    second = _profile(client, version=version)
+    assert second.status_code == 200, second.text
+    body = second.json()
+    assert body["has_selected_article_17"] is None
+    assert any(
+        entry["field"] == "has_selected_article_17"
+        and entry["old_value"] == "True"
+        and entry["new_value"] == ""
+        for entry in body["audit_trail"]
+    )

@@ -1,4 +1,9 @@
-"""Dashboard read model. It only reads stored snapshots; it never calculates."""
+"""Dashboard read model.
+
+It reads stored snapshots. The one write is `refresh_if_due`, which rebuilds
+and commits snapshots once per Jakarta day when a future-dated row has become
+due; the dashboard itself does no tax arithmetic beyond summing stored figures.
+"""
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
