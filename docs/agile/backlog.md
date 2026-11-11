@@ -85,14 +85,14 @@ Done in code: `backend/tests/test_golden.py`, `backend/app/engine/compute.py`,
 - [x] Versioned month snapshots (D-11 / ERD r3) + dashboard `as_of` = today WIB.
 - [ ] Still open: L3-B Bagian A columns (FR-31) and live KAP/KJS values.
 
-## Rubric features — not yet implemented
+## Rubric features
 
 These are **required for graded v1** (D-08). Mark a box only when this branch implements it:
 
-- [ ] OCR receipt upload (FR-06, FR-06a, FR-06b) — DB stub / D-01 design only
+- [x] OCR receipt upload (FR-06, FR-06a, FR-06b) — local storage, EXIF strip, confirm flow
 - [x] Real Midtrans Snap + webhook (FR-PAY-01…05; FR-PAY-09 Should) — orders and webhook; settlement requires `status_code` `"200"`
-- [ ] AI classifier **or** assistant (FR-12/13 or FR-27…30) via 9router (D-09)
-- [ ] Annual recap PDF (FR-31…33); library locked to `fpdf2` (D-11)
+- [x] AI classifier **and** assistant (FR-12/13 and FR-27…30) via 9router (D-09)
+- [x] Annual recap PDF (FR-31…33); library locked to `fpdf2` (D-11)
 
 ## Payments — Midtrans Snap
 
@@ -104,7 +104,7 @@ from `max(now_utc, valid_until_utc)`). Never use production keys.
 
 - [x] `GatewayAdapter` plus `FakeGatewayAdapter`
 - [x] Signature verification with `hmac.compare_digest`
-- [x] Reject a tampered `gross_amount_idr`
+- [x] Reject a tampered `gross_amount`
 - [x] Webhook idempotency; settlement is not reversed; 30-day renewal
 - [x] Map Snap `redirect_url` → API `payment_url` (D-11)
 - [ ] TODO: Status API confirmation before production
@@ -143,8 +143,8 @@ from `max(now_utc, valid_until_utc)`). Never use production keys.
 ## Sprint 5 — trace and demo
 
 - [x] Per-transaction audit trail endpoint (PR #4)
-- [ ] FR-6.x read-only assistant (rubric; not started)
-- [ ] FR-8.x annual workpaper PDF (rubric; not started)
+- [x] FR-6.x read-only assistant (rubric)
+- [x] FR-8.x annual workpaper PDF (rubric)
 - [ ] Demo script, report numbers
 
 ## Frontend design — mockup v1.4.2 (25 Sep 2026)

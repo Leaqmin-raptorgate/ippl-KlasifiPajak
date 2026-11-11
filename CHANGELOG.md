@@ -12,7 +12,16 @@ documents it was built against: the SRS, the API specification
 
 ## [Unreleased]
 
-Nothing yet.
+Contract: API v1.3.3.
+
+### Documentation
+
+- Align the API specification, README, backend README, backlog, roadmap and
+  open decisions with the landed stack: the OCR, Midtrans, AI and recap
+  features exist, the recap and webhook contracts are fully described,
+  `PAYLOAD_TOO_LARGE`, `INVALID_ORDER_AMOUNT`, `PAYMENT_GATEWAY_UNAVAILABLE` and
+  `VALIDATION_ERROR` are documented, and OD-13 records the open Pasal 58(1)(a)
+  question.
 
 ## [0.5.0] - 2026-11-07
 
