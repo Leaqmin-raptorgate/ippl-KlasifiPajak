@@ -187,7 +187,7 @@ def test_tc_hard_12_alembic_upgrade_empty_to_head_and_downgrade(monkeypatch):
     engine = create_engine(migrate_url, pool_pre_ping=True)
     with engine.connect() as conn:
         version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
-        assert version == "76fcdbc4af30"
+        assert version == "c45af872b930"
         tables = {row[0] for row in conn.execute(text("SHOW TABLES")).fetchall()}
     engine.dispose()
     for required in (
@@ -583,6 +583,157 @@ def test_pending_slot_generated_behaviour(monkeypatch):
             is None
         )
     engine.dispose()
+
+
+def _payment_event_fingerprint(conn) -> dict:
+    """Columns, unique keys, rows, and alembic version for payment_events."""
+    columns = [
+        row[0]
+        for row in conn.execute(
+            text(
+                """
+                SELECT COLUMN_NAME FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'payment_events'
+                ORDER BY ORDINAL_POSITION
+                """
+            )
+        ).fetchall()
+    ]
+    unique_keys = [
+        row[0]
+        for row in conn.execute(
+            text(
+                """
+                SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = 'payment_events'
+                  AND CONSTRAINT_TYPE = 'UNIQUE'
+                ORDER BY CONSTRAINT_NAME
+                """
+            )
+        ).fetchall()
+    ]
+    rows = conn.execute(
+        text(
+            """
+            SELECT id, order_id, status, raw_status
+            FROM payment_events
+            ORDER BY id
+            """
+        )
+    ).fetchall()
+    version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
+    return {
+        "columns": columns,
+        "unique_keys": unique_keys,
+        "rows": [tuple(row) for row in rows],
+        "version": version,
+    }
+
+
+def test_payment_event_downgrade_refuses_duplicate_normalized_status(monkeypatch):
+    """c45af872b930 downgrade must not drop raw history that shares a status.
+
+    Two events with the same order_id and normalized status but different
+    raw_status make the old unique key impossible. Downgrade -1 refuses and
+    leaves the table unchanged. A single remaining row still downgrades.
+    """
+    migrate_url = _migrate_test_url()
+    if not _mysql_reachable(migrate_url):
+        pytest.skip(f"MySQL not reachable for migrate test URL={migrate_url}")
+    _wipe_schema(migrate_url)
+    cfg = _alembic_config(migrate_url, monkeypatch)
+    old = os.getcwd()
+    try:
+        os.chdir(BACKEND_ROOT)
+        command.upgrade(cfg, "head")
+    finally:
+        os.chdir(old)
+
+    engine = create_engine(migrate_url, pool_pre_ping=True)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO users
+                  (id, email, email_norm, username, username_norm, password_hash,
+                   paid_flag, created_at)
+                VALUES
+                  ('u-raw', 'raw@ex.com', 'raw@ex.com', 'rawuser', 'rawuser', 'x',
+                   0, UTC_TIMESTAMP(6))
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO subscription_orders
+                  (id, user_id, plan_id, amount_idr, status, payment_url,
+                   expires_at_utc, created_at)
+                VALUES
+                  ('ord-raw', 'u-raw', 'monthly_25k', 25000, 'settlement', '',
+                   UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO payment_events
+                  (id, order_id, user_id, status, raw_status, gross_amount_idr,
+                   transaction_time, received_at)
+                VALUES
+                  ('pe1', 'ord-raw', 'u-raw', 'settlement', 'capture', 25000,
+                   UTC_TIMESTAMP(6), UTC_TIMESTAMP(6)),
+                  ('pe2', 'ord-raw', 'u-raw', 'settlement', 'settlement', 25000,
+                   UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+                """
+            )
+        )
+        before = _payment_event_fingerprint(conn)
+    assert before["version"] == "c45af872b930"
+    assert "raw_status" in before["columns"]
+    assert before["unique_keys"] == ["uq_payment_events_order_raw_status"]
+    assert len(before["rows"]) == 2
+
+    try:
+        os.chdir(BACKEND_ROOT)
+        with pytest.raises(RuntimeError, match="normalized status"):
+            command.downgrade(cfg, "-1")
+    finally:
+        os.chdir(old)
+
+    with engine.connect() as conn:
+        after_refuse = _payment_event_fingerprint(conn)
+    assert after_refuse == before
+
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM payment_events WHERE id = 'pe2'"))
+
+    try:
+        os.chdir(BACKEND_ROOT)
+        command.downgrade(cfg, "-1")
+    finally:
+        os.chdir(old)
+
+    with engine.connect() as conn:
+        version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
+        columns = [
+            row[0]
+            for row in conn.execute(
+                text(
+                    """
+                    SELECT COLUMN_NAME FROM information_schema.COLUMNS
+                    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'payment_events'
+                    """
+                )
+            ).fetchall()
+        ]
+        remaining = conn.execute(text("SELECT id, status FROM payment_events")).fetchall()
+    engine.dispose()
+    assert version == "b19e6a25c70a"
+    assert "raw_status" not in columns
+    assert remaining == [("pe1", "settlement")]
 
 
 def test_tc_hard_25_dockerfile_non_root_user():

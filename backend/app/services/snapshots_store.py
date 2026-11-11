@@ -102,6 +102,7 @@ def snapshot_end_month(tax_year: int, today: date | None = None) -> int:
 
 def profile_to_engine(profile: ProfileRow) -> EngineProfile:
     return EngineProfile(
+        has_selected_article_17=profile.has_selected_article_17 is True,
         spouse_has_usaha_income="yes" if profile.spouse_aggregation_active else "no",
         spouse_aggregation_active=profile.spouse_aggregation_active,
         spouse_usaha_omzet_ytd=profile.spouse_current_usaha_idr,
@@ -377,12 +378,15 @@ def _rebuild_locked(
         db.flush()
         return []
 
-    included = [row for row in rows if row.tx_date <= as_of]
+    included = [row for row in rows if row.tx_date <= as_of and not row.requires_clarification]
     engine_rows = [transaction_to_engine(row) for row in included]
     engine_profile = profile_to_engine(profile)
     snapshot = compute(engine_rows, engine_profile, ruleset, as_of)
 
-    if snapshot.prior_year_resolution_source == "unverifiable":
+    if profile.has_selected_article_17 is True:
+        scheme_status = "scheme_ineligible"
+        annotation = "PPh Final 0,5% tidak dihitung karena Anda memilih tarif Pasal 17."
+    elif snapshot.prior_year_resolution_source == "unverifiable":
         scheme_status = "unverifiable"
         annotation = UNVERIFIABLE_ANNOTATION
     elif snapshot.prior_year_ineligible:
@@ -487,6 +491,8 @@ def _rebuild_locked(
         db.execute(
             delete(MonthSnapshot).where(MonthSnapshot.id.in_([r.id for r in future_berlaku]))
         )
+    if month_keys is None and not only_usang:
+        profile.snapshot_checked_through = today
     db.flush()
     return written
 

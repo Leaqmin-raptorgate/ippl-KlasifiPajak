@@ -489,33 +489,3 @@ def get_month_snapshot(
     """Monthly snapshot jejak for one month (FR-47 / API §5.21)."""
     ruleset = active_ruleset(settings.ruleset_path)
     return transaction_service.month_snapshot(db, context.user, tax_year, month, ruleset)
-
-
-@router.post("/test-support/subscription-override", response_model=None)
-def subscription_override(
-    payload: dict,
-    request: Request,
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-):
-    """HB-29 / API §5.31 — fail-closed outside APP_ENV=test on loopback."""
-    if not settings.is_test:
-        return Response(status_code=404)
-    host = (request.client.host if request.client else "") or ""
-    if host not in {"127.0.0.1", "::1", "testclient", "localhost"}:
-        return Response(status_code=404)
-    from datetime import datetime
-
-    user_id = payload.get("user_id")
-    if not user_id:
-        raise ApiError(404, "USER_NOT_FOUND", "Pengguna tidak ditemukan.")
-    raw = payload.get("valid_until")
-    valid_until = None
-    if raw:
-        valid_until = datetime.fromisoformat(str(raw).replace("Z", "+00:00")).replace(tzinfo=None)
-    return subscription_service.set_subscription_override(
-        db,
-        user_id=str(user_id),
-        paid_flag=bool(payload.get("paid_flag")),
-        valid_until=valid_until,
-    )

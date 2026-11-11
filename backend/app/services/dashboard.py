@@ -1,13 +1,21 @@
-"""Dashboard read model. It only reads stored snapshots; it never calculates."""
+"""Dashboard read model.
+
+It reads stored snapshots. The one write is `refresh_if_due`, which rebuilds
+and commits snapshots once per Jakarta day when a future-dated row has become
+due; the dashboard itself does no tax arithmetic beyond summing stored figures.
+"""
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.errors import ApiError
 from app.engine import Ruleset
+from app.engine.compute import _prior_gross_revenue
 from app.models import MonthSnapshot, Profile, User
+from app.services.config import get_config
 from app.services.profile import find_profile
 from app.services.snapshot import DISCLAIMER
+from app.services.snapshots_store import profile_to_engine, rebuild, today_jakarta
 from app.services.transactions import provisional_usaha_total
 
 
@@ -19,6 +27,7 @@ def dashboard(db: Session, user: User, tax_year: int, ruleset: Ruleset) -> dict:
             "PROFILE_NOT_FOUND",
             "Profil untuk tahun pajak yang dipilih belum dibuat.",
         )
+    refresh_if_due(db, profile, ruleset)
     rows = db.scalars(
         select(MonthSnapshot)
         .where(
@@ -40,20 +49,23 @@ def dashboard(db: Session, user: User, tax_year: int, ruleset: Ruleset) -> dict:
         else 0
     )
     combined_ytd = usaha_ytd + pekerjaan_ytd + already_final_ytd + spouse_current
+    cap_warning_percent = int(get_config(db, "cap_warning_percent"))
 
     status = rows[-1].scheme_eligibility_status if rows else "scheme_eligible"
     next_year = rows[-1].next_year_ineligible if rows else False
-    prior_source = rows[-1].prior_year_resolution_source if rows else "first_year_taxpayer"
+    prior_amount, prior_tag = _prior_combined(profile, ruleset)
     split_month = next((row.month_key for row in rows if row.porsi_kena_idr > 0), None)
     remaining = max(0, ruleset.exemption_band_idr - usaha_ytd)
     annotation = next((row.annotation for row in rows if row.annotation), "")
 
-    # How much of the band is unconfirmed. Reported next to the band rather than
-    # netted out of it: the engine does not decide the treatment, the user does,
-    # and the band total must stay the number the engine actually computed.
+    # Provisional rows are excluded from the calculation until clarified.
     provisional = provisional_usaha_total(db, user, tax_year)
     if provisional:
-        note = "Rp " + f"{provisional:,}".replace(",", ".") + " belum terklasifikasi"
+        note = (
+            "Rp "
+            + f"{provisional:,}".replace(",", ".")
+            + " belum terklasifikasi dan tidak dihitung"
+        )
         annotation = f"{annotation} {note}".strip() if annotation else note
 
     return {
@@ -74,12 +86,15 @@ def dashboard(db: Session, user: User, tax_year: int, ruleset: Ruleset) -> dict:
             },
             "eligibility_prior_year_cap_4_8m": {
                 "limit_idr": ruleset.eligibility_cap_idr,
-                "combined_prior_year_gross_idr": _prior_combined(profile, ruleset),
-                "resolution_source": prior_source,
+                "combined_prior_year_gross_idr": prior_amount,
+                "resolution_source": prior_tag,
                 "status": status,
             },
             "monitoring_current_year_cap_4_8m": {
                 "limit_idr": ruleset.eligibility_cap_idr,
+                "cap_warning_percent": cap_warning_percent,
+                "cap_warning": combined_ytd * 100
+                >= ruleset.eligibility_cap_idr * cap_warning_percent,
                 "ytd_usaha_omzet_idr": usaha_ytd,
                 "provisional_usaha_omzet_idr": provisional,
                 "ytd_pekerjaan_bebas_omzet_idr": pekerjaan_ytd,
@@ -126,16 +141,14 @@ def dashboard(db: Session, user: User, tax_year: int, ruleset: Ruleset) -> dict:
     }
 
 
-def _prior_combined(profile: Profile, ruleset: Ruleset) -> int:
-    total = (
-        profile.prior_user_usaha_idr
-        + profile.prior_user_pekerjaan_bebas_idr
-        + profile.prior_user_already_final_idr
-    )
-    if profile.spouse_aggregation_active and ruleset.spouse_in_cap:
-        total += (
-            profile.prior_spouse_usaha_idr
-            + profile.prior_spouse_pekerjaan_bebas_idr
-            + profile.prior_spouse_already_final_idr
-        )
-    return total
+def _prior_combined(profile: Profile, ruleset: Ruleset) -> tuple[int, str]:
+    """Amount and source tag from the engine prior-year function (FR-19)."""
+    return _prior_gross_revenue(profile_to_engine(profile), ruleset.spouse_in_cap)
+
+
+def refresh_if_due(db: Session, profile: Profile, ruleset: Ruleset) -> None:
+    """Refresh once per Jakarta date so newly due transactions enter snapshots."""
+    today = today_jakarta()
+    if profile.snapshot_checked_through is None or profile.snapshot_checked_through < today:
+        rebuild(db, profile, ruleset)
+        db.commit()
