@@ -10,15 +10,14 @@ import { PUBLIC_RULESET } from "@/lib/domain";
 import { tanggalPanjang } from "@/lib/format";
 import { usePajakStore } from "@/stores/pajak";
 
-const props = defineProps<{ publik?: boolean }>();
+// `publik` is kept so existing callers still compile. The ruleset identity is
+// public either way: the dashboard returns 404 until a profile exists, and that
+// must not read as "ruleset not loaded".
+defineProps<{ publik?: boolean }>();
 const pajak = usePajakStore();
 
-const id = computed(
-  () => pajak.dashboard?.metadata.ruleset_id || (props.publik ? PUBLIC_RULESET.id : ""),
-);
-const berlaku = computed(
-  () => pajak.dashboard?.metadata.effective_date || (props.publik ? PUBLIC_RULESET.berlaku : ""),
-);
+const id = computed(() => pajak.dashboard?.metadata.ruleset_id || PUBLIC_RULESET.id);
+const berlaku = computed(() => pajak.dashboard?.metadata.effective_date || PUBLIC_RULESET.berlaku);
 </script>
 
 <template>

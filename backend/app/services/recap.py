@@ -31,6 +31,10 @@ _FONT_PATH = Path(__file__).resolve().parents[1] / "assets" / "fonts" / "DejaVuS
 KAP_KJS = "411128-420"
 KAP_KJS_STATUS = "secondary_unconfirmed"
 
+OVERWITHHELD_NOTE = (
+    "Kelebihan potong belum diperhitungkan; tidak dikreditkan atau dipindahkan antarbulan. "
+    "Konsultasikan dengan konsultan pajak berlisensi."
+)
 _NOT_AN_SPT = "Pernyataan: berkas ini bukan SPT resmi dan bukan produk DJP/Coretax."
 _STALE_MESSAGE = "Masih ada cuplikan berstatus usang tanpa baris berlaku, jadi rekap tidak disusun."
 _SCHEME_TEXT = {
@@ -155,6 +159,21 @@ def render_workpaper_pdf(recap: dict, *, sample: bool = False) -> bytes:
         + _idr(recap["total_pekerjaan_bebas_omzet_idr"]),
         5,
     )
+    if recap["total_overwithheld_excess_idr"]:
+        _line(
+            pdf,
+            "Kelebihan potong: Rp "
+            + _idr(recap["total_overwithheld_excess_idr"])
+            + " (per bulan: "
+            + ", ".join(
+                f"{m['month']}: Rp {_idr(m['overwithheld_excess_idr'])}"
+                for m in recap["months"]
+                if m["overwithheld_excess_idr"]
+            )
+            + "). "
+            + OVERWITHHELD_NOTE,
+            5,
+        )
     _line(pdf, f"KAP/KJS: {recap['kap_kjs']}", 5)
     _line(
         pdf,
@@ -223,6 +242,7 @@ def _assemble(
         "withheld": 0,
         "sisa": 0,
         "pekerjaan": 0,
+        "excess": 0,
     }
     for month in range(1, 13):
         row = chosen.get(month)
@@ -233,6 +253,7 @@ def _assemble(
         withheld = int(row.withheld_tax_idr) if row else 0
         sisa = int(row.sisa_bayar_idr) if row else 0
         pekerjaan = int(row.pekerjaan_bebas_omzet_idr) if row else 0
+        excess = int(row.overwithheld_excess_idr) if row else 0
         running += usaha
         totals["usaha"] += usaha
         totals["bebas"] += bebas
@@ -241,6 +262,7 @@ def _assemble(
         totals["withheld"] += withheld
         totals["sisa"] += sisa
         totals["pekerjaan"] += pekerjaan
+        totals["excess"] += excess
         months.append(
             {
                 "month": month,
@@ -252,6 +274,7 @@ def _assemble(
                 "self_paid_idr": None,
                 "withheld_tax_idr": withheld,
                 "sisa_bayar_idr": sisa,
+                "overwithheld_excess_idr": excess,
             }
         )
     if latest is None:
@@ -287,6 +310,8 @@ def _assemble(
         "total_tax_0_5_pct_idr": totals["tax"],
         "total_withheld_tax_idr": totals["withheld"],
         "total_sisa_bayar_idr": totals["sisa"],
+        "total_overwithheld_excess_idr": totals["excess"],
+        "overwithheld_note": OVERWITHHELD_NOTE,
         "total_pekerjaan_bebas_omzet_idr": totals["pekerjaan"],
     }
 

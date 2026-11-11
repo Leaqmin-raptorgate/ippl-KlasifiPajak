@@ -1,7 +1,7 @@
 """Read-only assistant HTTP endpoint (FR-27, FR-28)."""
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, ConfigDict, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
 from sqlalchemy.orm import Session
 
 from app.api.deps import AuthContext, current_session
@@ -16,7 +16,14 @@ class AssistantQueryIn(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    question: StrictStr
+    question: StrictStr = Field(min_length=1, max_length=1000)
+
+    @field_validator("question")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Pertanyaan tidak boleh kosong.")
+        return value
 
 
 @router.post("/assistant/query")

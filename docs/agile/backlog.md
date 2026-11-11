@@ -104,7 +104,7 @@ from `max(now_utc, valid_until_utc)`). Never use production keys.
 
 - [x] `GatewayAdapter` plus `FakeGatewayAdapter`
 - [x] Signature verification with `hmac.compare_digest`
-- [x] Reject a tampered `gross_amount`
+- [x] Reject a tampered `gross_amount` (`ORDER_AMOUNT_MISMATCH`)
 - [x] Webhook idempotency; settlement is not reversed; 30-day renewal
 - [x] Map Snap `redirect_url` → API `payment_url` (D-11)
 - [ ] TODO: Status API confirmation before production

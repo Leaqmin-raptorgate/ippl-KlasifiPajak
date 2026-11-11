@@ -43,6 +43,7 @@ from app.schemas.transaction import (
     TransactionUpdate,
 )
 from app.security import iso_utc
+from app.services import assistant as assistant_service
 from app.services import auth as auth_service
 from app.services import dashboard as dashboard_service
 from app.services import guidance as guidance_service
@@ -54,6 +55,7 @@ from app.services.auth import (
     GENERIC_RESET_MESSAGE,
     RESET_SUCCESS_MESSAGE,
 )
+from app.services.payments import has_pending_order
 from app.services.snapshot import active_ruleset
 
 configure_redacted_logging()
@@ -209,12 +211,11 @@ def logout(
 
 @router.get("/auth/me", response_model=MeOut)
 def me(context: AuthContext = Depends(current_session)) -> MeOut:
-    stamp = context.user.ai_consent_at
     return MeOut(
         user_id=context.user.id,
         email=context.user.email,
         username=context.user.username,
-        ai_consent_at=iso_utc(stamp) if stamp is not None else None,
+        ai_consent_at=assistant_service.consent_out(context.user.ai_consent_at)["ai_consent_at"],
     )
 
 
@@ -421,8 +422,6 @@ def get_subscription_status(
     context: AuthContext = Depends(current_session),
     db: Session = Depends(get_db),
 ) -> dict:
-    from app.services.payments import has_pending_order
-
     return subscription_service.subscription_status(
         context.user, has_pending_order(db, context.user)
     )

@@ -63,3 +63,14 @@ def test_fr44_configuration_changes_are_logged(client):
         assert len(changes) == 1
         assert changes[0].config_key == "T_rule"
         assert changes[0].actor == "offline-test"
+
+
+def test_cap_warning_percent_is_stored_as_whole_number(client):
+    """A value such as "80.0" is normalised so the dashboard's int() read cannot fail."""
+    from app.services.config import get_config, set_config
+
+    with SessionLocal() as db:
+        set_config(db, "cap_warning_percent", "90.0", actor="offline-test")
+        assert get_config(db, "cap_warning_percent") == "90"
+        with pytest.raises(ValueError):
+            set_config(db, "cap_warning_percent", "90.5", actor="offline-test")

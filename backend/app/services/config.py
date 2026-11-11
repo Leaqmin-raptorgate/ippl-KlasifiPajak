@@ -23,6 +23,9 @@ def set_config(db: Session, key: str, value: str, actor: str) -> None:
         raise ValueError("Configuration value out of range")
     if key == "cap_warning_percent" and not number.is_integer():
         raise ValueError("Warning percentage must be an integer")
+    if key == "cap_warning_percent":
+        # dashboard reads this key with int(); never store "80.0".
+        value = str(int(number))
     row = db.get(AppConfig, key, with_for_update=True)
     old = row.value if row else DEFAULTS[key]
     if old == value:

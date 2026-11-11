@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** Read-only assistant. The answer and the remaining quota come from the API. */
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppCard from "@/components/ui/AppCard.vue";
 import AppField from "@/components/ui/AppField.vue";
@@ -36,6 +36,14 @@ const pertanyaanSiap = [
 onMounted(() => {
   void kuota.muat();
 });
+
+// The consent alert is only true until consent is saved.
+watch(
+  () => session.persetujuanAi,
+  (setuju) => {
+    if (setuju && galat.value.startsWith("Persetujuan")) galat.value = "";
+  },
+);
 
 async function kirim() {
   const teks = tanya.value.trim();

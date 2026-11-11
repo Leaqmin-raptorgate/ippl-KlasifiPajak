@@ -8,7 +8,7 @@ import ProfilPage from "@/pages/ProfilPage.vue";
 import { useKuotaStore } from "@/stores/kuota";
 import { useProfilStore } from "@/stores/profil";
 
-async function mountProfile(existing = false) {
+async function mountProfile(existing = false, tweak: Partial<Profile> = {}) {
   const pinia = createPinia();
   setActivePinia(pinia);
   const profil = useProfilStore();
@@ -38,6 +38,7 @@ async function mountProfile(existing = false) {
       prior_spouse_pekerjaan_bebas_idr: null,
       prior_spouse_already_final_idr: null,
       audit_trail: [],
+      ...tweak,
     } as unknown as Profile;
   }
   vi.spyOn(profil, "muat").mockResolvedValue(undefined);
@@ -130,5 +131,29 @@ describe("FR-48 spouse and prior-year answers", () => {
     const alert = wrapper.find("[role='alert']");
     expect(alert.exists()).toBe(true);
     expect(alert.text()).toContain("tidak valid");
+  });
+
+  it("blocks Save until a spouse status is chosen when aggregation is on but status is unknown (R18-W2)", async () => {
+    const { wrapper, save } = await mountProfile(true, {
+      spouse_tax_status: "unknown",
+      spouse_aggregation_active: true,
+    });
+    const saveButton = () =>
+      wrapper.findAll("button").find((button) => button.text() === "Simpan")!;
+    expect(wrapper.text()).toContain("status perpajakan pasangan belum diketahui");
+    expect(saveButton().attributes("disabled")).toBeDefined();
+    await saveButton().trigger("click");
+    await flushPromises();
+    expect(save).not.toHaveBeenCalled();
+
+    await spouseSelect(wrapper)!.setValue("separate");
+    expect(saveButton().attributes("disabled")).toBeUndefined();
+    expect(wrapper.text()).not.toContain("status perpajakan pasangan belum diketahui");
+  });
+
+  it("does not lock Save for an unknown status without aggregation", async () => {
+    const { wrapper } = await mountProfile(true);
+    const saveButton = wrapper.findAll("button").find((button) => button.text() === "Simpan")!;
+    expect(saveButton.attributes("disabled")).toBeUndefined();
   });
 });

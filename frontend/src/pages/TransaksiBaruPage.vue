@@ -82,6 +82,7 @@ watch(kanal, () => {
   delete galatServer.source_channel;
 });
 
+const BATAS_BERKAS_BYTE = 8 * 1024 * 1024;
 const berkas = ref<File | null>(null);
 const imageId = ref("");
 
@@ -169,6 +170,9 @@ function pilihBukti() {
   input.accept = "image/jpeg,image/png";
   input.onchange = () => {
     berkas.value = input.files?.[0] ?? null;
+    // A different file invalidates whatever was uploaded before, so a later
+    // save can never confirm the previous image against this form.
+    imageId.value = "";
     void unggah();
   };
   input.click();
@@ -177,6 +181,19 @@ function pilihBukti() {
 async function unggah() {
   if (!berkas.value) return;
   galatSimpan.value = "";
+  if (!["image/jpeg", "image/png"].includes(berkas.value.type)) {
+    galatSimpan.value = "Berkas harus berupa foto JPEG atau PNG.";
+    return;
+  }
+  if (berkas.value.size > BATAS_BERKAS_BYTE) {
+    galatSimpan.value = "Ukuran foto maksimal 8 MB.";
+    return;
+  }
+  if (!kuota.berbayar) {
+    galatSimpan.value =
+      "Unggah struk hanya untuk akun berbayar aktif. Isi transaksi secara manual, atau lihat paket di halaman Kuota.";
+    return;
+  }
   if (!session.persetujuanAi) {
     galatSimpan.value = "Persetujuan pemrosesan AI diperlukan sebelum fitur ini digunakan.";
     return;
@@ -192,9 +209,6 @@ async function unggah() {
   } catch (error) {
     imageId.value = "";
     galatSimpan.value = error instanceof ApiFailure ? error.message : "Unggah gagal.";
-    if (error instanceof ApiFailure && error.code === "PAID_SUBSCRIPTION_REQUIRED") {
-      await router.push("/kuota");
-    }
   }
 }
 

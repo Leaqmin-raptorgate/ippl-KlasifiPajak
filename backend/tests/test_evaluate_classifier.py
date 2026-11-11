@@ -219,3 +219,68 @@ def test_scorer_never_imports_the_model_client():
     """NFR-01: evaluation is offline; the model client is not reachable from it."""
     source = Path(ev.__file__).read_text(encoding="utf-8")
     assert "model_client" not in source
+
+
+def test_blank_decision_row_is_unreviewed_not_an_error(tmp_path, capsys):
+    """A row with a reviewer but no decision yet is unreviewed, so --allow-partial scores the rest."""
+    path = _workbook(
+        tmp_path / "r.xlsx",
+        [
+            ("C1", "Penjualan kaos", "approved", "usaha", "Rina", ""),
+            ("C2", "Penjualan sepatu", "", "", "Rina", ""),
+        ],
+    )
+    assert ev.main([str(path)]) == 2
+    assert "1 unreviewed" in capsys.readouterr().err
+    out = tmp_path / "report.json"
+    assert ev.main([str(path), "--allow-partial", "--json", str(out)]) == 0
+    assert json.loads(out.read_text(encoding="utf-8"))["counts"]["unreviewed"] == 1
+
+
+def test_unknown_decision_is_rejected_only_on_a_reviewed_row(tmp_path):
+    reviewed = _workbook(
+        tmp_path / "a.xlsx", [("C1", "Penjualan kaos", "maybe", "usaha", "Rina", "")]
+    )
+    assert ev.main([str(reviewed)]) == 2
+    unreviewed = _workbook(
+        tmp_path / "b.xlsx", [("C1", "Penjualan kaos", "maybe", "usaha", "", "")]
+    )
+    assert ev.main([str(unreviewed), "--allow-partial"]) == 0
+
+
+def test_rules_version_covers_every_outcome_field_and_the_threshold(monkeypatch):
+    from dataclasses import replace
+
+    base = ev._rules_version()
+    assert ev._rules_version(0.9) != base
+    changed = tuple(
+        replace(rule, decisive=not rule.decisive) if i == 0 else rule
+        for i, rule in enumerate(ev.RULES)
+    )
+    monkeypatch.setattr(ev, "RULES", changed)
+    assert ev._rules_version() != base
+    changed = tuple(
+        replace(rule, citation="x") if i == 0 else rule for i, rule in enumerate(ev.RULES)
+    )
+    monkeypatch.setattr(ev, "RULES", changed)
+    assert ev._rules_version() != base
+
+
+def test_threshold_option_defaults_to_the_ruleset_and_is_reported(tmp_path, capsys):
+    path = _workbook(
+        tmp_path / "r.xlsx", [("C1", "Penjualan kaos", "approved", "usaha", "Rina", "")]
+    )
+    out = tmp_path / "report.json"
+    assert ev.main([str(path), "--json", str(out)]) == 0
+    assert "threshold=0.8" in capsys.readouterr().out
+    assert json.loads(out.read_text(encoding="utf-8"))["classifier"]["threshold"] == 0.8
+    # Every rule has confidence 0.9, so a threshold above that abstains on everything.
+    assert ev.main([str(path), "--threshold", "0.95", "--json", str(out)]) == 0
+    assert json.loads(out.read_text(encoding="utf-8"))["result"]["labelled"]["coverage"] == 0.0
+
+
+def test_a_file_that_is_not_a_workbook_exits_2(tmp_path, capsys):
+    bad = tmp_path / "bad.xlsx"
+    bad.write_bytes(b"this is not a zip file")
+    assert ev.main([str(bad)]) == 2
+    assert "reviewed dataset" in capsys.readouterr().err.lower()

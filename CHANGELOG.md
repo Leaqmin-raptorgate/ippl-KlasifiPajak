@@ -14,6 +14,14 @@ documents it was built against: the SRS, the API specification
 
 Contract: API v1.3.3.
 
+### Added
+
+- `docker compose up frontend` runs the Vite dev server on `127.0.0.1:5173`
+  and proxies `/api` to the `api` service. See
+  [frontend/README.md](frontend/README.md#running-with-docker-compose).
+- `API_PROXY_TARGET` sets the Vite dev proxy target. It defaults to
+  `http://127.0.0.1:8000` when unset or empty.
+
 ### Documentation
 
 - Align the API specification, README, backend README, backlog, roadmap and
