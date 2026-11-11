@@ -43,6 +43,7 @@ from app.schemas.transaction import (
     TransactionUpdate,
 )
 from app.security import iso_utc
+from app.services import assistant as assistant_service
 from app.services import auth as auth_service
 from app.services import dashboard as dashboard_service
 from app.services import guidance as guidance_service
@@ -214,6 +215,7 @@ def me(context: AuthContext = Depends(current_session)) -> MeOut:
         user_id=context.user.id,
         email=context.user.email,
         username=context.user.username,
+        ai_consent_at=assistant_service.consent_out(context.user.ai_consent_at)["ai_consent_at"],
     )
 
 

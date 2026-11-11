@@ -84,6 +84,47 @@ def test_register_login_me_and_logout(client):
     assert client.get("/api/v1/auth/me").status_code == 401
 
 
+def test_auth_me_ai_consent_at_matches_ai_consent(client):
+    """GET /auth/me returns the same ai_consent_at that GET /ai-consent reports (FR-27)."""
+    assert _register(client).status_code == 201
+    assert _login(client).status_code == 200
+
+    before = client.get("/api/v1/auth/me")
+    assert before.status_code == 200
+    assert before.json()["ai_consent_at"] is None
+    before_consent = client.get("/api/v1/ai-consent")
+    assert before_consent.status_code == 200
+    assert before_consent.json()["consent"] is False
+    assert before_consent.json()["ai_consent_at"] is None
+
+    granted = client.put("/api/v1/ai-consent", json={"consent": True})
+    assert granted.status_code == 200
+    stamp = granted.json()["ai_consent_at"]
+    assert isinstance(stamp, str) and stamp
+    assert granted.json()["consent"] is True
+
+    after = client.get("/api/v1/auth/me")
+    assert after.status_code == 200
+    assert after.json()["ai_consent_at"] == stamp
+    after_consent = client.get("/api/v1/ai-consent")
+    assert after_consent.status_code == 200
+    assert after_consent.json()["consent"] is True
+    assert after_consent.json()["ai_consent_at"] == stamp
+
+    withdrawn = client.put("/api/v1/ai-consent", json={"consent": False})
+    assert withdrawn.status_code == 200
+    assert withdrawn.json()["consent"] is False
+    assert withdrawn.json()["ai_consent_at"] is None
+
+    cleared = client.get("/api/v1/auth/me")
+    assert cleared.status_code == 200
+    assert cleared.json()["ai_consent_at"] is None
+    cleared_consent = client.get("/api/v1/ai-consent")
+    assert cleared_consent.status_code == 200
+    assert cleared_consent.json()["consent"] is False
+    assert cleared_consent.json()["ai_consent_at"] is None
+
+
 def test_non_browser_login_returns_a_token(client):
     _register(client)
     response = client.post(

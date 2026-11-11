@@ -3,6 +3,7 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { ApiFailure, api } from "@/lib/api";
 import type { Me } from "@/lib/wire";
+import { usePanduanStore } from "@/stores/panduan";
 
 export type Theme = "light" | "dark";
 
@@ -16,6 +17,8 @@ export const useSessionStore = defineStore("session", () => {
   const theme = ref<Theme>(readTheme());
   let muatJanji: Promise<void> | null = null;
 
+  /** Derived from the account, so it can never disagree with `user.ai_consent_at`. */
+  const persetujuanAi = computed(() => Boolean(user.value?.ai_consent_at));
   const tampilanNama = computed(() => user.value?.username ?? "");
   const inisial = computed(() => tampilanNama.value.trim().charAt(0).toUpperCase() || "?");
 
@@ -44,6 +47,7 @@ export const useSessionStore = defineStore("session", () => {
 
   function jatuh(code: string) {
     user.value = null;
+    usePanduanStore().bersihkan();
     siap.value = true;
     sesiBerakhir.value = code === "session_expired" || code === "session_revoked";
   }
@@ -76,6 +80,17 @@ export const useSessionStore = defineStore("session", () => {
     user.value = null;
     siap.value = true;
     sesiBerakhir.value = false;
+    usePanduanStore().bersihkan();
+  }
+
+  async function aturPersetujuanAi(consent: boolean) {
+    const body = await api<{ consent: boolean; ai_consent_at: string | null }>("/ai-consent", {
+      method: "PUT",
+      body: JSON.stringify({ consent }),
+    });
+    if (user.value) {
+      user.value.ai_consent_at = body.ai_consent_at;
+    }
   }
 
   async function mintaReset(email: string) {
@@ -111,6 +126,7 @@ export const useSessionStore = defineStore("session", () => {
     siap,
     sesiBerakhir,
     pesan,
+    persetujuanAi,
     theme,
     tampilanNama,
     inisial,
@@ -121,6 +137,7 @@ export const useSessionStore = defineStore("session", () => {
     keluar,
     mintaReset,
     konfirmasiReset,
+    aturPersetujuanAi,
     setTheme,
     toggleTheme,
   };

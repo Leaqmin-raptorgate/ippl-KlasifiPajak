@@ -8,16 +8,21 @@ import AppMeter from "@/components/ui/AppMeter.vue";
 import AppPill from "@/components/ui/AppPill.vue";
 import StatCard from "@/components/app/StatCard.vue";
 import TransactionLedger from "@/components/app/TransactionLedger.vue";
+import PanduanPanel from "@/components/app/PanduanPanel.vue";
 import WorkpaperNote from "@/components/app/WorkpaperNote.vue";
 import { ApiFailure } from "@/lib/api";
 import { CAPABILITIES } from "@/lib/capabilities";
 import { KATEGORI_LABEL } from "@/lib/domain";
 import { bulanTahun, persen, rupiah, rupiahPlain, rupiahShort } from "@/lib/format";
 import { usePajakStore } from "@/stores/pajak";
+import { usePanduanStore } from "@/stores/panduan";
+import { useSessionStore } from "@/stores/session";
 import { useTransaksiStore } from "@/stores/transaksi";
 
 const store = useTransaksiStore();
 const pajak = usePajakStore();
+const panduan = usePanduanStore();
+const session = useSessionStore();
 const router = useRouter();
 const pdfPesan = ref("");
 
@@ -31,6 +36,24 @@ const rasioBebas = computed(() => {
   if (!band || band.limit_idr === 0) return 0;
   return band.ytd_usaha_omzet_idr / band.limit_idr;
 });
+/** Real share of the Rp4,8 M cap, not the warning threshold (`cap_warning_percent`). */
+const persenGabungan = computed(() => {
+  const now = tahun.value;
+  if (!now || now.limit_idr === 0) return 0;
+  return Math.round((now.ytd_combined_gross_idr * 100) / now.limit_idr);
+});
+/**
+ * The API sends a remaining free band of 0 when the prior-year check does not
+ * pass. That 0 is "not computed", so the hero shows a dash and the reason.
+ */
+const sisaTidakDihitung = computed(
+  () => lalu.value?.status === "unverifiable" || lalu.value?.status === "scheme_ineligible",
+);
+const alasanSisa = computed(() =>
+  lalu.value?.status === "unverifiable"
+    ? "Isi peredaran bruto tahun lalu di Profil untuk menghitung sisa."
+    : "Skema PPh final 0,5% tidak berlaku, jadi tidak ada sisa pita bebas.",
+);
 const sudahLewati = computed(() =>
   pita.value
     ? pita.value.remaining_free_band_idr === 0 && pita.value.ytd_usaha_omzet_idr > 0
@@ -54,6 +77,26 @@ const OVER_LABEL: Record<string, string> = {
 };
 
 const statusSkema = computed(() => STATUS_LABEL[lalu.value?.status ?? ""] ?? "—");
+const alasanSkema = computed(() => {
+  const alasanApi = pajak.dashboard?.monthly_summaries.find(
+    (bulan) => bulan.annotation,
+  )?.annotation;
+  if (alasanApi) return alasanApi;
+  if (lalu.value?.status === "scheme_ineligible") {
+    return `Omzet gabungan tahun lalu ${rupiah(lalu.value.combined_prior_year_gross_idr)} melampaui batas ${rupiah(lalu.value.limit_idr)}.`;
+  }
+  if (lalu.value?.status === "unverifiable") {
+    return "Data omzet tahun lalu belum lengkap, sehingga batas kelayakan belum dapat diperiksa.";
+  }
+  return "";
+});
+const skemaTidakDihitung = computed(
+  () => lalu.value?.status === "scheme_ineligible" || lalu.value?.status === "unverifiable",
+);
+/** The PDF still prints PPh as 0 for a year that cannot be checked. */
+const bolehUnduh = computed(
+  () => CAPABILITIES.workpaperExport && lalu.value?.status !== "unverifiable",
+);
 
 const breakdown = computed(() => {
   const now = tahun.value;
@@ -78,7 +121,10 @@ const breakdown = computed(() => {
 const terbaru = computed(() => store.items.slice(0, 5));
 
 onMounted(() => {
-  void pajak.muat();
+  void pajak.muat().then(() => {
+    if (session.user && pajak.dashboard) void panduan.muat();
+    else panduan.bersihkan();
+  });
   void store.muat({ per_page: 5 }).catch(() => undefined);
 });
 
@@ -113,12 +159,7 @@ async function unduh() {
         <AppButton v-if="!pajak.dashboard" to="/profil" variant="primary" icon="profil">
           Buat profil tahun pajak
         </AppButton>
-        <AppButton
-          v-else-if="CAPABILITIES.workpaperExport"
-          variant="outline"
-          icon="unduh"
-          @click="unduh"
-        >
+        <AppButton v-else-if="bolehUnduh" variant="outline" icon="unduh" @click="unduh">
           Unduh workpaper
         </AppButton>
         <AppButton
@@ -142,7 +183,13 @@ async function unduh() {
             </AppButton>
           </div>
           <p v-if="pdfPesan" class="basis" role="alert">{{ pdfPesan }}</p>
-          <p class="big figure">{{ pita ? rupiah(pita.remaining_free_band_idr) : "—" }}</p>
+          <p class="big figure">
+            {{ pita && !sisaTidakDihitung ? rupiah(pita.remaining_free_band_idr) : "—" }}
+          </p>
+          <p v-if="pita && sisaTidakDihitung" class="basis sisa-alasan">
+            {{ alasanSisa }}
+            <RouterLink v-if="lalu?.status === 'unverifiable'" to="/profil">Buka Profil</RouterLink>
+          </p>
           <p class="basis">
             dari {{ pita ? rupiah(pita.limit_idr) : "—" }} batas usaha
             <template v-if="pita?.split_month">
@@ -205,6 +252,28 @@ async function unduh() {
       </div>
     </AppCard>
 
+    <AppCard v-if="tahun?.cap_warning" class="cap-warning" role="status">
+      <p class="cap-warning-title">Omzet gabungan mendekati batas tahun berjalan</p>
+      <p>
+        Omzet gabungan tercatat {{ rupiah(tahun.ytd_combined_gross_idr) }} atau
+        {{ persenGabungan }}% dari batas {{ rupiah(tahun.limit_idr) }}. Peringatan ini tidak
+        mengubah status kelayakan atau angka pajak.
+      </p>
+    </AppCard>
+
+    <AppCard v-if="lalu?.status === 'unverifiable'" class="cap-warning" role="status">
+      <p class="cap-warning-title">Data omzet tahun lalu belum lengkap</p>
+      <p>
+        Batas kelayakan skema PPh final 0,5% belum dapat diperiksa karena omzet tahun lalu belum
+        diisi. Lengkapi profil tahun pajak untuk memastikan skema yang berlaku.
+      </p>
+      <div class="unverifiable-act">
+        <AppButton to="/profil" variant="outline" size="sm" icon="profil">
+          Lengkapi data profil
+        </AppButton>
+      </div>
+    </AppCard>
+
     <section class="stats" aria-label="Ringkasan">
       <div class="stat-grid kp-stagger">
         <StatCard
@@ -230,15 +299,18 @@ async function unduh() {
           label="Kelayakan skema (omzet lalu)"
           :value="statusSkema"
           :caption="
-            lalu
+            alasanSkema ||
+            (lalu
               ? `Omzet gabungan: ${rupiah(lalu.combined_prior_year_gross_idr)}`
-              : 'Menunggu dasbor'
+              : 'Menunggu dasbor')
           "
           icon="helpCircle"
-          :tone="lalu?.status === 'scheme_ineligible' ? 'warn' : 'default'"
+          :tone="skemaTidakDihitung ? 'warn' : 'default'"
         />
       </div>
     </section>
+
+    <PanduanPanel v-if="pajak.dashboard" />
 
     <section v-if="pajak.dashboard" aria-labelledby="h-bulan">
       <div class="sec-head">
@@ -252,17 +324,23 @@ async function unduh() {
           <li v-for="bulan in pajak.dashboard.monthly_summaries" :key="bulan.month" class="mix-row">
             <span>{{ bulanTahun(bulan.month + "-01") }}</span>
             <span class="figure">omzet {{ rupiahPlain(bulan.usaha_omzet_idr) }}</span>
-            <span class="figure">pajak {{ rupiahPlain(bulan.tax_0_5_pct_idr) }}</span>
-            <span class="figure">kurang bayar {{ rupiahPlain(bulan.sisa_bayar_idr) }}</span>
-            <AppPill
-              size="sm"
-              :label="OVER_LABEL[bulan.overwithheld_status] ?? bulan.overwithheld_status"
-              :tone="bulan.overwithheld_status === 'nihil' ? 'neutral' : 'ask'"
-            />
+            <template v-if="skemaTidakDihitung">
+              <span class="figure">Tidak dihitung di sini</span>
+              <span class="muted">{{ alasanSkema }}</span>
+            </template>
+            <template v-else>
+              <span class="figure">pajak {{ rupiahPlain(bulan.tax_0_5_pct_idr) }}</span>
+              <span class="figure">kurang bayar {{ rupiahPlain(bulan.sisa_bayar_idr) }}</span>
+              <AppPill
+                size="sm"
+                :label="OVER_LABEL[bulan.overwithheld_status] ?? bulan.overwithheld_status"
+                :tone="bulan.overwithheld_status === 'nihil' ? 'neutral' : 'ask'"
+              />
+            </template>
           </li>
         </ul>
       </AppCard>
-      <p v-if="CAPABILITIES.workpaperExport && pajak.recap" class="sub">
+      <p v-if="CAPABILITIES.workpaperExport && pajak.recap && !skemaTidakDihitung" class="sub">
         Rekap usaha {{ rupiah(pajak.recap.total_usaha_omzet_idr) }}, kena
         {{ rupiah(pajak.recap.total_porsi_kena_idr) }}, pajak
         {{ rupiah(pajak.recap.total_tax_0_5_pct_idr) }}, sisa
@@ -416,6 +494,21 @@ async function unduh() {
   line-height: 1.4;
 }
 
+.cap-warning {
+  border-color: var(--cat-ask-line);
+  background: var(--cat-ask-bg);
+  color: var(--cat-ask-ink);
+}
+
+.cap-warning-title {
+  margin-bottom: var(--s-1);
+  font-weight: 650;
+}
+
+.unverifiable-act {
+  margin-top: var(--s-3);
+}
+
 .meter {
   margin-top: var(--s-5);
 }
@@ -446,6 +539,12 @@ async function unduh() {
 
 .mix-row:last-child {
   border-bottom: 0;
+}
+
+/* Month label column: fixed width so rows line up at 390px (R18-N4). */
+li.mix-row > span:first-child {
+  flex: 0 0 7.5rem;
+  white-space: nowrap;
 }
 
 .mix-row dd {

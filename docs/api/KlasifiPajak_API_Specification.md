@@ -467,9 +467,12 @@ Session cookie. `200`:
 {
   "user_id": "usr_01J9X1A2B3",
   "email": "user@example.com",
-  "username": "adityaputra"
+  "username": "adityaputra",
+  "ai_consent_at": null
 }
 ```
+
+`ai_consent_at` is UTC `YYYY-MM-DDTHH:mm:ssZ`, or null when no consent is stored. The browser reads this field. See §5.34.
 
 `401` means there is no usable session. The browser calls this on load. There is no refresh endpoint.
 
@@ -935,3 +938,31 @@ Bound to `127.0.0.1` and `APP_ENV=test` only. Any other environment or interface
 ### 5.32 `POST /test-support/password-reset-token`
 
 Same bind, fail-closed startup, and `404` rule as 5.31. Body: `email`. `200` returns `reset_token` and `expires_at_utc` without sending mail. The token is stored as SHA-256 and is single-use through 5.5.
+
+### 5.34 `GET /ai-consent` and `PUT /ai-consent`
+
+Session cookie. The frontend reads `ai_consent_at` from `GET /auth/me` (§5.3.1). `GET /ai-consent` exists for non-browser clients. The browser does not call `GET /ai-consent` to decide whether the checkbox is ticked.
+
+`GET /ai-consent` returns the stored choice. `200`:
+
+```json
+{ "consent": false, "ai_consent_at": null }
+```
+
+`consent` is true when `ai_consent_at` is set and false when it is null. `ai_consent_at` is the same UTC timestamp `GET /auth/me` returns, or null.
+
+`PUT /ai-consent` body: `{ "consent": true }` or `{ "consent": false }`. The first `true` records `ai_consent_at` in UTC. A later `true` while a timestamp is already set leaves that timestamp unchanged. `false` clears it. `200` returns `{ "consent": <true or false>, "ai_consent_at": "<utc or null>" }`. `consent` is true only when the timestamp is set. The browser sends this `PUT` when the user ticks or clears the checkbox.
+
+OCR upload and the assistant return `403` `AI_CONSENT_REQUIRED` ("Persetujuan pemrosesan AI diperlukan sebelum fitur ini digunakan.") until `ai_consent_at` is set.
+
+The checkbox the user sees is this text, including the line breaks and the bullet character:
+
+```
+Saya menyetujui pengiriman data ke layanan AI di luar aplikasi, hanya untuk fitur yang saya pakai:
+• Klasifikasi: deskripsi transaksi, nominal, nama klien (hanya jika berbentuk badan usaha), status NIB, kode KBLI, dan kategori transaksi sebelumnya.
+• Baca struk (OCR): seluruh foto struk, termasuk apa pun yang tercetak di dalamnya. Metadata foto dihapus.
+• Asisten: pertanyaan yang saya ketik, serta tanggal, nominal dan kategori transaksi, data profil pajak (termasuk status pasangan dan angka peredaran), dan ringkasan bulanan. Deskripsi transaksi, nomor faktur dan nama klien tidak dikirim ke asisten.
+Saya dapat mencabut persetujuan kapan saja di Profil. Fitur AI tidak dapat dipakai tanpa persetujuan ini.
+```
+
+The assistant lines match the allowlist. A transaction row sent to the assistant is `id`, `tx_date`, `amount_idr`, `category`, `requires_clarification`, `source`, and `citation`. The profile omits `name` and `business_description` and still includes spouse status and the prior-year and spouse amount fields. The sentence has to change if that allowlist changes.

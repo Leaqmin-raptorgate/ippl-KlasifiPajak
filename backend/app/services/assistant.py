@@ -151,6 +151,14 @@ def get_model_client() -> OpenAICompatibleClient:
     )
 
 
+def consent_out(stamp: datetime | None) -> dict:
+    """The one wire shape for a consent timestamp (FR-27)."""
+    return {
+        "consent": stamp is not None,
+        "ai_consent_at": iso_utc(stamp) if stamp is not None else None,
+    }
+
+
 def set_ai_consent(db: Session, user: User, consent: bool) -> dict:
     """Record or withdraw AI processing consent and commit (FR-27)."""
     if consent:
@@ -159,11 +167,7 @@ def set_ai_consent(db: Session, user: User, consent: bool) -> dict:
     else:
         user.ai_consent_at = None
     db.commit()
-    stamp = user.ai_consent_at
-    return {
-        "consent": stamp is not None,
-        "ai_consent_at": iso_utc(stamp) if stamp is not None else None,
-    }
+    return consent_out(user.ai_consent_at)
 
 
 def answer(db: Session, user: User, question: str) -> dict:
