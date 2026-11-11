@@ -329,7 +329,9 @@ def test_fr_pay07_override_route_is_not_mounted_outside_test(environment):
     import sys
 
     env = os.environ.copy()
-    env.update(APP_ENV=environment, JWT_SECRET="x" * 40)
+    backend = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # pytest finds ``app`` through pyproject; a child process needs the path itself.
+    env.update(APP_ENV=environment, JWT_SECRET="x" * 40, PYTHONPATH=backend)
     code = (
         "from app.main import app; "
         "assert '/api/v1/test-support/subscription-override' "
