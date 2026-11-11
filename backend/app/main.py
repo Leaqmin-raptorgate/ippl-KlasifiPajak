@@ -20,6 +20,7 @@ from app.api.routes_recap import router as recap_router
 from app.api.routes_receipts import router as receipts_router
 from app.api.routes_test_support import refuse_non_loopback_test_bind
 from app.api.routes_test_support import router as test_support_router
+from app.api.upload_limit import UploadSizeLimitMiddleware
 from app.config.settings import Settings
 from app.db import init_db
 
@@ -43,6 +44,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Added first, so it sits inside CORS and a 413 still carries the CORS headers.
+app.add_middleware(UploadSizeLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.cors_origins),

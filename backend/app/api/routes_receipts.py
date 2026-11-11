@@ -7,7 +7,7 @@ The router is mounted at ``/api/v1`` by the application entrypoint.
 from datetime import date
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
 from sqlalchemy.orm import Session
@@ -73,6 +73,7 @@ def get_receipt_image(
 @router.post("/transactions/ocr-confirm", status_code=201)
 def ocr_confirm(
     payload: OcrConfirmIn,
+    background: BackgroundTasks,
     context: AuthContext = Depends(current_session),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -91,4 +92,5 @@ def ocr_confirm(
         withheld_tax_amount_idr=payload.withheld_tax_amount_idr,
         source_channel=payload.source_channel,
         ruleset=ruleset,
+        background=background,
     )

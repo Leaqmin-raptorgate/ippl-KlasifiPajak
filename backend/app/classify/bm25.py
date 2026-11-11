@@ -45,8 +45,6 @@ def _load_docs() -> list[dict[str, str]]:
         if not all(isinstance(value, str) and value for value in (doc_id, text, citation)):
             continue
         docs.append({"id": doc_id, "text": text, "citation": citation})
-        if len(docs) == _MAX_HITS:
-            break
     return docs
 
 

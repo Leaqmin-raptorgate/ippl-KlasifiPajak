@@ -32,7 +32,7 @@ from app.schemas.transaction import (
 from app.security import iso_utc, new_id, now_utc
 from app.services.config import get_config
 from app.services.profile import find_profile
-from app.services.receipts import delete_receipt_for_transaction
+from app.services.receipts import delete_receipt_for_transaction, remove_files
 from app.services.snapshot import DISCLAIMER
 from app.services.snapshots_store import (
     get_berlaku,
@@ -556,8 +556,7 @@ def delete_transaction(db: Session, user: User, transaction_id: str, ruleset: Ru
     profile = _require_profile(db, user, ruleset.tax_year)
     lock_profile(db, profile)
     row = get_transaction_for_update(db, user, transaction_id)
-    if row.image_id:
-        delete_receipt_for_transaction(db, row)
+    receipt_key = delete_receipt_for_transaction(db, row) if row.image_id else None
 
     for event in db.scalars(
         select(ClassificationEvent).where(ClassificationEvent.transaction_id == row.id)
@@ -567,6 +566,8 @@ def delete_transaction(db: Session, user: User, transaction_id: str, ruleset: Ru
     db.flush()
     _stale_and_rebuild(db, profile, ruleset)
     db.commit()
+    # Unlink only after the database outcome is known (FR-09).
+    remove_files([receipt_key])
     return {"deleted": True, "id": transaction_id}
 
 
