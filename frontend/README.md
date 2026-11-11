@@ -11,10 +11,23 @@ npm run build      # typecheck, then bundle to dist/
 npm run typecheck  # vue-tsc, strict
 ```
 
-When running via Docker Compose (`docker compose up frontend`), dependencies
-are cached in the `frontend_node_modules` volume. If `package-lock.json` changes,
-run `docker compose down -v` or `docker compose run --rm frontend npm ci` to
-refresh the volume.
+## Running with Docker Compose
+
+`docker compose up frontend` serves Vite on `http://127.0.0.1:5173` and proxies
+`/api` to the `api` service (`API_PROXY_TARGET`, default
+`http://127.0.0.1:8000` outside Compose).
+
+- **Before the first run**, create the mount point as yourself:
+  `mkdir -p frontend/node_modules`. If Docker creates it, it is owned by root
+  and a later host `npm ci` fails with EACCES. To recover:
+  `docker run --rm -v "$PWD/frontend:/x" alpine rm -rf /x/node_modules`.
+- **After `package-lock.json` changes**, refresh the `frontend_node_modules`
+  volume with `docker compose run --rm frontend npm ci`. Do not use
+  `docker compose down -v` for this: it also deletes the MySQL data volume.
+- The container runs as uid 1000 (`node`) on top of the `./frontend` bind
+  mount. On hosts where your user is not uid 1000 (rootless Docker, Podman),
+  Vite may be unable to write to the mount.
+- Use one workflow per checkout: Compose or host `npm`, not both.
 
 ## What it is
 

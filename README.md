@@ -61,9 +61,8 @@ docker compose up api                 # pulls mysql + migrate via depends_on
 docker compose up frontend            # vite dev server on http://127.0.0.1:5173
 ```
 
-If `frontend/package-lock.json` changes, refresh the `frontend_node_modules`
-volume with `docker compose down -v` or
-`docker compose run --rm frontend npm ci`.
+First-time setup, refreshing `node_modules` after a lockfile change and host
+permission caveats are in [frontend/README.md](frontend/README.md#running-with-docker-compose).
 
 Against a virtualenv (MySQL already migrated):
 
