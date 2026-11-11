@@ -18,7 +18,10 @@ services:
       retries: 20
 
   test:
-    build: .
+    build:
+      context: .
+      args:
+        INSTALL_DEV: "true"
     environment:
       APP_ENV: test
       # pytest create_all needs DDL on the test schema (MYSQL_USER grants).
