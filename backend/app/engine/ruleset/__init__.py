@@ -15,6 +15,40 @@ account, so the spouse's turnover is already in it. `unknown` is false, the
 result may be inexact, and that choice is not signed off. When a profile
 save includes `spouse_tax_status`, the stored flag is true only for
 `separate`. Omitting the status stores the flag that was sent.
+
+Income has two separate questions: whether it is inside the 0.5% base, and
+whether it counts in the Rp4.8bn gross-turnover test. One stored category
+cannot answer both. The four stored categories stay as they are. Ids are
+not renamed. Deposit interest, dividends and lottery prizes are final-taxed
+and are stored as ``already_final`` under ``already_final.deposit``,
+``already_final.bank``, ``already_final.dividend`` and ``already_final.prize``,
+so they count in the Rp4.8bn test. Whether Pasal 58(1)(a) takes them out of
+that test is an open decision (see the open-decision entry), not settled here.
+
+Today's matrix, pinned by test:
+
+- Goods or services sale: in the 0.5% base, in the Rp4.8bn test, ``usaha``.
+- Freelance service on the Pasal 56(4) list: not in the 0.5% base, in the
+  test, ``pekerjaan_bebas``.
+- Rent of land or a building: not in the 0.5% base, in the test,
+  ``already_final``.
+- Business income earned abroad and taxed abroad: not in the 0.5% base, in
+  the test. The user enters it as another category. There is no extra rule.
+- Deposit or savings interest: not in the 0.5% base, in the test. Whether it
+  is out of the Rp4.8bn test under Pasal 58(1)(a) is open and not signed off.
+  Stored as ``already_final`` (``already_final.deposit``, ``already_final.bank``).
+- Dividend to a resident individual: same, id ``already_final.dividend``.
+- Lottery prize: the rule phrase is ``hadiah undian`` only. Same open
+  question. Stored as ``already_final``, id ``already_final.prize``. Do not
+  widen the phrase to ``hadiah``.
+- Other prizes (a competition or an award): not decided. The lottery rule
+  does not match, so the row stays clarification.
+- Gift, inheritance, loan received, or a transfer between the user's own
+  accounts: not in the 0.5% base, not in the test, ``non_object``.
+
+Wording for interest, dividends and lottery prizes: dikenai PPh final
+tersendiri. Do not call those rows outside the tax object. Do not say they
+are left out of the gross-turnover test until the open decision is signed off.
 """
 
 from app.engine.ruleset.load import load_ruleset

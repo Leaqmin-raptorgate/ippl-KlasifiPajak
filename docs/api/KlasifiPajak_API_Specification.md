@@ -81,6 +81,22 @@ current_combined = user transactions through as_of in those three categories
 
 `non_object` is in neither sum. Spouse profile totals are not also stored as rows in `transactions`.
 
+Tax treatment and the Rp 4.800.000.000 test are separate questions. This table records today's stored category. It does not add a category, rename an id, or change what the engine counts. The 0.5% base is `usaha` only. The test counts `usaha`, `pekerjaan_bebas` and `already_final`. A row still waiting on clarification is not an engine input.
+
+| Case                                                            | In the 0.5% base | In the Rp 4,8 miliar test                                           | Stored today                                                       |
+| --------------------------------------------------------------- | ---------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Goods or services sale                                          | yes              | yes                                                                 | `usaha`                                                            |
+| Freelance service on the Pasal 56(4) list                       | no               | yes                                                                 | `pekerjaan_bebas`                                                  |
+| Rent of land or a building                                      | no               | yes                                                                 | `already_final`                                                    |
+| Business income earned abroad and taxed abroad                  | no               | yes                                                                 | entered under another category; no separate rule                   |
+| Deposit or savings interest                                     | no               | no in the engine; the legal reading is an inference, not signed off | `non_object`, ids `already_final.deposit` and `already_final.bank` |
+| Dividend to a resident individual                               | no               | no in the engine; same inference, not signed off                    | `non_object`, id `already_final.dividend`                          |
+| Lottery prize, phrase `hadiah undian` only                      | no               | no in the engine; same inference, not signed off                    | `non_object`, id `already_final.prize`                             |
+| Other prize (competition or award, not a lottery)               | not decided      | not decided                                                         | clarification; the lottery phrase is not widened                   |
+| Gift, inheritance, loan received, transfer between own accounts | no               | no                                                                  | `non_object`                                                       |
+
+Interest, dividends and lottery prizes are final-taxed under their own rule. The user-facing sentence, including guidance item `separate_final_income` returned by `GET /guidance` for every profile, is: bunga deposito atau tabungan, dividen, dan hadiah undian dikenai PPh final tersendiri; tidak dihitung dalam peredaran bruto usaha. That sentence describes what this release records. It does not call those receipts outside the tax object. The engine excludes them from both sums because the stored category is `non_object`. Whether Pasal 58(1)(a) requires that exclusion is not signed off.
+
 Cap comparison is strict. Combined gross `>` `4_800_000_000` fails. Equality stays eligible.
 
 - `prior_combined > 4_800_000_000` sets `scheme_eligibility_status` to `scheme_ineligible` for the whole current year. Every month has `tax_0_5_pct_idr` `0` and annotation `Fasilitas PPh Final 0,5% tidak berlaku (peredaran bruto tahun lalu melebihi Rp 4,8 miliar).`

@@ -21,6 +21,12 @@ def test_fr48_article17_election_suppresses_final_tax_and_round_trips(client):
             dashboard["thresholds"]["eligibility_prior_year_cap_4_8m"]["status"]
             != "scheme_eligible"
         )
+        guidance = client.get("/api/v1/guidance")
+        assert guidance.status_code == 200
+        cited = [item for item in guidance.json()["items"] if item["id"] == "article17"]
+        assert cited
+        assert "17" in cited[0]["text"]
+        assert cited[0]["citation"]
 
 
 def test_fr48_unknown_answers_remain_unknown_after_profile_read(client):

@@ -45,6 +45,7 @@ from app.schemas.transaction import (
 from app.security import iso_utc
 from app.services import auth as auth_service
 from app.services import dashboard as dashboard_service
+from app.services import guidance as guidance_service
 from app.services import profile as profile_service
 from app.services import subscription as subscription_service
 from app.services import transactions as transaction_service
@@ -386,6 +387,16 @@ def dashboard(
     if tax_year != ruleset.tax_year:
         raise ApiError(422, "INVALID_DATE_RANGE", f"Tahun pajak harus {ruleset.tax_year}.")
     return dashboard_service.dashboard(db, context.user, tax_year, ruleset)
+
+
+@router.get("/guidance")
+def guidance(
+    context: AuthContext = Depends(current_session),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    """Return cited guidance applicable to the current profile."""
+    return guidance_service.guidance(db, context.user, active_ruleset(settings.ruleset_path))
 
 
 @router.get("/quotas")

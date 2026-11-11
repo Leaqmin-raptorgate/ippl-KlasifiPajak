@@ -30,6 +30,7 @@ from app.schemas.transaction import (
     TransactionUpdate,
 )
 from app.security import iso_utc, new_id, now_utc
+from app.services.config import get_config
 from app.services.profile import find_profile
 from app.services.snapshot import DISCLAIMER
 from app.services.snapshots_store import (
@@ -271,7 +272,7 @@ def create_transaction(
             )
 
     category, rule_id, confidence, requires_clarification, citation = classify(
-        f"{payload.description} {payload.client_name}"
+        payload.description, float(get_config(db, "T_rule"))
     )
     row = TransactionRow(
         id=new_id("tx_"),
@@ -374,10 +375,15 @@ def clarification_for(db: Session, user: User, transaction_id: str) -> Clarifica
             "CLARIFICATION_NOT_REQUIRED",
             "Baris ini sudah terklasifikasi, jadi tidak ada pertanyaan yang menunggu.",
         )
+    # Format the amount alone: a comma in a client name must stay as written.
+    amount = f"{row.amount_idr:,}".replace(",", ".")
     return ClarificationOut(
         transaction_id=row.id,
         provisional_category=row.category,
-        question=_CLARIFICATION_QUESTION,
+        question=(
+            f"Penghasilan{f' dari {row.client_name}' if row.client_name else ''} "
+            f"sebesar Rp {amount}: {_CLARIFICATION_QUESTION}"
+        ),
         options=tuple(
             ClarificationOption(value=value, label=label) for value, label in _CATEGORIES
         ),
@@ -646,12 +652,13 @@ def reclassify_transactions(
             )
         rows.append(row)
 
+    threshold = float(get_config(db, "T_rule"))
     results = []
     for row in rows:
         old_category = row.category
         old_requires_clarification = row.requires_clarification
         category, rule_id, confidence, requires_clarification, citation = classify(
-            f"{row.description} {row.client_name}"
+            row.description, threshold
         )
         old_was = old_category
         before = _usaha_total(db, user.id, tax_year=ruleset.tax_year, as_of=today_jakarta())
