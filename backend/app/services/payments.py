@@ -18,9 +18,17 @@ from app.payments.adapter import (
     parse_gross_amount,
 )
 from app.security import iso_utc, new_id, now_utc
+from app.services.subscription import PLANS
 
-PLAN_ID = "monthly_25k"
-PLAN_AMOUNT_IDR = 25_000
+# Single source of truth for price and duration: /subscriptions/status advertises PLANS.
+_PLAN = PLANS[0]
+PLAN_ID = _PLAN["plan_id"]
+PLAN_AMOUNT_IDR = _PLAN["price_idr"]
+PLAN_DURATION = timedelta(days=_PLAN["duration_days"])
+
+# Midtrans sends offset-less transaction_time in WIB (UTC+7). Not zoneinfo: the
+# slim image may lack tzdata.
+_WIB = timezone(timedelta(hours=7))
 
 
 def _is_production() -> bool:
@@ -43,6 +51,8 @@ def has_pending_order(db: Session, user: User) -> bool:
             .where(
                 SubscriptionOrder.user_id == user.id,
                 SubscriptionOrder.status == "pending",
+                # A row without a link is still being created, or the process died.
+                SubscriptionOrder.payment_url != "",
                 SubscriptionOrder.expires_at_utc > now_utc(),
             )
             .limit(1)
@@ -147,7 +157,7 @@ def _notice_transaction_time(payload: dict[str, Any], received_at: datetime) -> 
 
 
 def _parse_notice_time(raw: Any) -> datetime | None:
-    """Parse transaction_time. A Midtrans clock has no offset and is stored as given."""
+    """Parse transaction_time to naive UTC. A Midtrans clock has no offset and is WIB."""
     if not isinstance(raw, str):
         return None
     text = raw.strip()
@@ -162,9 +172,10 @@ def _parse_notice_time(raw: Any) -> datetime | None:
             return parsed.astimezone(timezone.utc).replace(tzinfo=None)
         return parsed
     try:
-        return datetime.strptime(text, "%Y-%m-%d %H:%M:%S")
+        local = datetime.strptime(text, "%Y-%m-%d %H:%M:%S").replace(tzinfo=_WIB)
     except ValueError:
         return None
+    return local.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 def list_orders(db: Session, user: User) -> list[dict]:
@@ -180,12 +191,22 @@ def list_orders(db: Session, user: User) -> list[dict]:
 def process_notification(db: Session, payload: dict[str, Any]) -> dict:
     """Verify, record and apply a gateway event atomically (FR-PAY-03)."""
     # Always use the real verifier, even when order creation uses a fake gateway.
-    verifier = MidtransAdapter(
-        server_key=os.environ.get("MIDTRANS_SERVER_KEY", ""),
-        is_production=_is_production(),
-    )
+    try:
+        verifier = MidtransAdapter(
+            server_key=os.environ.get("MIDTRANS_SERVER_KEY", ""),
+            is_production=_is_production(),
+        )
+    except ValueError:
+        # Key and MIDTRANS_IS_PRODUCTION disagree: a controlled error, so the gateway retries.
+        raise ApiError(
+            503,
+            "PAYMENT_GATEWAY_UNAVAILABLE",
+            "Layanan pembayaran belum tersedia. Coba lagi nanti.",
+        ) from None
     if not verifier.verify_notification(payload):
-        raise ApiError(401, "INVALID_WEBHOOK_SIGNATURE", "Tanda tangan pembayaran tidak sah.")
+        raise ApiError(
+            401, "INVALID_WEBHOOK_SIGNATURE", "Tanda tangan webhook pembayaran tidak sah."
+        )
     order_id = payload["order_id"]
     status = payload.get("transaction_status")
     fraud_status = payload.get("fraud_status", "")
@@ -219,7 +240,9 @@ def process_notification(db: Session, payload: dict[str, Any]) -> dict:
         raise ApiError(400, "INVALID_ORDER_AMOUNT", "Nominal pembayaran tidak sah.") from None
     if amount != order.amount_idr:
         raise ApiError(
-            400, "ORDER_AMOUNT_MISMATCH", "Nominal pembayaran tidak cocok dengan pesanan."
+            400,
+            "ORDER_AMOUNT_MISMATCH",
+            "Nominal pembayaran pada notifikasi tidak cocok dengan pesanan.",
         )
     # Reject before insert so a non-200 settlement cannot duplicate-match a later 200.
     status_code = str(payload.get("status_code", ""))
@@ -256,8 +279,9 @@ def process_notification(db: Session, payload: dict[str, Any]) -> dict:
             if owner is not None and order.user_id == owner.id:
                 start = max(instant, owner.valid_until_utc) if owner.valid_until_utc else instant
                 owner.paid_flag = True
-                owner.valid_until_utc = start + timedelta(days=30)
-        elif normalized in {"expire", "fail"} and order.status != "settlement":
+                owner.valid_until_utc = start + PLAN_DURATION
+        elif normalized in {"expire", "fail"} and order.status == "pending":
+            # Spec 5.30: expire and fail do not replace each other; the first stays.
             order.status = normalized
         # Pending and ignored events never reverse a terminal status.
     db.commit()

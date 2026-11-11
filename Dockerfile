@@ -7,8 +7,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONPATH=/app/backend
 
-COPY requirements.txt pyproject.toml .env.example ./
+ARG INSTALL_DEV=false
+
+COPY requirements.txt requirements-dev.txt pyproject.toml .env.example ./
 RUN pip install --no-cache-dir -r requirements.txt \
+    && if [ "$INSTALL_DEV" = "true" ]; then pip install --no-cache-dir -r requirements-dev.txt; fi \
     && useradd --create-home --uid 10001 --shell /usr/sbin/nologin appuser
 
 COPY backend ./backend

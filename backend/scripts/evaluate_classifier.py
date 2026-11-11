@@ -18,7 +18,7 @@ so a result can be tied to the exact data and rules that produced it.
 Usage::
 
     python backend/scripts/evaluate_classifier.py REVIEW.xlsx \
-        [--allow-partial] [--json OUT.json]
+        [--allow-partial] [--threshold T] [--json OUT.json]
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ import argparse
 import hashlib
 import json
 import sys
+import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -35,7 +36,13 @@ backend_dir = Path(__file__).resolve().parent.parent
 if str(backend_dir) not in sys.path:
     sys.path.insert(0, str(backend_dir))
 
+from openpyxl.utils.exceptions import InvalidFileException  # noqa: E402
+
 from app.classify.rules import RULES, classify  # noqa: E402
+from app.services.config import DEFAULTS  # noqa: E402
+
+#: The ruleset's rule threshold (``T_rule``), not a number chosen here.
+DEFAULT_THRESHOLD = float(DEFAULTS["T_rule"])
 
 CATEGORIES = ("usaha", "pekerjaan_bebas", "already_final", "non_object")
 CLARIFY = "clarify"
@@ -106,10 +113,11 @@ def _dataset_from_review(ws) -> Dataset:
         reviewer = _text(row[col["reviewer"]])
         note = _text(row[col["review_note"]])
 
-        if decision not in _DECISIONS:
-            errors.append(f"{rid}: unknown decision '{decision}'")
-        elif not reviewer or decision == "pending":
+        if not reviewer or decision in {"", "pending"}:
+            # No reviewer, or no decision yet: not reviewed, whatever else is in the row.
             dataset.unreviewed.append(rid)
+        elif decision not in _DECISIONS:
+            errors.append(f"{rid}: unknown decision '{decision}'")
         elif decision in _LABELLED:
             if label not in CATEGORIES:
                 errors.append(f"{rid}: {decision} needs final_label in {CATEGORIES}, got '{label}'")
@@ -126,9 +134,9 @@ def _dataset_from_review(ws) -> Dataset:
     return dataset
 
 
-def predict_rules(description: str) -> str:
+def predict_rules(description: str, threshold: float = DEFAULT_THRESHOLD) -> str:
     """Rule tier only: a category, or ``clarify`` when the rules do not decide."""
-    category, _, _, requires_clarification, _ = classify(description)
+    category, _, _, requires_clarification, _ = classify(description, threshold)
     return CLARIFY if requires_clarification else category
 
 
@@ -188,9 +196,13 @@ def score(examples: list[Example], predict: Callable[[str], str]) -> dict:
     }
 
 
-def _rules_version() -> str:
-    table = "\n".join(f"{r.id}|{r.category}|{r.phrase}|{r.confidence}" for r in RULES)
-    return hashlib.sha256(table.encode("utf-8")).hexdigest()
+def _rules_version(threshold: float = DEFAULT_THRESHOLD) -> str:
+    """Hash every field that can change an outcome, plus the threshold."""
+    table = "\n".join(
+        f"{r.id}|{r.category}|{r.phrase}|{r.confidence}|{r.decisive}|{r.weak}|{r.citation}"
+        for r in RULES
+    )
+    return hashlib.sha256(f"{table}\nthreshold={threshold}".encode("utf-8")).hexdigest()
 
 
 def _fmt(value: float | None) -> str:
@@ -202,7 +214,10 @@ def _print_report(report: dict) -> None:
     cla = report["result"]["should_clarify"]
     counts = report["counts"]
     print(f"Dataset: {report['dataset']['path']} (sha256 {report['dataset']['sha256'][:12]})")
-    print(f"Rules: {report['classifier']['rules_version'][:12]}  tier=rules_only")
+    print(
+        f"Rules: {report['classifier']['rules_version'][:12]}  tier=rules_only  "
+        f"threshold={report['classifier']['threshold']}"
+    )
     print(
         f"Rows: labelled={counts['labelled']} should_clarify={counts['should_clarify']} "
         f"excluded={counts['excluded']} unreviewed={counts['unreviewed']}"
@@ -246,6 +261,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("dataset", type=Path)
     parser.add_argument("--allow-partial", action="store_true")
     parser.add_argument("--json", type=Path, dest="json_out")
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=DEFAULT_THRESHOLD,
+        help="minimum rule confidence (default: the ruleset's T_rule)",
+    )
     args = parser.parse_args(sys.argv[1:] if argv is None else argv)
 
     path: Path = args.dataset
@@ -254,7 +275,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     try:
         dataset = load_review_workbook(path)
-    except (DatasetError, KeyError, OSError) as exc:
+    except (DatasetError, KeyError, OSError, zipfile.BadZipFile, InvalidFileException) as exc:
         print(f"{_REQUIRED} {exc}", file=sys.stderr)
         return 2
     if dataset.unreviewed and not args.allow_partial:
@@ -265,12 +286,13 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    result = score(dataset.examples, predict_rules)
+    result = score(dataset.examples, lambda text: predict_rules(text, args.threshold))
     report = {
         "dataset": {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()},
         "classifier": {
             "tier": "rules_only",
-            "rules_version": _rules_version(),
+            "rules_version": _rules_version(args.threshold),
+            "threshold": args.threshold,
             "model_called": False,
         },
         "counts": {

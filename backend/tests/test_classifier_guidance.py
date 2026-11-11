@@ -54,7 +54,6 @@ def test_fr11_ongkos_does_not_trigger_kos_rule():
         ("Proyek renovasi dapur, bukti potong PPh final", "already_final"),
         ("Galian pondasi, sudah final di bukti potong", "already_final"),
         ("Sewa lahan parkir ke tetangga", "already_final"),
-        ("Pembatalan order, uang dikembalikan penjual", "non_object"),
         ("Setor tunai dari dompet pribadi", "non_object"),
         ("Pindah saldo antar akun", "non_object"),
         ("Top up e-wallet", "non_object"),
@@ -257,9 +256,10 @@ def test_tc_cap_warning_exact_integer_boundary(client, amount, warning):
 @pytest.mark.parametrize(
     "description", ["bunga deposito", "bunga bank", "dividen", "hadiah undian"]
 )
-def test_fr10_non_business_excluded_from_cap(description):
-    """FR-10 / FR-20: non-business receipts do not count as turnover."""
-    assert classify(description)[0] == "non_object"
+def test_final_taxed_passive_income_is_already_final(description):
+    """Interest, dividends and lottery prizes stay ``already_final`` until Pasal 58(1)(a)
+    is signed off; they are never the 0.5% usaha base."""
+    assert classify(description)[0] == "already_final"
 
 
 def test_fr10_business_rent_remains_final():
@@ -276,10 +276,10 @@ _CAP_PROBE = 4_800_000_001
         ("jasa penerjemahan", "pekerjaan_bebas", "pekerjaan_bebas.translation", False, True),
         ("sewa tanah", "already_final", "already_final.rent", False, True),
         ("sewa bangunan", "already_final", "already_final.rent_building", False, True),
-        ("bunga deposito", "non_object", "already_final.deposit", False, False),
-        ("bunga bank", "non_object", "already_final.bank", False, False),
-        ("dividen", "non_object", "already_final.dividend", False, False),
-        ("hadiah undian", "non_object", "already_final.prize", False, False),
+        ("bunga deposito", "already_final", "already_final.deposit", False, True),
+        ("bunga bank", "already_final", "already_final.bank", False, True),
+        ("dividen", "already_final", "already_final.dividend", False, True),
+        ("hadiah undian", "already_final", "already_final.prize", False, True),
         ("hadiah lomba", None, "", False, False),
         ("pemberian orang tua", "non_object", "non_object.parents", False, False),
     ],
@@ -287,7 +287,7 @@ _CAP_PROBE = 4_800_000_001
 def test_income_matrix_pins_today_category_base_and_cap(
     description, category, rule_id, in_base, in_cap, ruleset
 ):
-    """Pin today's category, the 0.5% base, and the Rp4.8bn test. No rule change.
+    """Pin today's category, the 0.5% base, and the Rp4.8bn test.
 
     ``hadiah lomba`` is a competition prize, not a lottery. It stays
     clarification and is not passed to the engine. ``hadiah undian`` is the
@@ -327,3 +327,100 @@ def test_income_matrix_pins_today_category_base_and_cap(
     assert (snapshot.ytd_usaha_omzet == _CAP_PROBE) is in_base
     assert (snapshot.final_tax > 0) is in_base
     assert snapshot.current_year_crossed_cap is in_cap
+
+
+@pytest.mark.parametrize(
+    "description",
+    [
+        "Pembayaran les privat dari orang tua murid",
+        "Jasa konsultasi dari pemberi kerja lama",
+        "Penjualan pulsa dan top up e-wallet pelanggan",
+        "Jual kaos, refund 1 pcs",
+        "Sewa ruko dan pembatalan",
+        "Dividen dan gaji bulan ini",
+        "Sewa tanah dan gaji",
+        # ``penjual`` is an ordinary sale word beside a refund phrase.
+        "Pembatalan order, uang dikembalikan penjual",
+    ],
+)
+def test_decisive_match_does_not_override_a_different_category(description):
+    """A decisive phrase next to a phrase for another category asks instead of picking."""
+    category, _, _, needs_clarification, _ = classify(description)
+    assert needs_clarification is True
+    assert category == "usaha"
+
+
+@pytest.mark.parametrize(
+    "description",
+    ["Jual sepeda bekas, bukan usaha", "Penjualan, sudah final", "Honor narasumber, PPh final"],
+)
+def test_explicit_statement_still_settles_the_category(description):
+    """``bukan usaha`` and a final-tax marker name the answer, so they are not second-guessed."""
+    assert classify(description)[3] is False
+
+
+@pytest.mark.parametrize(
+    "description", ["dijual online", "menjual kue", "Penjual sayur", "Dijual lewat Shopee"]
+)
+def test_inflected_roots_match_usaha(description):
+    assert classify(description)[0] == "usaha"
+    assert classify(description)[3] is False
+
+
+@pytest.mark.parametrize("description", ["terjualah", "tokoferol", "dijualah"])
+def test_unrelated_words_around_a_root_do_not_match(description):
+    assert classify(description)[3] is True
+
+
+def _clarification_question(client, **overrides):
+    _auth(client)
+    assert _profile(client).status_code == 200
+    created = _tx(client, description="zzz tidak dikenal", **overrides)
+    assert created.status_code == 201, created.text
+    response = client.get(f"/api/v1/transactions/{created.json()['id']}/clarification")
+    assert response.status_code == 200, response.text
+    return response.json()["question"]
+
+
+def test_clarification_question_leaves_a_comma_in_the_client_name_alone(client):
+    question = _clarification_question(
+        client, client_name="PT Maju, Tbk", amount_idr=12_500_000, invoice_no="INV-C-1"
+    )
+    assert question.startswith("Penghasilan dari PT Maju, Tbk sebesar Rp 12.500.000: ")
+
+
+def test_clarification_question_omits_the_client_clause_when_it_is_empty(client):
+    _auth(client)
+    assert _profile(client).status_code == 200
+    created = _tx(client, description="zzz tidak dikenal", invoice_no="INV-C-2")
+    assert created.status_code == 201, created.text
+    with SessionLocal() as db:
+        from app.models import Transaction as TransactionRow
+
+        row = db.get(TransactionRow, created.json()["id"])
+        row.client_name = ""
+        db.commit()
+    response = client.get(f"/api/v1/transactions/{created.json()['id']}/clarification")
+    assert response.json()["question"].startswith("Penghasilan sebesar Rp 12.500.000: ")
+
+
+def test_every_guidance_condition_can_be_produced():
+    """A condition no profile can produce is dead guidance that nobody would ever see."""
+    import json
+    from pathlib import Path
+
+    path = Path(__file__).parent.parent / "app" / "guidance" / "pp20-2026-academic-1.json"
+    conditions = {item["condition"] for item in json.loads(path.read_text(encoding="utf-8"))}
+    producible = {
+        "always",
+        "unmarried",
+        "separate",
+        "joint",
+        "unknown",
+        "article17",
+        "article17_unknown",
+        "company",
+        "company_unknown",
+        "cap_warning",
+    }
+    assert conditions <= producible

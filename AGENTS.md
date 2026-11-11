@@ -55,7 +55,7 @@ Putra. It supersedes v1.0, v2.5 and v2.6. Its ids include `FR-01` through
 > `SPEC/KlasifiPajak/` (course SRS is never committed here). The HTTP contract
 > of record is API **v1.3.2**, mirrored at
 > `docs/api/KlasifiPajak_API_Specification.md`. The schema of record is ERD
-> **r3** (D-11 `month_snapshots.version`); Alembic head `76fcdbc4af30` matches
+> **r3** (D-11 `month_snapshots.version`); Alembic head `c45af872b930` implements
 > r3. Do not add `TODO(SRS-COMMIT)` markers; every id cited here has a source
 > of record. Disclaimer lock (D-07):
 > `DOKUMEN KERJA (WORKPAPER) — BUKAN SPT RESMI DAN BUKAN PRODUK DJP/CORETAX.`

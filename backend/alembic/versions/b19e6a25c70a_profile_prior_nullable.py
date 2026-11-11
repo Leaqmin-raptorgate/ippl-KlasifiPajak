@@ -60,6 +60,9 @@ def downgrade() -> None:
     op.drop_column("users", "ai_consent_at")
     op.drop_column("profiles", "spouse_tax_status")
     op.drop_column("profiles", "snapshot_checked_through")
+    # Lossy by necessity: NOT NULL cannot be restored with NULLs present, so an
+    # unanswered (NULL) prior-year amount becomes 0 (reported nil). After a
+    # downgrade and re-upgrade those taxpayers read as eligible, not unverifiable.
     for field in _FIELDS:
         op.execute(sa.text(f"UPDATE profiles SET {field} = 0 WHERE {field} IS NULL"))
         op.alter_column("profiles", field, existing_type=sa.BigInteger(), nullable=False)
