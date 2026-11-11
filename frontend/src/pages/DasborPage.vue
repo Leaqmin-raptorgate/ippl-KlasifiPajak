@@ -36,6 +36,24 @@ const rasioBebas = computed(() => {
   if (!band || band.limit_idr === 0) return 0;
   return band.ytd_usaha_omzet_idr / band.limit_idr;
 });
+/** Real share of the Rp4,8 M cap, not the warning threshold (`cap_warning_percent`). */
+const persenGabungan = computed(() => {
+  const now = tahun.value;
+  if (!now || now.limit_idr === 0) return 0;
+  return Math.round((now.ytd_combined_gross_idr * 100) / now.limit_idr);
+});
+/**
+ * The API sends a remaining free band of 0 when the prior-year check does not
+ * pass. That 0 is "not computed", so the hero shows a dash and the reason.
+ */
+const sisaTidakDihitung = computed(
+  () => lalu.value?.status === "unverifiable" || lalu.value?.status === "scheme_ineligible",
+);
+const alasanSisa = computed(() =>
+  lalu.value?.status === "unverifiable"
+    ? "Isi peredaran bruto tahun lalu di Profil untuk menghitung sisa."
+    : "Skema PPh final 0,5% tidak berlaku, jadi tidak ada sisa pita bebas.",
+);
 const sudahLewati = computed(() =>
   pita.value
     ? pita.value.remaining_free_band_idr === 0 && pita.value.ytd_usaha_omzet_idr > 0
@@ -165,7 +183,13 @@ async function unduh() {
             </AppButton>
           </div>
           <p v-if="pdfPesan" class="basis" role="alert">{{ pdfPesan }}</p>
-          <p class="big figure">{{ pita ? rupiah(pita.remaining_free_band_idr) : "—" }}</p>
+          <p class="big figure">
+            {{ pita && !sisaTidakDihitung ? rupiah(pita.remaining_free_band_idr) : "—" }}
+          </p>
+          <p v-if="pita && sisaTidakDihitung" class="basis sisa-alasan">
+            {{ alasanSisa }}
+            <RouterLink v-if="lalu?.status === 'unverifiable'" to="/profil">Buka Profil</RouterLink>
+          </p>
           <p class="basis">
             dari {{ pita ? rupiah(pita.limit_idr) : "—" }} batas usaha
             <template v-if="pita?.split_month">
@@ -232,8 +256,8 @@ async function unduh() {
       <p class="cap-warning-title">Omzet gabungan mendekati batas tahun berjalan</p>
       <p>
         Omzet gabungan tercatat {{ rupiah(tahun.ytd_combined_gross_idr) }} atau
-        {{ tahun.cap_warning_percent }}% dari batas {{ rupiah(tahun.limit_idr) }}. Peringatan ini
-        tidak mengubah status kelayakan atau angka pajak.
+        {{ persenGabungan }}% dari batas {{ rupiah(tahun.limit_idr) }}. Peringatan ini tidak
+        mengubah status kelayakan atau angka pajak.
       </p>
     </AppCard>
 
@@ -515,6 +539,12 @@ async function unduh() {
 
 .mix-row:last-child {
   border-bottom: 0;
+}
+
+/* Month label column: fixed width so rows line up at 390px (R18-N4). */
+li.mix-row > span:first-child {
+  flex: 0 0 7.5rem;
+  white-space: nowrap;
 }
 
 .mix-row dd {

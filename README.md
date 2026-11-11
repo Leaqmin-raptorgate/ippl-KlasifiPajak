@@ -58,11 +58,12 @@ Vite frontend. The API depends on migrate completing successfully. Schema is
 ```bash
 docker compose up mysql migrate api frontend
 # or simply:
-docker compose up frontend            # pulls mysql + migrate + api via depends_on
+docker compose up api                 # pulls mysql + migrate via depends_on
+docker compose up frontend            # vite dev server on http://127.0.0.1:5173 (proxies `/api` to the `api` service)
 ```
 
-- API: http://127.0.0.1:8000
-- Frontend: http://127.0.0.1:5173 (Vite proxies `/api` to the `api` service)
+First-time setup, refreshing `node_modules` after a lockfile change and host
+permission caveats are in [frontend/README.md](frontend/README.md#running-with-docker-compose).
 
 Against a virtualenv (MySQL already migrated):
 
@@ -112,14 +113,13 @@ loopback. See the [API specification](docs/api/KlasifiPajak_API_Specification.md
 
 Money crosses the wire as integer rupiah and is rejected as a string or float.
 
-### Not yet implemented (rubric / later)
+### Still open
 
-Do not treat these as done just because env placeholders or DB stubs exist:
+OCR receipt upload, the Midtrans adapter and webhook, the AI classifier and assistant, and the annual recap PDF are implemented. What is still open:
 
-- **OCR receipt upload** (FR-06 / FR-06a / FR-06b) — `receipt_images` table only
-- **Real Midtrans payment** (FR-PAY-01…05) — adapter / Snap not built
-- **AI classifier or assistant** (FR-12/13 or FR-27…30) — rules/keyword path only
-- **Annual recap PDF** (FR-31…33) — not built (`fpdf2` locked by D-11 when it lands)
+- **Midtrans Status API confirmation** — settlement trusts the signed notice (signature, amount, `status_code` `"200"`); the Status API is not called. Required before real payments.
+- **Live Midtrans keys** — use sandbox keys only (D-10).
+- **OD-13** — whether interest, dividends and lottery prizes count toward the Rp 4,8 miliar test is not signed off ([open decisions](docs/agile/open-decisions.md)).
 
 ## Available Scripts
 
@@ -176,7 +176,7 @@ Layering rules: [backend/README.md](backend/README.md).
 - [docs/STYLE.md](docs/STYLE.md) — style authority
 - [docs/agile/backlog.md](docs/agile/backlog.md) — sprint / M50 status
 - [docs/agile/roadmap.md](docs/agile/roadmap.md) — sequence, risks, open decisions
-- [docs/agile/open-decisions.md](docs/agile/open-decisions.md) — OD-* and D-01…D-11
+- [docs/agile/open-decisions.md](docs/agile/open-decisions.md) — OD-* and D-01…D-18
 - [docs/api/KlasifiPajak_API_Specification.md](docs/api/KlasifiPajak_API_Specification.md): API contract **v1.3.3**
 
 The course SRS stays outside this repository and is never pushed. The SRS of

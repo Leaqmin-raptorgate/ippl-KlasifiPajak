@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import logging
 import os
 import re
 import threading
@@ -32,6 +33,8 @@ from app.models import Transaction as TransactionRow
 from app.security import new_id, now_utc
 
 # Read inside functions. Tests replace this global; do not copy it at import.
+
+log = logging.getLogger(__name__)
 RECEIPT_STORAGE_ROOT = os.environ.get("RECEIPT_STORAGE_ROOT", "/var/lib/klasifipajak/receipts")
 
 _MAX_BYTES = 8 * 1024 * 1024
@@ -69,7 +72,6 @@ OCR_RESPONSE_SCHEMA: dict[str, Any] = {
     "required": ["amount_idr", "tx_date", "client_name", "invoice_no"],
 }
 
-_decode_lock = threading.Lock()
 _rate_lock = threading.Lock()
 _upload_hits: dict[str, list[float]] = {}
 
@@ -135,8 +137,9 @@ def upload_receipt(db: Session, user: User, raw: bytes, content_type: str | None
     mime = _agreed_mime(raw, content_type)
     if mime is None:
         raise ApiError(422, "IMAGE_TYPE_NOT_SUPPORTED", _TYPE_MESSAGE)
-    encoded = _reencode(raw, mime)
+    # Use up the hourly slot first, so a file that fails to decode still counts.
     _consume_upload_slot(user.id)
+    encoded = _reencode(raw, mime)
 
     now = now_utc()
     if _purge_expired_unconfirmed(db, user.id, now):
@@ -210,6 +213,7 @@ def confirm_receipt(
     withheld_tax_amount_idr: int,
     source_channel: str,
     ruleset: Ruleset,
+    background=None,
 ) -> dict:
     """Create a transaction from confirmed fields only (FR-06b).
 
@@ -218,8 +222,16 @@ def confirm_receipt(
     """
     _require_paid(user)
     image = _owned_image(db, user.id, image_id)
+    # Serialize concurrent confirms of one receipt: the second waits here, then
+    # sees the first one's transaction below.
+    image = db.scalar(
+        select(ReceiptImage)
+        .where(ReceiptImage.id == image.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     now = now_utc()
-    if image.expires_at_utc is not None and image.expires_at_utc < now:
+    if image is None or (image.expires_at_utc is not None and image.expires_at_utc < now):
         raise ApiError(404, "TRANSACTION_NOT_FOUND", _NOT_FOUND)
     taken = db.scalar(select(TransactionRow.id).where(TransactionRow.image_id == image.id))
     if taken is not None:
@@ -241,7 +253,9 @@ def confirm_receipt(
     try:
         # Link the receipt before the insert commits, so a second confirm
         # cannot leave a transaction that has no image_id.
-        created = create_transaction(db, user, payload, ruleset, image_id=image_pk)
+        created = create_transaction(
+            db, user, payload, ruleset, background=background, image_id=image_pk
+        )
     except IntegrityError as exc:
         db.rollback()
         # A concurrent confirm of this same image wins the unique index.
@@ -259,19 +273,19 @@ def confirm_receipt(
     return {"image_id": image.id, "transaction": created.model_dump(mode="json")}
 
 
-def delete_receipt_for_transaction(db: Session, row: TransactionRow) -> None:
-    """Delete receipt bytes for a transaction the caller is removing (FR-09).
+def delete_receipt_for_transaction(db: Session, row: TransactionRow) -> str | None:
+    """Detach a transaction's receipt and return the storage key to remove (FR-09).
 
+    The file is NOT deleted here: the caller commits the database work first
+    and then calls ``remove_files``, so a rolled-back request never loses bytes.
     The receipt row goes only when no other transaction still references it.
-    The transaction row itself is not deleted here. The foreign key is cleared
-    before the receipt row so the storage row can be removed first.
     """
     image_id = row.image_id
     if not image_id:
-        return
+        return None
     image = db.get(ReceiptImage, image_id)
     if image is None:
-        return
+        return None
     other = db.scalar(
         select(TransactionRow.id).where(
             TransactionRow.image_id == image_id,
@@ -279,12 +293,12 @@ def delete_receipt_for_transaction(db: Session, row: TransactionRow) -> None:
         )
     )
     if other is not None:
-        return
-    if not _delete_bytes(image.storage_key):
-        return
+        return None
+    key = image.storage_key
     row.image_id = None
     db.flush()
     db.delete(image)
+    return key
 
 
 def purge_expired_receipts(db: Session) -> int:
@@ -308,18 +322,61 @@ def purge_expired_receipts(db: Session) -> int:
         db.delete(row)
         removed += 1
     db.commit()
+    retry_pending_deletions()
     return removed
 
 
-def delete_user_files(db: Session, user_id: str) -> None:
-    """Delete every receipt file stored for this account (FR-06, FR-42).
+def delete_user_files(db: Session, user_id: str) -> list[str]:
+    """Return the storage keys of every receipt stored for this account (FR-06, FR-42).
 
-    Does not delete ``receipt_images`` rows and does not commit. Call it while
-    those rows still exist, before the account-deletion SQL removes them.
+    Deletes nothing and does not commit. Call it while the ``receipt_images``
+    rows still exist, commit the account deletion, then pass the keys to
+    ``remove_files``.
     """
     rows = db.scalars(select(ReceiptImage).where(ReceiptImage.user_id == user_id)).all()
-    for row in rows:
-        _delete_bytes(row.storage_key)
+    return [row.storage_key for row in rows]
+
+
+def _pending_file() -> Path:
+    return Path(RECEIPT_STORAGE_ROOT) / ".pending_deletions"
+
+
+def remove_files(storage_keys: list[str | None]) -> list[str]:
+    """Delete files after the database commit. Failures are logged and recorded.
+
+    A key that cannot be removed is appended to ``.pending_deletions`` under the
+    storage root; ``retry_pending_deletions`` (run by the purge job) tries again,
+    so a file cannot outlive its row unnoticed (FR-42). Returns the failed keys.
+    """
+    failed = [key for key in storage_keys if key and not _delete_bytes(key)]
+    if failed:
+        log.error("receipt files not deleted: %d (queued for retry)", len(failed))
+        try:
+            with _pending_file().open("a", encoding="utf-8") as handle:
+                handle.writelines(f"{key}\n" for key in failed)
+        except OSError:
+            log.error("could not record pending receipt deletions")
+    return failed
+
+
+def retry_pending_deletions() -> int:
+    """Retry keys recorded by ``remove_files``. Returns how many are still pending."""
+    path = _pending_file()
+    try:
+        keys = [
+            line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
+        ]
+    except OSError:
+        return 0
+    still = [key for key in dict.fromkeys(keys) if not _delete_bytes(key)]
+    try:
+        if still:
+            path.write_text("".join(f"{key}\n" for key in still), encoding="utf-8")
+        else:
+            path.unlink(missing_ok=True)
+    except OSError:
+        pass
+    return len(still)
 
 
 def _require_paid(user: User) -> None:
@@ -383,20 +440,15 @@ def _agreed_mime(raw: bytes, content_type: str | None) -> str | None:
 
 def _reencode(raw: bytes, mime: str) -> bytes:
     """Decode, drop metadata, and encode again in the same format (FR-06)."""
-    with _decode_lock:
-        previous = Image.MAX_IMAGE_PIXELS
-        Image.MAX_IMAGE_PIXELS = _MAX_IMAGE_PIXELS
-        try:
-            return _reencode_unlocked(raw, mime)
-        finally:
-            Image.MAX_IMAGE_PIXELS = previous
-
-
-def _reencode_unlocked(raw: bytes, mime: str) -> bytes:
     with warnings.catch_warnings():
         warnings.simplefilter("error", Image.DecompressionBombWarning)
         try:
             with Image.open(io.BytesIO(raw)) as image:
+                # Check the header size before decoding, instead of changing
+                # Pillow's process-wide MAX_IMAGE_PIXELS.
+                width, height = image.size
+                if width * height > _MAX_IMAGE_PIXELS:
+                    raise ValueError("image exceeds the pixel limit")
                 image.load()
                 clean = _without_metadata(image, mime)
                 buffer = io.BytesIO()

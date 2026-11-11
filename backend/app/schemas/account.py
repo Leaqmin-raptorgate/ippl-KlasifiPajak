@@ -59,6 +59,13 @@ class MeOut(BaseModel):
     ai_consent_at: str | None = None
 
 
+class AiConsentOut(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    consent: bool
+    ai_consent_at: str | None = None
+
+
 class RevokedOut(BaseModel):
     model_config = ConfigDict(frozen=True)
 

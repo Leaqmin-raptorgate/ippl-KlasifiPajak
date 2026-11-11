@@ -225,3 +225,24 @@ def test_fr48_assistant_context_passes_null_new_taxpayer(client, monkeypatch):
     assert response.status_code == 200, response.text
     content = fake.calls[0]["messages"][1]["content"]
     assert '"is_new_taxpayer_current_year":null' in content
+
+
+def test_profile_put_is_full_replace_for_onboarding_answers(client):
+    """PUT replaces the whole profile: an omitted onboarding answer resets to unanswered."""
+    _auth(client)
+    first = _profile(client, has_selected_article_17=True)
+    assert first.status_code == 200, first.text
+    assert first.json()["has_selected_article_17"] is True
+    version = first.json()["version"]
+
+    # Same body without the field, as an older client would send it.
+    second = _profile(client, version=version)
+    assert second.status_code == 200, second.text
+    body = second.json()
+    assert body["has_selected_article_17"] is None
+    assert any(
+        entry["field"] == "has_selected_article_17"
+        and entry["old_value"] == "True"
+        and entry["new_value"] == ""
+        for entry in body["audit_trail"]
+    )

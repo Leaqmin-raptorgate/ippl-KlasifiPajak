@@ -16,13 +16,13 @@ from app.services.snapshot import DISCLAIMER
 
 
 @lru_cache(maxsize=16)
-def _load_guidance_items(ruleset_id: str) -> list[dict]:
+def _load_guidance_items(ruleset_id: str) -> tuple[dict, ...]:
     path = Path(__file__).parent.parent / "guidance" / f"{ruleset_id}.json"
     if not path.is_file():
         raise ApiError(
             500, "RULESET_GUIDANCE_NOT_FOUND", f"Panduan ruleset {ruleset_id} tidak ditemukan."
         )
-    return json.loads(path.read_text(encoding="utf-8"))
+    return tuple(json.loads(path.read_text(encoding="utf-8")))
 
 
 def guidance(db: Session, user: User, ruleset: Ruleset) -> dict:

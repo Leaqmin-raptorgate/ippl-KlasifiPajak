@@ -8,7 +8,7 @@ import ProfilPage from "@/pages/ProfilPage.vue";
 import { useKuotaStore } from "@/stores/kuota";
 import { useProfilStore } from "@/stores/profil";
 
-async function mountProfile(existing = false, newTaxpayer: boolean | null = false) {
+async function mountProfile(existing = false, tweak: Partial<Profile> = {}) {
   const pinia = createPinia();
   setActivePinia(pinia);
   const profil = useProfilStore();
@@ -27,7 +27,7 @@ async function mountProfile(existing = false, newTaxpayer: boolean | null = fals
       marital_status: "unknown",
       spouse_tax_status: "unknown",
       spouse_aggregation_active: false,
-      is_new_taxpayer_current_year: newTaxpayer,
+      is_new_taxpayer_current_year: false,
       spouse_current_usaha_idr: 0,
       spouse_current_pekerjaan_bebas_idr: 0,
       spouse_current_already_final_idr: 0,
@@ -38,6 +38,7 @@ async function mountProfile(existing = false, newTaxpayer: boolean | null = fals
       prior_spouse_pekerjaan_bebas_idr: null,
       prior_spouse_already_final_idr: null,
       audit_trail: [],
+      ...tweak,
     } as unknown as Profile;
   }
   vi.spyOn(profil, "muat").mockResolvedValue(undefined);
@@ -134,7 +135,7 @@ describe("FR-48 spouse and prior-year answers", () => {
   });
 
   it("keeps a loaded unanswered new-taxpayer answer null on save", async () => {
-    const { wrapper, save } = await mountProfile(true, null);
+    const { wrapper, save } = await mountProfile(true, { is_new_taxpayer_current_year: null });
     await wrapper
       .findAll("button")
       .find((button) => button.text() === "Simpan")!
@@ -146,7 +147,7 @@ describe("FR-48 spouse and prior-year answers", () => {
   });
 
   it("sends true when the loaded new-taxpayer answer is yes", async () => {
-    const { wrapper, save } = await mountProfile(true, true);
+    const { wrapper, save } = await mountProfile(true, { is_new_taxpayer_current_year: true });
     await wrapper
       .findAll("button")
       .find((button) => button.text() === "Simpan")!
@@ -167,5 +168,29 @@ describe("FR-48 spouse and prior-year answers", () => {
     expect(save).toHaveBeenCalledOnce();
     const payload = save.mock.calls[0]![0] as unknown as Record<string, unknown>;
     expect(payload.is_new_taxpayer_current_year).toBeNull();
+  });
+
+  it("blocks Save until a spouse status is chosen when aggregation is on but status is unknown (R18-W2)", async () => {
+    const { wrapper, save } = await mountProfile(true, {
+      spouse_tax_status: "unknown",
+      spouse_aggregation_active: true,
+    });
+    const saveButton = () =>
+      wrapper.findAll("button").find((button) => button.text() === "Simpan")!;
+    expect(wrapper.text()).toContain("status perpajakan pasangan belum diketahui");
+    expect(saveButton().attributes("disabled")).toBeDefined();
+    await saveButton().trigger("click");
+    await flushPromises();
+    expect(save).not.toHaveBeenCalled();
+
+    await spouseSelect(wrapper)!.setValue("separate");
+    expect(saveButton().attributes("disabled")).toBeUndefined();
+    expect(wrapper.text()).not.toContain("status perpajakan pasangan belum diketahui");
+  });
+
+  it("does not lock Save for an unknown status without aggregation", async () => {
+    const { wrapper } = await mountProfile(true);
+    const saveButton = wrapper.findAll("button").find((button) => button.text() === "Simpan")!;
+    expect(saveButton.attributes("disabled")).toBeUndefined();
   });
 });

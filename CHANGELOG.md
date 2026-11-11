@@ -12,7 +12,24 @@ documents it was built against: the SRS, the API specification
 
 ## [Unreleased]
 
-Nothing yet.
+Contract: API v1.3.3.
+
+### Added
+
+- `docker compose up frontend` runs the Vite dev server on `127.0.0.1:5173`
+  and proxies `/api` to the `api` service. See
+  [frontend/README.md](frontend/README.md#running-with-docker-compose).
+- `API_PROXY_TARGET` sets the Vite dev proxy target. It defaults to
+  `http://127.0.0.1:8000` when unset or empty.
+
+### Documentation
+
+- Align the API specification, README, backend README, backlog, roadmap and
+  open decisions with the landed stack: the OCR, Midtrans, AI and recap
+  features exist, the recap and webhook contracts are fully described,
+  `PAYLOAD_TOO_LARGE`, `INVALID_ORDER_AMOUNT`, `PAYMENT_GATEWAY_UNAVAILABLE` and
+  `VALIDATION_ERROR` are documented, and OD-13 records the open Pasal 58(1)(a)
+  question.
 
 ## [0.5.0] - 2026-11-07
 

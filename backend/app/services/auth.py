@@ -597,10 +597,11 @@ def delete_account(db: Session, user: User, payload: DeleteAccountIn) -> None:
         db.delete(tx)
     db.flush()
 
+    receipt_keys: list[str] = []
     if _table_exists(db, "receipt_images"):
         from app.services.receipts import delete_user_files
 
-        delete_user_files(db, user_id)
+        receipt_keys = delete_user_files(db, user_id)
         db.execute(text("DELETE FROM receipt_images WHERE user_id = :uid"), {"uid": user_id})
 
     if _table_exists(db, "quota_counters"):
@@ -608,4 +609,8 @@ def delete_account(db: Session, user: User, payload: DeleteAccountIn) -> None:
 
     db.delete(user)
     db.commit()
+    if receipt_keys:
+        from app.services.receipts import remove_files
+
+        remove_files(receipt_keys)
     log.info("account deleted user_id=%s", user_id)

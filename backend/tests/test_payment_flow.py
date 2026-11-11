@@ -245,7 +245,8 @@ def test_fr_pay03_stores_payload_transaction_time(client, fake_gateway):
     with SessionLocal() as db:
         event = db.scalar(select(PaymentEvent).where(PaymentEvent.order_id == order["order_id"]))
         assert event is not None
-        assert event.transaction_time == datetime(2020, 1, 9, 18, 27, 19)
+        # Midtrans sends WIB (UTC+7) without an offset; 18:27:19 WIB is 11:27:19 UTC.
+        assert event.transaction_time == datetime(2020, 1, 9, 11, 27, 19)
         assert before <= event.received_at <= now_utc()
     user = _user(user_id)
     assert user.paid_flag is True
@@ -315,3 +316,51 @@ def test_fr_pay02_list_returns_payment_url_only_while_pending(client, fake_gatew
     items = client.get("/api/v1/subscriptions/orders").json()["items"]
     assert items[0]["status"] == "settlement"
     assert "payment_url" not in items[0]
+
+
+def _status_of(order_id):
+    with SessionLocal() as db:
+        return db.scalar(select(SubscriptionOrder.status).where(SubscriptionOrder.id == order_id))
+
+
+@pytest.mark.parametrize("first,second", [("expire", "deny"), ("deny", "expire")])
+def test_fr_pay05_expire_and_fail_do_not_replace_each_other(client, fake_gateway, first, second):
+    """Spec 5.30: the first of expire/fail stays; a later one does not overwrite it."""
+    _auth(client)
+    order = _order(client)
+    for status in (first, second):
+        response = client.post("/api/v1/webhooks/payment", json=_notice(order["order_id"], status))
+        assert response.status_code == 200, response.text
+    expected = "expire" if first == "expire" else "fail"
+    assert _status_of(order["order_id"]) == expected
+
+
+@pytest.mark.parametrize("first", ["expire", "deny"])
+def test_fr_pay05_settlement_still_wins_after_expire_or_fail(client, fake_gateway, first):
+    _auth(client)
+    order = _order(client)
+    client.post("/api/v1/webhooks/payment", json=_notice(order["order_id"], first))
+    response = client.post("/api/v1/webhooks/payment", json=_notice(order["order_id"]))
+    assert response.status_code == 200, response.text
+    assert _status_of(order["order_id"]) == "settlement"
+
+
+def test_fr_pay03_key_and_production_flag_mismatch_is_503_not_500(client, monkeypatch):
+    """A live-looking key with the sandbox flag must not crash the webhook."""
+    monkeypatch.setenv("MIDTRANS_SERVER_KEY", "Mid-server-live-looking")
+    monkeypatch.setenv("MIDTRANS_IS_PRODUCTION", "false")
+    response = client.post("/api/v1/webhooks/payment", json=_notice("any"))
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "PAYMENT_GATEWAY_UNAVAILABLE"
+
+
+def test_fr35_order_without_payment_url_is_not_pending(client, fake_gateway):
+    """An order with no link (gateway call in flight or crashed) does not show as pending."""
+    _auth(client)
+    order = _order(client)
+    assert client.get("/api/v1/subscriptions/status").json()["subscription_tier"] == "pending"
+    with SessionLocal() as db:
+        row = db.scalar(select(SubscriptionOrder).where(SubscriptionOrder.id == order["order_id"]))
+        row.payment_url = ""
+        db.commit()
+    assert client.get("/api/v1/subscriptions/status").json()["subscription_tier"] != "pending"
