@@ -8,6 +8,7 @@ answer is stored. This module does not import the tax engine.
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
 from collections import deque
@@ -174,7 +175,7 @@ def _prepare(transaction_id: str, user_id: str, version: int) -> dict[str, Any] 
             .order_by(ClassificationEvent.recorded_at.asc(), ClassificationEvent.id.asc())
         )
         prepared = {
-            "description": row.description,
+            "description": _scrub_own_identifiers(row.description, row.client_name, row.invoice_no),
             "client_name": row.client_name,
             "amount_idr": int(row.amount_idr),
             "ruleset_id": event.ruleset_id if event is not None else "",
@@ -225,6 +226,21 @@ def _quotes(query: str) -> list[dict[str, str]]:
             continue
         quotes.append({"id": doc_id, "text": text, "citation": citation})
     return quotes
+
+
+def _scrub_own_identifiers(
+    description: str, client_name: str | None, invoice_no: str | None
+) -> str:
+    """Replace the row's own client name and invoice number inside the free text.
+
+    The client name field is masked separately; this keeps the same name from
+    leaving through the description or the BM25 query (FR-43, NFR-16).
+    """
+    for value, token in ((client_name, "[KLIEN]"), (invoice_no, "[INVOICE]")):
+        text = (value or "").strip()
+        if len(text) >= 3:
+            description = re.sub(re.escape(text), token, description, flags=re.IGNORECASE)
+    return description
 
 
 def _ask(prepared: dict[str, Any]) -> Any:

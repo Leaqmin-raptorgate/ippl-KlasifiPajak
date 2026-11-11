@@ -6,10 +6,15 @@ rather than a guess.
 
 Matching, in order:
 
-1. The first matching ``decisive`` rule wins outright. These are signals that
-   settle the category whatever else the text says: a final-tax marker, an
-   own-money or refund flow, employment income, land or building rent, and the
-   professions Pasal 56(4) names explicitly (creator, affiliate, broker).
+1. A ``decisive`` rule settles the category when nothing else contradicts it:
+   a final-tax marker, an own-money or refund flow, employment income, land or
+   building rent, and the professions Pasal 56(4) names explicitly (creator,
+   affiliate, broker). If decisive matches point to more than one category, or
+   a non-weak ordinary match points to a different category (``Jual kaos,
+   refund 1 pcs``), the row is mixed and goes to clarification. Explicit
+   statements in the text itself (a final-tax marker, or ``bukan usaha``) settle
+   the category outright, and a Pasal 56(4) profession is not second-guessed by
+   an ordinary goods phrase.
 2. Otherwise the non-``weak`` matches are used (weak phrases, such as ``toko``
    or ``fee``, often name the client or a side cost rather than the income).
    If none, the weak matches are used.
@@ -70,10 +75,10 @@ RULES: tuple[Rule, ...] = (
     _d("non_object.parents", "non_object", "orang tua"),
     _d("non_object.crypto", "non_object", "kripto"),
     _d("non_object.btc", "non_object", "btc"),
-    _d("already_final.deposit", "non_object", "bunga deposito"),
-    _d("already_final.bank", "non_object", "bunga bank"),
-    _d("already_final.dividend", "non_object", "dividen"),
-    _d("already_final.prize", "non_object", "hadiah undian"),
+    _d("already_final.deposit", "already_final", "bunga deposito"),
+    _d("already_final.bank", "already_final", "bunga bank"),
+    _d("already_final.dividend", "already_final", "dividen"),
+    _d("already_final.prize", "already_final", "hadiah undian"),
     _d("non_object.salary", "non_object", "gaji"),
     _d("non_object.severance", "non_object", "pesangon"),
     _d("non_object.employer", "non_object", "pemberi kerja"),
@@ -147,10 +152,34 @@ RULES: tuple[Rule, ...] = (
 )
 
 
-_COMPILED_RULES = tuple(
-    (rule, re.compile(r"(?<!\w)" + re.escape(rule.phrase) + r"(?!\w)", re.IGNORECASE))
-    for rule in RULES
+#: Optional Indonesian verb or noun prefix and suffix around a rule's root, so
+#: ``menjual``, ``dijual`` and ``penjual`` match ``jual`` but ``terjualah`` and
+#: ``tokoferol`` do not. The phrase table is not changed.
+_AFFIX_PREFIX = r"(?:me(?:n|m|ng|ny)?|di|ter|pe(?:n|m|ng|ny)?|ber)?"
+_AFFIX_SUFFIX = r"(?:an|nya)?"
+
+#: Rules whose phrase states the answer itself, so a nearby ordinary phrase
+#: cannot contradict them.
+_EXPLICIT = frozenset(
+    {
+        "already_final.marker_pph",
+        "already_final.marker_tagged",
+        "already_final.marker_done",
+        "already_final.marker_withheld",
+        "already_final.marker_cut",
+        "non_object.not_business",
+    }
 )
+
+
+def _pattern(phrase: str) -> re.Pattern[str]:
+    return re.compile(
+        r"(?<!\w)" + _AFFIX_PREFIX + re.escape(phrase) + _AFFIX_SUFFIX + r"(?!\w)",
+        re.IGNORECASE,
+    )
+
+
+_COMPILED_RULES = tuple((rule, _pattern(rule.phrase)) for rule in RULES)
 
 _CLARIFY = ("usaha", "", 0.0, True, "")
 
@@ -167,11 +196,33 @@ def classify(text: str, threshold: float = 0.8) -> tuple[str, str, float, bool, 
     decisive = [rule for rule in matches if rule.decisive]
     if decisive:
         chosen = decisive[0]
+        if chosen.id not in _EXPLICIT:
+            if len({rule.category for rule in decisive}) > 1:
+                return _CLARIFY
+            # A Pasal 56(4) profession names the income whatever goods words sit
+            # beside it (``jual endorsement``); every other decisive phrase must
+            # not sit beside an ordinary phrase for a different category.
+            if chosen.category != "pekerjaan_bebas" and any(
+                rule.category != chosen.category
+                for rule in matches
+                if not rule.decisive and not rule.weak
+            ):
+                return _CLARIFY
     else:
         pool = [rule for rule in matches if not rule.weak] or matches
         if len({rule.category for rule in pool}) > 1:
             return _CLARIFY
         chosen = pool[0]
+    # Several rules of the chosen category can match once affixes are allowed
+    # (``penerjemah`` and ``penerjemahan``); report the most specific phrase.
+    chosen = max(
+        (
+            rule
+            for rule in matches
+            if rule.category == chosen.category and chosen.phrase in rule.phrase
+        ),
+        key=lambda rule: len(rule.phrase),
+    )
     if chosen.confidence < threshold:
         return _CLARIFY
     return chosen.category, chosen.id, chosen.confidence, False, chosen.citation

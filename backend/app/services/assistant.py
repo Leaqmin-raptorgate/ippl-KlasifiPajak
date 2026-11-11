@@ -369,7 +369,7 @@ def _bind_tools(db: Session, user_id: str) -> dict[str, Any]:
         profile_ids = select(Profile.id).where(Profile.user_id == user_id)
         rows = db.scalars(
             select(MonthSnapshot)
-            .where(MonthSnapshot.profile_id.in_(profile_ids))
+            .where(MonthSnapshot.profile_id.in_(profile_ids), MonthSnapshot.status == "berlaku")
             .order_by(MonthSnapshot.month_key.asc(), MonthSnapshot.version.desc())
             .limit(_SNAPSHOT_LIMIT)
         ).all()
@@ -384,8 +384,8 @@ def _bind_tools(db: Session, user_id: str) -> dict[str, Any]:
         profile_ids = select(Profile.id).where(Profile.user_id == user_id)
         rows = db.scalars(
             select(MonthSnapshot)
-            .where(MonthSnapshot.profile_id.in_(profile_ids))
-            .order_by(MonthSnapshot.month_key.asc())
+            .where(MonthSnapshot.profile_id.in_(profile_ids), MonthSnapshot.status == "berlaku")
+            .order_by(MonthSnapshot.month_key.asc(), MonthSnapshot.version.desc())
             .limit(_SNAPSHOT_LIMIT)
         ).all()
         return [
@@ -553,35 +553,37 @@ def _corpus_quotes(query: str) -> list[Any]:
     return []
 
 
+_MIN_LITERAL_LENGTH = 4
+
+
 def _stored_private_literals(db: Session, user_id: str) -> list[str]:
-    """Stored description, invoice number, client name, and profile name."""
-    found: list[str] = []
+    """Stored description, invoice number, client name, and profile name.
 
-    def add(value: object) -> None:
-        if not isinstance(value, str):
-            return
-        text = value.strip()
-        if len(text) < 3 or text in found:
-            return
-        found.append(text)
+    Only literals of at least four characters are returned, so a short word
+    such as ``web`` is not mistaken for private data.
+    """
+    found: set[str] = set()
+    columns = select(
+        Transaction.description, Transaction.invoice_no, Transaction.client_name
+    ).where(Transaction.user_id == user_id)
+    for values in db.execute(columns.distinct()):
+        found.update(_literal(value) for value in values)
+    for (name,) in db.execute(select(Profile.name).where(Profile.user_id == user_id).distinct()):
+        found.add(_literal(name))
+    found.discard("")
+    return sorted(found, key=len, reverse=True)
 
-    rows = db.scalars(select(Transaction).where(Transaction.user_id == user_id)).all()
-    for row in rows:
-        add(row.description)
-        add(row.invoice_no)
-        add(row.client_name)
-    profiles = db.scalars(select(Profile).where(Profile.user_id == user_id)).all()
-    for row in profiles:
-        add(row.name)
-    found.sort(key=len, reverse=True)
-    return found
+
+def _literal(value: object) -> str:
+    text = value.strip() if isinstance(value, str) else ""
+    return text if len(text) >= _MIN_LITERAL_LENGTH else ""
 
 
 def _scrub_literals(value: Any, literals: list[str]) -> Any:
-    """Remove stored private literals, including from the free-text question."""
+    """Remove stored private literals, whole tokens only, including from the question."""
     if isinstance(value, str):
         for literal in literals:
-            value = value.replace(literal, "[REDACTED]")
+            value = re.sub(r"(?<!\w)" + re.escape(literal) + r"(?!\w)", "[REDACTED]", value)
         return value
     if isinstance(value, dict):
         return {str(key): _scrub_literals(item, literals) for key, item in value.items()}

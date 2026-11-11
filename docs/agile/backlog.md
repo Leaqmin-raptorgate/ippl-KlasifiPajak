@@ -100,11 +100,11 @@ Held until D-10 placeholders are wired into an adapter. Contract is API
 **v1.3.2** §5.30 (HMAC over `order_id`, status, `amount_str`; monotonic status;
 30-day renewal) (to be rewritten for real Midtrans). Never use production keys.
 
-- [ ] `GatewayAdapter` plus `FakeGatewayAdapter`
-- [ ] Signature verification with `hmac.compare_digest`
-- [ ] Reject a tampered `gross_amount_idr`
-- [ ] Webhook idempotency, monotonic status, renewal arithmetic
-- [ ] Map Snap `redirect_url` → API `payment_url` (D-11)
+- [x] `GatewayAdapter` plus `FakeGatewayAdapter`
+- [x] Signature verification with `hmac.compare_digest`
+- [x] Reject a tampered `gross_amount` (`ORDER_AMOUNT_MISMATCH`)
+- [x] Webhook idempotency, monotonic status, renewal arithmetic
+- [x] Map Snap `redirect_url` → API `payment_url` (D-11)
 - [ ] TODO: Status API confirmation before production
 
 ## Sprint 1 — docs and stack
