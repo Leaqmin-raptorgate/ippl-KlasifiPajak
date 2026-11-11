@@ -11,7 +11,7 @@ Done on `main` (M50 PRs #1–#4 merged; tip `3d5ced0`):
 
 - Tax engine at `backend/app/engine/`, pure Python, no framework, no model.
 - Ruleset as data at `backend/app/engine/ruleset/pp20_2026.json`.
-- **SRS v2.7 / API v1.3.2 / ERD r3** are the artefacts of record (SRS + ERD
+- **SRS v2.7 / API v1.3.3 / ERD r3** are the artefacts of record (SRS + ERD
   outside the repo; API mirrored under `docs/api/`).
 - Bagian A aligned to the API contract (`/health`, `/ruleset`, `POST /snapshot`).
 - Authenticated Bagian B: register/login/logout/me, password reset, sessions,
@@ -24,20 +24,18 @@ Done on `main` (M50 PRs #1–#4 merged; tip `3d5ced0`):
 - CI: lint/format, frontend `vue-tsc` build, fail-closed pip-audit, gitleaks,
   engine coverage gate, docker test image.
 
-**Not started (rubric / D-08 — do not claim done):**
-
-- OCR receipt upload (FR-06*)
-- Real Midtrans payment (FR-PAY-*)
-- AI classifier or assistant (9router / D-09)
-- Annual recap PDF (`fpdf2` / D-11)
+**Rubric features (D-08):** OCR receipt upload (FR-06*), Midtrans orders and
+webhook (FR-PAY-*), the AI classifier and assistant (9router / D-09) and the
+annual recap PDF (`fpdf2` / D-11) are implemented. Still open: Midtrans Status
+API confirmation and live keys.
 
 ### Recorded deviations
 
 - Storage uses SQLAlchemy 2.0 ORM for v1 demo (D-07 / HB-19). Stored-procedure
   tier under `docs/sql_syntaxes/` remains a Should, not a Must.
 - Runtime schema comes from Alembic, not `Base.metadata.create_all`.
-- Classifier on the live path is still the keyword/rules table. Model fallback
-  is designed (D-09) and not built.
+- The classifier runs the keyword/rules table first and falls back to the
+  model (D-09) only when no rule is decisive.
 - Disclaimer string locked (D-07):
   `DOKUMEN KERJA (WORKPAPER) — BUKAN SPT RESMI DAN BUKAN PRODUK DJP/CORETAX.`
 
@@ -51,7 +49,7 @@ Done on `main` (M50 PRs #1–#4 merged; tip `3d5ced0`):
 ### Residual risk
 
 - Rubric four (OCR, Midtrans, AI, PDF) are the bulk of remaining effort.
-- Live Midtrans keys are a user task before demo freeze (Fri 28 Nov 2026
+- Live Midtrans keys are a user task before demo freeze (Fri 27 Nov 2026
   18:00 Asia/Makassar) per D-10.
 - Coverage gate measures **engine only** (NFR-14); whole-app coverage is
   informational.
@@ -67,8 +65,9 @@ Done on `main` (M50 PRs #1–#4 merged; tip `3d5ced0`):
 
 ## Why payments is sequenced carefully
 
-Payments is a lecturer requirement (D-08), so it is in scope. API v1.3.2 §5.30
-defines the current webhook contract, which must be rewritten for real Midtrans.
+Payments is a lecturer requirement (D-08), so it is in scope. API v1.3.3 §5.30
+defines the webhook contract, rewritten for real Midtrans. Status API
+confirmation is still open.
 D-10 allows building against placeholders first; live sandbox keys come before
 demo freeze. Never run against production keys.
 

@@ -11,7 +11,7 @@ does not exist yet.
 Requirement provenance: the SRS of record is **v2.7**, with `FR-01` to
 `FR-47`, `FR-23a`, `FR-PAY-01` to `FR-PAY-09`, `NFR-01` to `NFR-15` (and
 related), and `UC-01` to `UC-26`. It lives outside this repository under
-`SPEC/`, beside **ERD r3** and **API v1.3.2**. The API contract is mirrored at
+`SPEC/`, beside **ERD r3** and **API v1.3.3**. The API contract is mirrored at
 `docs/api/KlasifiPajak_API_Specification.md`.
 
 Ids such as `FR-17`, `FR-23a`, `UC-20`, `NFR-12` and `NFR-13` are defined in
@@ -85,25 +85,27 @@ Done in code: `backend/tests/test_golden.py`, `backend/app/engine/compute.py`,
 - [x] Versioned month snapshots (D-11 / ERD r3) + dashboard `as_of` = today WIB.
 - [ ] Still open: L3-B Bagian A columns (FR-31) and live KAP/KJS values.
 
-## Rubric features — not yet implemented
+## Rubric features
 
-These are **required for graded v1** (D-08) and must not be marked done:
+These are **required for graded v1** (D-08). Mark a box only when this branch implements it:
 
-- [ ] OCR receipt upload (FR-06, FR-06a, FR-06b) — DB stub / D-01 design only
-- [ ] Real Midtrans Snap + webhook (FR-PAY-01…05; FR-PAY-09 Should)
-- [ ] AI classifier **or** assistant (FR-12/13 or FR-27…30) via 9router (D-09)
-- [ ] Annual recap PDF (FR-31…33); library locked to `fpdf2` (D-11)
+- [x] OCR receipt upload (FR-06, FR-06a, FR-06b) — local storage, EXIF strip, confirm flow
+- [x] Real Midtrans Snap + webhook (FR-PAY-01…05; FR-PAY-09 Should) — orders and webhook; settlement requires `status_code` `"200"`
+- [x] AI classifier **and** assistant (FR-12/13 and FR-27…30) via 9router (D-09)
+- [x] Annual recap PDF (FR-31…33); library locked to `fpdf2` (D-11)
 
-## Payments — Midtrans Snap (not started)
+## Payments — Midtrans Snap
 
-Held until D-10 placeholders are wired into an adapter. Contract is API
-**v1.3.2** §5.30 (HMAC over `order_id`, status, `amount_str`; monotonic status;
-30-day renewal) (to be rewritten for real Midtrans). Never use production keys.
+Orders and the payment webhook are implemented. Settlement requires
+`status_code` `"200"` in addition to a valid signature and a matching amount.
+Contract is API **v1.3.3** §5.30 (SHA512 over Midtrans body fields and ServerKey;
+a later pending, expire, or fail does not reverse settlement; 30-day renewal
+from `max(now_utc, valid_until_utc)`). Never use production keys.
 
 - [x] `GatewayAdapter` plus `FakeGatewayAdapter`
 - [x] Signature verification with `hmac.compare_digest`
 - [x] Reject a tampered `gross_amount` (`ORDER_AMOUNT_MISMATCH`)
-- [x] Webhook idempotency, monotonic status, renewal arithmetic
+- [x] Webhook idempotency; settlement is not reversed; 30-day renewal
 - [x] Map Snap `redirect_url` → API `payment_url` (D-11)
 - [ ] TODO: Status API confirmation before production
 
@@ -141,8 +143,8 @@ Held until D-10 placeholders are wired into an adapter. Contract is API
 ## Sprint 5 — trace and demo
 
 - [x] Per-transaction audit trail endpoint (PR #4)
-- [ ] FR-6.x read-only assistant (rubric; not started)
-- [ ] FR-8.x annual workpaper PDF (rubric; not started)
+- [x] FR-6.x read-only assistant (rubric)
+- [x] FR-8.x annual workpaper PDF (rubric)
 - [ ] Demo script, report numbers
 
 ## Frontend design — mockup v1.4.2 (25 Sep 2026)

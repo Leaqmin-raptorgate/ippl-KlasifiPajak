@@ -13,11 +13,11 @@ Not a filed return. Not authorized DJP software.
 
 ## Spec versions (source of truth)
 
-| Artefact | Version                                 | Where                                                                                                  |
-| -------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| SRS      | **v2.7**                                | Outside this repository (`SPEC/`); course SRS is never pushed here                                     |
-| API      | **v1.3.2**                              | Mirrored at [`docs/api/KlasifiPajak_API_Specification.md`](docs/api/KlasifiPajak_API_Specification.md) |
-| ERD      | **r3** (D-11 `month_snapshots.version`) | Outside this repository (`SPEC/`); Alembic `76fcdbc4af30` matches r3                                   |
+| Artefact | Version                                 | Where                                                                                                                                       |
+| -------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| SRS      | **v2.7**                                | Outside this repository (`SPEC/`); course SRS is never pushed here                                                                          |
+| API      | **v1.3.3**                              | Mirrored at [`docs/api/KlasifiPajak_API_Specification.md`](docs/api/KlasifiPajak_API_Specification.md)                                      |
+| ERD      | **r3** (D-11 `month_snapshots.version`) | Outside this repository (`SPEC/`); r3 was `76fcdbc4af30`; later revisions are proposed r4 changes; run `alembic heads` for the current head |
 
 Prior API text in this repo was v1.2.2; treat the mirror above as normative.
 
@@ -45,20 +45,21 @@ npm ci   # ALWAYS npm ci, never npm install (lockfile-locked)
 | `JWT_SECRET`           | Session signing secret (≥ 32 bytes in production).                                                                            |
 | `TRUSTED_PROXY_IPS`    | Comma-separated peer IPs/CIDRs allowed to supply `X-Forwarded-For`. Empty = trust none.                                       |
 | `TRUSTED_PROXY_COUNT`  | How many rightmost XFF hops to peel when the peer is trusted (default `0`).                                                   |
-| `AI_*` / `MIDTRANS_*`  | Placeholders for later rubric work (D-09 / D-10). Leave empty until those features are built.                                 |
+| `AI_*`                 | OpenAI-compatible client settings for receipt OCR, fallback classification, and assistant Q&A. Empty = fail closed to rules.  |
+| `MIDTRANS_*`           | Midtrans Snap server/client keys and production flag for subscription checkout and notification verification.                 |
 
-### Docker Compose (MySQL + migrate + API)
+### Docker Compose (MySQL + migrate + API + frontend)
 
 Compose boots MySQL, runs a **one-shot `migrate` service** (`alembic upgrade head`
-as `klasifipajak_migrate`), then starts the API as `klasifipajak_app`. The API
-depends on migrate completing successfully. Schema is **not** created via
-`create_all` at runtime.
+as `klasifipajak_migrate`), then starts the API as `klasifipajak_app` and the
+Vite frontend. The API depends on migrate completing successfully. Schema is
+**not** created via `create_all` at runtime.
 
 ```bash
-docker compose up mysql migrate api   # migrate is one-shot; api on http://127.0.0.1:8000
+docker compose up mysql migrate api frontend
 # or simply:
 docker compose up api                 # pulls mysql + migrate via depends_on
-docker compose up frontend            # vite dev server on http://127.0.0.1:5173
+docker compose up frontend            # vite dev server on http://127.0.0.1:5173 (proxies `/api` to the `api` service)
 ```
 
 First-time setup, refreshing `node_modules` after a lockfile change and host
@@ -84,7 +85,7 @@ npm --prefix frontend run test:unit   # Vitest (happy-dom); no backend required
 FastAPI over the deterministic engine, plus an authenticated application
 surface backed by MySQL 8. Engine endpoints are unauthenticated and bound to
 loopback. See the [API specification](docs/api/KlasifiPajak_API_Specification.md)
-(v1.3.2).
+(v1.3.3).
 
 | Endpoint                                                   | Purpose                                                 |
 | ---------------------------------------------------------- | ------------------------------------------------------- |
@@ -112,14 +113,13 @@ loopback. See the [API specification](docs/api/KlasifiPajak_API_Specification.md
 
 Money crosses the wire as integer rupiah and is rejected as a string or float.
 
-### Not yet implemented (rubric / later)
+### Still open
 
-Do not treat these as done just because env placeholders or DB stubs exist:
+OCR receipt upload, the Midtrans adapter and webhook, the AI classifier and assistant, and the annual recap PDF are implemented. What is still open:
 
-- **OCR receipt upload** (FR-06 / FR-06a / FR-06b) — `receipt_images` table only
-- **Real Midtrans payment** (FR-PAY-01…05) — adapter / Snap not built
-- **AI classifier or assistant** (FR-12/13 or FR-27…30) — rules/keyword path only
-- **Annual recap PDF** (FR-31…33) — not built (`fpdf2` locked by D-11 when it lands)
+- **Midtrans Status API confirmation** — settlement trusts the signed notice (signature, amount, `status_code` `"200"`); the Status API is not called. Required before real payments.
+- **Live Midtrans keys** — use sandbox keys only (D-10).
+- **OD-13** — whether interest, dividends and lottery prizes count toward the Rp 4,8 miliar test is not signed off ([open decisions](docs/agile/open-decisions.md)).
 
 ## Available Scripts
 
@@ -158,12 +158,12 @@ The workflow does not publish or deploy anything.
 - `backend/app/schemas/` — Pydantic request and response shapes
 - `backend/app/services/` — one function per use case
 - `backend/app/models/` — SQLAlchemy tables (ERD r3)
-- `backend/app/classify/` — keyword/rules path today; model client later
-- `backend/app/payments/` — gateway adapter (**not built**)
-- `backend/alembic/` — migrations (initial head = ERD r3 / D-11)
+- `backend/app/classify/` — keyword/rules path and fallback AI classifier
+- `backend/app/payments/` — Midtrans Snap gateway adapter and notification handling
+- `backend/alembic/` — migrations (r3 was `76fcdbc4af30`; later revisions are proposed r4 changes; run `alembic heads` for the current head)
 - `backend/tests/` — engine tests, API tests, and `TC-GOLDEN-*`
 - `frontend/` — Vue 3 + Vite
-- `docs/api/`: API specification mirror (v1.3.2)
+- `docs/api/`: API specification mirror (v1.3.3)
 - `docs/agile/` — backlog, roadmap, open decisions
 
 Layering rules: [backend/README.md](backend/README.md).
@@ -176,9 +176,8 @@ Layering rules: [backend/README.md](backend/README.md).
 - [docs/STYLE.md](docs/STYLE.md) — style authority
 - [docs/agile/backlog.md](docs/agile/backlog.md) — sprint / M50 status
 - [docs/agile/roadmap.md](docs/agile/roadmap.md) — sequence, risks, open decisions
-- [docs/agile/open-decisions.md](docs/agile/open-decisions.md) — OD-* and D-01…D-11
-- [docs/api/KlasifiPajak_API_Specification.md](docs/api/KlasifiPajak_API_Specification.md): API contract **v1.3.2**
+- [docs/agile/open-decisions.md](docs/agile/open-decisions.md) — OD-* and D-01…D-18
+- [docs/api/KlasifiPajak_API_Specification.md](docs/api/KlasifiPajak_API_Specification.md): API contract **v1.3.3**
 
 The course SRS stays outside this repository and is never pushed. The SRS of
-record is **v2.7**; API v1.3.2 supersedes FR-20 and FR-22 until SRS v2.8 is
-approved. The ERD of record is r3.
+record is **v2.7**; API v1.3.3 includes draft SRS v2.8 changes pending integration into the course SRS. The ERD of record is r3.

@@ -21,9 +21,10 @@ so a figure and the data that produced it are read together.
 
 ## `app/classify/`
 
-Rules/keyword path is live on transaction create. BM25 and the OpenAI-compatible
-model client (D-09 / 9router) are **not built yet**. Pipeline order when AI
-lands: rules first, then model fallback, then one clarifying question.
+Rules/keyword path runs on transaction create. BM25 retrieval
+(`classify/bm25.py`) and the OpenAI-compatible model client
+(`classify/model_client.py`, D-09 / 9router) are built. Pipeline order: rules
+first, then model fallback, then one clarifying question.
 
 ## `app/services/`
 
@@ -54,9 +55,9 @@ DML-only `klasifipajak_app` user and must not call `create_all` for schema.
 
 ## `app/payments/`
 
-Gateway adapter interface plus implementations. **Not built yet** (D-10
-placeholders in `.env.example` only). Services must depend on the interface,
-never on a concrete gateway, when this lands.
+Gateway adapter interface plus `MidtransAdapter` (`payments/adapter.py`).
+Services depend on the interface, not on a concrete gateway. Live keys are
+still placeholders (D-10); use sandbox keys.
 
 ## `app/config/`
 
@@ -64,23 +65,25 @@ Environment-derived settings currently read by the API process: `APP_ENV`,
 `DATABASE_URL`, `JWT_SECRET`, `CORS_ORIGINS`, `RULESET_PATH`, plus
 `TRUSTED_PROXY_IPS` / `TRUSTED_PROXY_COUNT` (read in the auth routes).
 `MIGRATE_DATABASE_URL` is used by Alembic (`backend/alembic/env.py`), not by
-`Settings`. AI (`AI_BASE_URL`, `AI_API_KEY`, `AI_MODEL_*`, `AI_TIMEOUT_S`) and
-Midtrans (`MIDTRANS_*`) keys in `.env.example` are **planned / not yet read**
-(D-09 / D-10). Thresholds and quotas that are product-configurable live here;
+`Settings`. AI (`AI_BASE_URL`, `AI_API_KEY`, `AI_MODEL_*`, `AI_TIMEOUT_S`) is
+read by `Settings` and the OCR, classifier, and assistant clients (D-09).
+Midtrans `MIDTRANS_SERVER_KEY` and `MIDTRANS_IS_PRODUCTION` are read by
+`services/payments.py` (D-10). `MIDTRANS_CLIENT_KEY` is only in `.env.example`
+and is not read. Thresholds and quotas that are product-configurable live here;
 tax rates and bands do not.
 
 ## Status vs empty placeholders
 
-| Directory                                                  | Status on main (2026-11-03)                               |
-| ---------------------------------------------------------- | --------------------------------------------------------- |
-| `app/engine/`, `app/engine/ruleset/`                       | Done                                                      |
-| `app/models/`, `app/schemas/`, `app/services/`, `app/api/` | Done (M50)                                                |
-| `app/config/`                                              | Done                                                      |
-| `backend/alembic/`                                         | Done — initial head = ERD r3 / D-11                       |
-| `app/classify/`                                            | Rules/keywords only; AI client **not built**              |
-| `app/payments/`                                            | **Not built**                                             |
-| OCR / receipt bytes / PDF export                           | **Not built** (table stub / D-01 design only)             |
-| `frontend/`                                                | Vue 3 app present; treat OCR/AI/PDF screens as incomplete |
+| Directory                                                  | Status on main (2026-11-03)                           |
+| ---------------------------------------------------------- | ----------------------------------------------------- |
+| `app/engine/`, `app/engine/ruleset/`                       | Done                                                  |
+| `app/models/`, `app/schemas/`, `app/services/`, `app/api/` | Done (M50)                                            |
+| `app/config/`                                              | Done                                                  |
+| `backend/alembic/`                                         | Done — initial head = ERD r3 / D-11                   |
+| `app/classify/`                                            | Rules, BM25 and the model client                      |
+| `app/payments/`                                            | `MidtransAdapter`; Status API confirmation still open |
+| OCR / receipt bytes / PDF export                           | Built (`routes_receipts.py`, `services/recap.py`)     |
+| `frontend/`                                                | Vue 3 app with OCR, assistant and workpaper screens   |
 
 Workpaper disclaimer (D-07), exact string:
 
