@@ -421,6 +421,7 @@ def test_every_guidance_condition_can_be_produced():
         "article17_unknown",
         "company",
         "company_unknown",
+        "new_taxpayer_unknown",
         "cap_warning",
     }
     assert conditions <= producible
