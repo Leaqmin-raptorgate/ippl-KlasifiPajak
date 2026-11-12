@@ -83,7 +83,12 @@ Done in code: `backend/tests/test_golden.py`, `backend/app/engine/compute.py`,
       `next_year_ineligible` (FR-20).
 - [x] FR-03: prior-year empty vs zero (`UNSET`).
 - [x] Versioned month snapshots (D-11 / ERD r3) + dashboard `as_of` = today WIB.
-- [ ] Still open: L3-B Bagian A columns (FR-31) and live KAP/KJS values.
+- [x] FR-31 L3-B Bagian A columns a to e, g and h: the annual recap and the PDF
+      (`services/recap.py`) carry Bulan, a Bruto, b Akumulasi, c Tidak kena,
+      d Kena pajak, e PPh final, g Dipotong and h Selisih, per month and in total.
+- [ ] Still open: column f (Disetor sendiri) is printed empty because the app
+      does not record self-paid tax, and the KAP/KJS value (`411128-420`) is a
+      secondary, unconfirmed source (OD-3).
 
 ## Rubric features
 
@@ -121,8 +126,14 @@ from `max(now_utc, valid_until_utc)`). Never use production keys.
 
 - [x] Heuristic-first path, zero model calls — keyword table on transaction create
 - [x] Non-object and already-final keyword table
-- [ ] NFR-Q1 labeled set of at least 40 transactions
-- [ ] NFR-Q2, NFR-Q3 report heuristic accuracy
+- [ ] NFR-Q1 labeled set of at least 40 transactions: the evaluator
+      (`backend/scripts/evaluate_classifier.py`) and the dev and held-out
+      workbooks exist outside the repo, but the labels are drafted, not checked
+      by the developer, and the rules changed after the last measurement.
+      Missing: developer-reviewed labels.
+- [ ] NFR-Q2, NFR-Q3 report heuristic accuracy: the 2026-11-09 scores in
+      `backend/README.md` predate the 2026-11-11 rule changes. Missing: a
+      re-measured dev and held-out score (issue #24).
 
 ## Sprint 3 — storage and dashboard
 
@@ -135,8 +146,13 @@ from `max(now_utc, valid_until_utc)`). Never use production keys.
 
 ## Sprint 4 — AI fallback
 
-- [ ] Request bundle and validated reply (model path)
-- [ ] One targeted clarifying question (model path)
+- [x] Request bundle and validated reply (model path): background fallback in
+      `services/classification_fallback.py` with `build_classification_messages`
+      and `validate_classification`; consent and quota gated, quota refunded
+      when no valid reply is stored
+- [ ] One targeted clarifying question (model path): missing. The question on
+      `GET /transactions/{id}/clarification` is a fixed template, not written
+      by the model, and the model reply carries no question
 - [x] Override and stale recompute (rules/user path on main)
 - [x] Quota counters and `paid_flag` read models (reserve-on-AI still open)
 
@@ -150,12 +166,23 @@ from `max(now_utc, valid_until_utc)`). Never use production keys.
 ## Frontend design — mockup v1.4.2 (25 Sep 2026)
 
 Static HTML mockups live in `IPPL/mockup/` (outside this repo). UI strings
-are Indonesian. Pinia wiring is largely present; treat OCR / asisten / rekap
-screens as incomplete until the backend features exist.
+are Indonesian. The OCR, asisten and workpaper features have backend routes
+and are switched on in `frontend/src/lib/capabilities.ts`, except the
+subscription purchase UI (`subscriptionPurchase` is `false`, issue #22).
 
-- [ ] Mockup screens vs live routes (Profil, Transaksi, Klasifikasi, Dashboard,
-      Asisten, Rekap) — track in Plane
-- [ ] **needs-decision** residual UI gaps (Pengaturan, OCR paywall vs FR-06, …)
+Live routes: `/`, `/masuk`, `/atur-ulang`, `/dasbor`, `/transaksi`,
+`/transaksi/baru`, `/transaksi/:id` (Klasifikasi), `/asisten`, `/kuota`,
+`/langganan/kembali`, `/profil`. The annual recap has no page of its own: it
+is shown on the dashboard (`/dasbor`), with the workpaper PDF button.
+
+- [ ] Mockup screens vs live routes: Profil, Transaksi, Klasifikasi, Dashboard
+      and Asisten have routes. Rekap has none by design (dashboard). Missing:
+      a screen-by-screen comparison against the mockup, which lives outside
+      this repo; track in Plane
+- [ ] **needs-decision** residual UI gaps: there is no Pengaturan route, and
+      the OCR upload on `/transaksi/baru` tells a free account to see the
+      Kuota page while the purchase UI there is off (issue #22). Whether to
+      add Pengaturan is undecided
 
 ## Quality gates
 
