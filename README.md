@@ -117,8 +117,7 @@ Money crosses the wire as integer rupiah and is rejected as a string or float.
 
 OCR receipt upload, the Midtrans adapter and webhook, the AI classifier and assistant, and the annual recap PDF are implemented. What is still open:
 
-- **Midtrans Status API confirmation** — settlement trusts the signed notice (signature, amount, `status_code` `"200"`); the Status API is not called. Required before real payments.
-- **Live Midtrans keys** — use sandbox keys only (D-10).
+- **Live Midtrans keys** — use sandbox keys only (D-10). The Status API confirmation of settlements is built and tested with a fake adapter; the live sandbox run is still to do.
 - **OD-13** — whether interest, dividends and lottery prizes count toward the Rp 4,8 miliar test is not signed off ([open decisions](docs/agile/open-decisions.md)).
 
 ## Available Scripts
