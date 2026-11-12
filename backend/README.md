@@ -24,7 +24,11 @@ so a figure and the data that produced it are read together.
 Rules/keyword path runs on transaction create. BM25 retrieval
 (`classify/bm25.py`) and the OpenAI-compatible model client
 (`classify/model_client.py`, D-09 / 9router) are built. Pipeline order: rules
-first, then model fallback, then one clarifying question.
+first. On a rule miss the row stays provisional and, with AI consent and
+quota, `services/classification_fallback.py` classifies it in the background
+and stores only a validated reply. When no model answer is stored, the row
+keeps asking the user: the question on `GET /transactions/{id}/clarification`
+is a fixed template, not model-written.
 
 ## `app/services/`
 
@@ -74,16 +78,16 @@ tax rates and bands do not.
 
 ## Status vs empty placeholders
 
-| Directory                                                  | Status on main (2026-11-03)                           |
+| Directory                                                  | Status on main (2026-11-12)                           |
 | ---------------------------------------------------------- | ----------------------------------------------------- |
 | `app/engine/`, `app/engine/ruleset/`                       | Done                                                  |
-| `app/models/`, `app/schemas/`, `app/services/`, `app/api/` | Done (M50)                                            |
+| `app/models/`, `app/schemas/`, `app/services/`, `app/api/` | Done (M50, plus receipts, recap, assistant, orders)   |
 | `app/config/`                                              | Done                                                  |
 | `backend/alembic/`                                         | Done — initial head = ERD r3 / D-11                   |
 | `app/classify/`                                            | Rules, BM25 and the model client                      |
 | `app/payments/`                                            | `MidtransAdapter`; Status API confirmation still open |
 | OCR / receipt bytes / PDF export                           | Built (`routes_receipts.py`, `services/recap.py`)     |
-| `frontend/`                                                | Vue 3 app with OCR, assistant and workpaper screens   |
+| `frontend/`                                                | Vue 3 app; recap and PDF are on the dashboard page    |
 
 Workpaper disclaimer (D-07), exact string:
 
@@ -119,6 +123,6 @@ The workbook `Review` sheet has a header row that starts with `id`. Row meaning:
 - `exclude` with a reviewer and a `review_note`: listed, not scored.
 - No reviewer: unreviewed. Scoring refuses unless `--allow-partial`.
 
-Measured on 2026-11-09 for the rules-only tier (rules hash `c8ae779fc0ed`): dev accuracy 91/98 (0.93) and coverage 92/98 (0.94); held-out accuracy 23/49 (0.47), coverage 27/49 (0.55), and accuracy on decided rows 0.85. The held-out score comes from a separate workbook (`heldout_v1.xlsx`), not from the dev workbook. The labels were drafted by the same author who tuned the rules, and the developer has not checked them. The held-out figure is indicative. Further tuning needs a new held-out set (v2). Do not tune these rules against `heldout_v1`.
+Measured on 2026-11-09 for the rules-only tier (rules hash `c8ae779fc0ed`). Rules changed afterwards in `c043268` (2026-11-11), so these figures describe the earlier rules and have not been re-measured (issue #24): dev accuracy 91/98 (0.93) and coverage 92/98 (0.94); held-out accuracy 23/49 (0.47), coverage 27/49 (0.55), and accuracy on decided rows 0.85. The held-out score comes from a separate workbook (`heldout_v1.xlsx`), not from the dev workbook. The labels were drafted by the same author who tuned the rules, and the developer has not checked them. The held-out figure is indicative. Further tuning needs a new held-out set (v2). Do not tune these rules against `heldout_v1`.
 
 The dev workbook is `../outputs/label-review-20261108/candidate_label_review_CLAUDE_DRAFT.xlsx` (SHA-256 `ffd7ad1c5838891fd6cf55c9d7f9601d05fd8ba6453ab6f803a367a6cff37a7f`). The held-out workbook is `../outputs/label-review-20261108/heldout_v1.xlsx` (SHA-256 `45bfdc46d5763de555b979687122df3246c62d8be6e2f899e336f7f5c7126f3d`). Both sit outside this repository, beside `Project/`. They are not committed. The held-out labels stay out of the repo unless the developer asks to add them.
