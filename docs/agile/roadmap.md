@@ -49,8 +49,7 @@ API confirmation and live keys.
 ### Residual risk
 
 - The rubric four (OCR, Midtrans, AI, PDF) are implemented. What remains is
-  Midtrans Status API confirmation, the demo script, report numbers and the
-  re-measured classifier scores.
+  the demo script, report numbers and the re-measured classifier scores.
 - Live Midtrans keys are a user task before demo freeze (Fri 27 Nov 2026
   18:00 Asia/Makassar) per D-10.
 - Coverage gate measures **engine only** (NFR-14); whole-app coverage is
