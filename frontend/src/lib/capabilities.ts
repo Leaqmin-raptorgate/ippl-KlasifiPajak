@@ -28,7 +28,7 @@ export const CAPABILITIES = Object.freeze({
   /** `DELETE /transactions/{id}`. Deleting one row and rebuilding its month. */
   deleteTransaction: true,
   /** `GET` and `POST /subscriptions/orders`. */
-  subscriptionPurchase: false,
+  subscriptionPurchase: true,
   /** `GET /transactions/{id}/audit-trail`. */
   auditTrail: true,
 } as const);

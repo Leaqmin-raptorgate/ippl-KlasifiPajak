@@ -37,6 +37,14 @@ function statusLabel(status?: string): string {
   return status || "—";
 }
 
+function statusPesanan(status: string): string {
+  if (status === "pending") return "Menunggu bayar";
+  if (status === "settlement") return "Lunas";
+  if (status === "expire") return "Kedaluwarsa";
+  if (status === "fail") return "Gagal";
+  return status;
+}
+
 onMounted(() => {
   void kuota.muat();
 });
@@ -148,7 +156,9 @@ function gantiTema(nilai: string) {
             {{ galat || kuota.bayarPesan || kuota.pesan }}
           </p>
           <div v-if="CAPABILITIES.subscriptionPurchase" class="plan-cta">
-            <AppButton variant="primary" block @click="bayar">Buat tautan bayar</AppButton>
+            <AppButton variant="primary" block :disabled="kuota.memproses" @click="bayar">{{
+              kuota.memproses ? "Membuat tautan bayar…" : "Buat tautan bayar"
+            }}</AppButton>
           </div>
           <p v-else-if="!kuota.berbayar" class="plan-tag">
             Paket berbayar ({{ harga }} / 30 hari) sedang disiapkan dan akan segera tersedia.
@@ -156,7 +166,9 @@ function gantiTema(nilai: string) {
           <ul v-if="CAPABILITIES.subscriptionPurchase && kuota.orders.length" class="fitur">
             <li v-for="order in kuota.orders" :key="order.order_id">
               <span class="fitur-label">{{ order.order_id }}</span>
-              <span class="fitur-nilai">{{ order.status }} · {{ rupiah(order.amount_idr) }}</span>
+              <span class="fitur-nilai"
+                >{{ statusPesanan(order.status) }} · {{ rupiah(order.amount_idr) }}</span
+              >
             </li>
           </ul>
           <p class="plan-kaki">
