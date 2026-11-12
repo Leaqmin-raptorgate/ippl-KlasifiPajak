@@ -282,4 +282,15 @@ describe("KuotaPage subscription purchase", () => {
     expect(kosong.get(".harga-cat").text()).toContain("Paket aktif · 30 hari");
     expect(kosong.get(".harga-cat").text()).not.toContain("berlaku sampai");
   });
+
+  it("shows the Riwayat pesanan heading only when orders exist", async () => {
+    const kosong = await pasang();
+    expect(kosong.text()).not.toContain("Riwayat pesanan");
+    expect(kosong.find(".fitur-pesanan").exists()).toBe(false);
+
+    orders = [{ ...PENDING, order_id: "ord_1", status: "settlement", payment_url: undefined }];
+    const ada = await pasang();
+    expect(ada.text()).toContain("Riwayat pesanan");
+    expect(ada.find(".fitur-pesanan").exists()).toBe(true);
+  });
 });

@@ -203,9 +203,20 @@ function gantiTema(nilai: string) {
           <p v-else-if="!kuota.berbayar" class="plan-tag">
             Paket berbayar ({{ harga }} / 30 hari) sedang disiapkan dan akan segera tersedia.
           </p>
-          <ul v-if="CAPABILITIES.subscriptionPurchase && kuota.orders.length" class="fitur">
+          <h3
+            v-if="CAPABILITIES.subscriptionPurchase && kuota.orders.length"
+            id="h-pesanan"
+            class="t3"
+          >
+            Riwayat pesanan
+          </h3>
+          <ul
+            v-if="CAPABILITIES.subscriptionPurchase && kuota.orders.length"
+            class="fitur fitur-pesanan"
+            aria-labelledby="h-pesanan"
+          >
             <li v-for="order in kuota.orders" :key="order.order_id">
-              <span class="fitur-label">{{ order.order_id }}</span>
+              <span class="fitur-label" :title="order.order_id">{{ order.order_id }}</span>
               <span class="fitur-nilai"
                 >{{ statusPesanan(order.status) }} · {{ rupiah(order.amount_idr) }}</span
               >
@@ -434,6 +445,25 @@ function gantiTema(nilai: string) {
 
 .fitur li.off .fitur-nilai {
   color: var(--ink-3);
+}
+
+/* Order history rows: long ids must wrap and never overlap the status text. */
+.fitur-pesanan li {
+  flex-wrap: wrap;
+  justify-content: space-between;
+  color: var(--ink);
+}
+
+.fitur-pesanan .fitur-label {
+  flex: 1 1 12rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.fitur-pesanan .fitur-nilai {
+  flex: 0 1 auto;
+  max-width: 100%;
+  white-space: nowrap;
 }
 
 .plan-cta {
