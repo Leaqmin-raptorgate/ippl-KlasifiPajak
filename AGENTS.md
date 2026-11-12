@@ -520,6 +520,5 @@ Do not resolve these yourself. Full table: `docs/agile/open-decisions.md`
 
 Closed recently: OD-6 snapshot versioning via **D-11**; OD-7/8/9 quota defaults
 and no-trial; provenance OD-1/2/12. Rubric features OCR / Midtrans / AI / PDF
-were approved in scope (D-08) and are implemented (PRs #16 and #17). What is
-still open on them: Midtrans Status API confirmation before real payments,
-live Midtrans keys (sandbox only, D-10), and the live KAP/KJS value (OD-3).
+were approved in scope (D-08); the four rubric features are implemented
+(PRs #16 and #17).
