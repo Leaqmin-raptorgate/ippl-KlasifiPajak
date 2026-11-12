@@ -6,6 +6,7 @@ import base64
 import hashlib
 import hmac
 import re
+from collections.abc import Callable
 from typing import Any, Protocol
 
 import httpx2
@@ -60,6 +61,9 @@ def normalize_status(status: str, fraud_status: str = "") -> str:
 _STATUS_ORDER_CODES = {"200", "201", "202", "407"}
 
 
+StatusOutcome = dict[str, Any] | Exception | Callable[[str], dict[str, Any]]
+
+
 class FakeGatewayAdapter:
     """In-memory gateway that returns a preconfigured payment URL.
 
@@ -77,11 +81,13 @@ class FakeGatewayAdapter:
         self.signature_valid = signature_valid
         self.calls: list[dict[str, Any]] = []
         self.status_calls: list[str] = []
-        self._status_script: list[dict[str, Any] | Exception] = []
+        self._status_script: list[StatusOutcome] = []
 
-    def script_status(self, *outcomes: dict[str, Any] | Exception) -> None:
-        """Queue Status API outcomes: a body dict, or an exception to raise.
+    def script_status(self, *outcomes: StatusOutcome) -> None:
+        """Queue Status API outcomes: a body dict, an exception to raise, or a callable.
 
+        A callable receives the order id and returns a body dict or raises; tests
+        use it to change the database while the Status API call is in flight.
         Each call consumes one outcome; when the queue is empty the default
         agreeing body is returned.
         """
@@ -112,6 +118,8 @@ class FakeGatewayAdapter:
             outcome = self._status_script.pop(0)
             if isinstance(outcome, Exception):
                 raise outcome
+            if callable(outcome):
+                return outcome(order_id)
             return outcome
         return self.status_body(order_id)
 

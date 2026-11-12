@@ -198,8 +198,8 @@ def _confirm_settlement(order_id: str, amount: int) -> None:
     """
     try:
         body = get_gateway_adapter().get_transaction_status(order_id)
-        if not isinstance(body, dict):
-            raise GatewayUnavailable("Invalid status body")
+        # The adapter already checked the body is a dict, matches the order and has
+        # an order-status code; the types and amount below are compared here.
         remote_status = body.get("transaction_status")
         remote_fraud = body.get("fraud_status", "")
         if not isinstance(remote_status, str) or not isinstance(remote_fraud, str):
@@ -253,61 +253,63 @@ def process_notification(db: Session, payload: dict[str, Any]) -> dict:
     ):
         raise ApiError(400, "INVALID_WEBHOOK_STATUS", "Status pembayaran tidak sah.")
     normalized = normalize_status(status, fraud_status)
-    confirmed = False
-    while True:
-        # The preliminary read selects the account lock before the order lock, as
-        # in create_order; the locked re-read below is authoritative.
-        initial = db.scalar(select(SubscriptionOrder).where(SubscriptionOrder.id == order_id))
-        if initial is None:
-            raise ApiError(404, "ORDER_NOT_FOUND", "Pesanan tidak ditemukan.")
-        owner = None
-        if initial.user_id is not None:
-            owner = db.scalar(select(User).where(User.id == initial.user_id).with_for_update())
-        order = db.scalar(
-            select(SubscriptionOrder)
-            .where(SubscriptionOrder.id == order_id)
-            .with_for_update()
-            .execution_options(populate_existing=True)
+    if normalized == "settlement":
+        # Ask the Status API before taking any row lock. This read holds no lock
+        # and is rolled back; the locked section below stays authoritative and
+        # re-checks the event and the order status, so a settlement that lands
+        # during the call cannot be granted twice. Anything unexpected here is
+        # left to the locked section to report.
+        peek = db.scalar(select(SubscriptionOrder).where(SubscriptionOrder.id == order_id))
+        pending_amount = None
+        if peek is not None and str(payload.get("status_code", "")) == "200":
+            try:
+                parsed = parse_gross_amount(payload["gross_amount"])
+            except ValueError:
+                parsed = None
+            if parsed == peek.amount_idr and peek.status != "settlement":
+                pending_amount = parsed
+        db.rollback()
+        if pending_amount is not None:
+            _confirm_settlement(order_id, pending_amount)
+    # The preliminary read selects the account lock before the order lock, as in
+    # create_order; the locked re-read below is authoritative.
+    initial = db.scalar(select(SubscriptionOrder).where(SubscriptionOrder.id == order_id))
+    if initial is None:
+        raise ApiError(404, "ORDER_NOT_FOUND", "Pesanan tidak ditemukan.")
+    owner = None
+    if initial.user_id is not None:
+        owner = db.scalar(select(User).where(User.id == initial.user_id).with_for_update())
+    order = db.scalar(
+        select(SubscriptionOrder)
+        .where(SubscriptionOrder.id == order_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if order is None:
+        raise ApiError(404, "ORDER_NOT_FOUND", "Pesanan tidak ditemukan.")
+    try:
+        amount = parse_gross_amount(payload["gross_amount"])
+    except ValueError:
+        raise ApiError(400, "INVALID_ORDER_AMOUNT", "Nominal pembayaran tidak sah.") from None
+    if amount != order.amount_idr:
+        raise ApiError(
+            400,
+            "ORDER_AMOUNT_MISMATCH",
+            "Nominal pembayaran pada notifikasi tidak cocok dengan pesanan.",
         )
-        if order is None:
-            raise ApiError(404, "ORDER_NOT_FOUND", "Pesanan tidak ditemukan.")
-        try:
-            amount = parse_gross_amount(payload["gross_amount"])
-        except ValueError:
-            raise ApiError(400, "INVALID_ORDER_AMOUNT", "Nominal pembayaran tidak sah.") from None
-        if amount != order.amount_idr:
-            raise ApiError(
-                400,
-                "ORDER_AMOUNT_MISMATCH",
-                "Nominal pembayaran pada notifikasi tidak cocok dengan pesanan.",
-            )
-        # Reject before insert so a non-200 settlement cannot duplicate-match a later 200.
-        status_code = str(payload.get("status_code", ""))
-        if normalized == "settlement" and status_code != "200":
-            raise ApiError(400, "INVALID_WEBHOOK_STATUS", "Status pembayaran tidak sah.")
-        existing = db.scalar(
-            select(PaymentEvent.id)
-            .where(
-                PaymentEvent.order_id == order_id,
-                PaymentEvent.raw_status == status,
-                PaymentEvent.status == normalized,
-            )
-            .with_for_update()
+    # Reject before insert so a non-200 settlement cannot duplicate-match a later 200.
+    status_code = str(payload.get("status_code", ""))
+    if normalized == "settlement" and status_code != "200":
+        raise ApiError(400, "INVALID_WEBHOOK_STATUS", "Status pembayaran tidak sah.")
+    existing = db.scalar(
+        select(PaymentEvent.id)
+        .where(
+            PaymentEvent.order_id == order_id,
+            PaymentEvent.raw_status == status,
+            PaymentEvent.status == normalized,
         )
-        if (
-            normalized == "settlement"
-            and existing is None
-            and order.status != "settlement"
-            and not confirmed
-        ):
-            # Only a notice that would grant access needs the Status API. Release
-            # the locks first so the external call never holds a row lock, then
-            # take them again and re-check everything.
-            db.rollback()
-            _confirm_settlement(order_id, amount)
-            confirmed = True
-            continue
-        break
+        .with_for_update()
+    )
     duplicate = existing is not None or (
         normalized == "settlement" and order.status == "settlement"
     )

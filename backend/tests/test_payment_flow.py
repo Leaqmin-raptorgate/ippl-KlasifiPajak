@@ -506,3 +506,51 @@ def test_status_api_host_follows_is_production_flag(monkeypatch, raw, host):
         # A production-shaped key is refused by the sandbox adapter; use a sandbox key.
         monkeypatch.setenv("MIDTRANS_SERVER_KEY", "SB-Mid-server-not-real")
     assert get_gateway_adapter().status_base_url == host
+
+
+def _settle_in_database(order_id, user_id):
+    """Settle the order the way a concurrent notification would, and commit."""
+    with SessionLocal() as db:
+        order = db.scalar(select(SubscriptionOrder).where(SubscriptionOrder.id == order_id))
+        owner = db.scalar(select(User).where(User.id == user_id))
+        instant = now_utc()
+        order.status = "settlement"
+        owner.paid_flag = True
+        owner.valid_until_utc = max(instant, owner.valid_until_utc or instant) + timedelta(days=30)
+        db.add(
+            PaymentEvent(
+                id="payevt_concurrent",
+                order_id=order_id,
+                user_id=user_id,
+                status="settlement",
+                raw_status="settlement",
+                gross_amount_idr=25_000,
+                transaction_time=instant,
+                received_at=instant,
+            )
+        )
+        db.commit()
+
+
+def test_fr_pay03_settlement_during_status_call_is_not_granted_twice(client, fake_gateway):
+    """A settlement committed while the Status API call is in flight is not granted again."""
+    _auth(client)
+    user_id = client.get("/api/v1/auth/me").json()["user_id"]
+    order = _order(client)
+    order_id = order["order_id"]
+
+    def concurrent_settlement(called_order_id):
+        _settle_in_database(called_order_id, user_id)
+        return fake_gateway.status_body(called_order_id)
+
+    fake_gateway.script_status(concurrent_settlement)
+    response = client.post("/api/v1/webhooks/payment", json=_notice(order_id))
+    assert response.status_code == 200, response.text
+    assert response.json() == {"acknowledged": True, "idempotent_duplicate": True}
+    assert fake_gateway.status_calls == [order_id]
+    assert _event_count(order_id) == 1
+    granted = _user(user_id)
+    assert granted.paid_flag is True
+    # Exactly one 30-day grant: the one made inside the Status call.
+    assert granted.valid_until_utc <= now_utc() + timedelta(days=30, minutes=1)
+    assert _status_of(order_id) == "settlement"
