@@ -250,4 +250,36 @@ describe("KuotaPage subscription purchase", () => {
     expect(berbayar.get(".plan-cta").text()).toContain("Berlaku sampai");
     expect(berbayar.get(".plan-cta").text()).toContain("2026");
   });
+
+  it("formats the paid-card valid-until date instead of printing the raw ISO string", async () => {
+    const iso = "2026-12-02T12:23:31.890050+07:00";
+    status = {
+      ...STATUS,
+      subscription_tier: "berbayar",
+      paid_flag: true,
+      valid_until_local: iso,
+      valid_until_utc: "2026-12-02T05:23:31.890050Z",
+    };
+    const wrapper = await pasang();
+    expect(wrapper.text()).toContain("berlaku sampai 2 Desember 2026");
+    expect(wrapper.text()).not.toContain(iso);
+    expect(wrapper.text()).not.toContain("T12:23");
+  });
+
+  it("falls back to valid_until_utc and omits the clause when both are missing", async () => {
+    status = {
+      ...STATUS,
+      subscription_tier: "berbayar",
+      paid_flag: true,
+      valid_until_local: null,
+      valid_until_utc: "2026-12-02T05:23:31Z",
+    };
+    const fallback = await pasang();
+    expect(fallback.get(".harga-cat").text()).toContain("berlaku sampai 2 Desember 2026");
+
+    status = { ...(status as object), valid_until_utc: null };
+    const kosong = await pasang();
+    expect(kosong.get(".harga-cat").text()).toContain("Paket aktif · 30 hari");
+    expect(kosong.get(".harga-cat").text()).not.toContain("berlaku sampai");
+  });
 });

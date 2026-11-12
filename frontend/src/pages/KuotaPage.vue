@@ -29,6 +29,10 @@ const temaOpsi = [
 const chat = computed(() => kuota.quotas?.assistant_chat);
 const ai = computed(() => kuota.quotas?.ai_classification);
 const rencana = computed(() => kuota.status?.available_plans?.[0]);
+const berlakuSampai = computed(() => {
+  const iso = kuota.status?.valid_until_local || kuota.status?.valid_until_utc;
+  return iso ? tanggalPanjang(iso) : "";
+});
 const harga = computed(() => (kuota.status ? rupiah(rencana.value?.price_idr ?? 25_000) : "—"));
 
 function statusLabel(status?: string): string {
@@ -170,9 +174,7 @@ function gantiTema(nilai: string) {
               <p class="harga figure">{{ harga }}</p>
               <p class="harga-cat">
                 Paket aktif · 30 hari
-                <template v-if="kuota.status?.valid_until_local">
-                  · berlaku sampai {{ kuota.status.valid_until_local }}
-                </template>
+                <template v-if="berlakuSampai"> · berlaku sampai {{ berlakuSampai }} </template>
               </p>
             </template>
             <template v-else>
