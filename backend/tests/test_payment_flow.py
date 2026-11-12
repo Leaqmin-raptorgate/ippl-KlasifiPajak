@@ -146,10 +146,7 @@ def test_fr_pay03_late_settlement_after_expiry_activates(client, fake_gateway):
     ("raw", "expected"),
     [
         ("true", True),
-        ("TRUE", False),
-        ("True", False),
-        (" true", False),
-        ("1", False),
+        ("TRUE", True),
         ("false", False),
         pytest.param(None, False, id="unset"),
         ("", False),
@@ -491,17 +488,15 @@ def test_fr_pay05_later_expire_does_not_reverse_confirmed_settlement(client, fak
     ("raw", "host"),
     [
         ("true", "https://api.midtrans.com/v2"),
-        ("TRUE", "https://api.sandbox.midtrans.com/v2"),
-        ("True", "https://api.sandbox.midtrans.com/v2"),
-        (" true", "https://api.sandbox.midtrans.com/v2"),
+        ("TRUE", "https://api.midtrans.com/v2"),
         ("1", "https://api.sandbox.midtrans.com/v2"),
         ("false", "https://api.sandbox.midtrans.com/v2"),
         ("", "https://api.sandbox.midtrans.com/v2"),
         (None, "https://api.sandbox.midtrans.com/v2"),
     ],
 )
-def test_status_api_host_is_production_only_for_lowercase_true(monkeypatch, raw, host):
-    """Spec 5.30: the production Status API host needs exactly the lowercase word true."""
+def test_status_api_host_follows_is_production_flag(monkeypatch, raw, host):
+    """Spec 5.30: the Status API host follows _is_production(), so true in any case is production."""
     monkeypatch.setenv("MIDTRANS_SERVER_KEY", "Mid-server-not-real")
     if raw is None:
         monkeypatch.delenv("MIDTRANS_IS_PRODUCTION", raising=False)

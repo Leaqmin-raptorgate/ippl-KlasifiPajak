@@ -32,8 +32,7 @@ _WIB = timezone(timedelta(hours=7))
 
 
 def _is_production() -> bool:
-    # Exactly the lowercase word: any other value (TRUE, True, 1) stays on the sandbox.
-    return os.environ.get("MIDTRANS_IS_PRODUCTION", "false") == "true"
+    return os.environ.get("MIDTRANS_IS_PRODUCTION", "false").lower() == "true"
 
 
 def get_gateway_adapter() -> MidtransAdapter:
