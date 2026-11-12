@@ -87,31 +87,55 @@ surface backed by MySQL 8. Engine endpoints are unauthenticated and bound to
 loopback. See the [API specification](docs/api/KlasifiPajak_API_Specification.md)
 (v1.3.3).
 
-| Endpoint                                                   | Purpose                                                 |
-| ---------------------------------------------------------- | ------------------------------------------------------- |
-| `GET /health`                                              | liveness                                                |
-| `GET /ruleset`                                             | rates and ceilings                                      |
-| `POST /snapshot`                                           | compute one snapshot from a transaction set             |
-| `POST /api/v1/auth/register`                               | create an account (argon2id)                            |
-| `POST /api/v1/auth/login`                                  | open a cookie session                                   |
-| `POST /api/v1/auth/logout`                                 | revoke this session                                     |
-| `GET /api/v1/auth/me`                                      | current user                                            |
-| `POST /api/v1/auth/password-reset/request`                 | request reset (generic response)                        |
-| `POST /api/v1/auth/password-reset/confirm`                 | confirm reset with token                                |
-| `GET /api/v1/auth/sessions`                                | list sessions                                           |
-| `DELETE /api/v1/auth/sessions/{id}`                        | revoke one session                                      |
-| `DELETE /api/v1/auth/sessions`                             | revoke other sessions                                   |
-| `DELETE /api/v1/account`                                   | delete account                                          |
-| `GET/PUT /api/v1/profiles/{year}`                          | read or version the business profile                    |
-| `GET/POST /api/v1/transactions`                            | list or record a classified transaction                 |
-| `GET/PUT/DELETE /api/v1/transactions/{id}`                 | read, edit, delete                                      |
-| `POST .../override`, `.../clarification`, `.../reclassify` | category flows (rules-only today)                       |
-| `GET /api/v1/tax/dashboard`                                | thresholds and monthly summaries (`as_of` = today WIB)  |
-| `GET/POST /api/v1/tax/snapshots/...`                       | month snapshot read / year recalculate (versioned rows) |
-| `GET /api/v1/quotas`                                       | monthly quota counters                                  |
-| `GET /api/v1/subscriptions/status`                         | plan state from `paid_flag`                             |
+| Endpoint                                           | Purpose                                                 |
+| -------------------------------------------------- | ------------------------------------------------------- |
+| `GET /health`                                      | liveness                                                |
+| `GET /ruleset`                                     | rates and ceilings                                      |
+| `POST /snapshot`                                   | compute one snapshot from a transaction set             |
+| `POST /api/v1/auth/register`                       | create an account (argon2id)                            |
+| `POST /api/v1/auth/login`                          | open a cookie session                                   |
+| `POST /api/v1/auth/logout`                         | revoke this session                                     |
+| `GET /api/v1/auth/me`                              | current user                                            |
+| `POST /api/v1/auth/password-reset/request`         | request reset (generic response)                        |
+| `POST /api/v1/auth/password-reset/confirm`         | confirm reset with token                                |
+| `GET /api/v1/auth/sessions`                        | list sessions                                           |
+| `DELETE /api/v1/auth/sessions/{id}`                | revoke one session                                      |
+| `DELETE /api/v1/auth/sessions`                     | revoke other sessions                                   |
+| `DELETE /api/v1/account`                           | delete account                                          |
+| `GET/PUT /api/v1/profiles/{year}`                  | read or version the business profile                    |
+| `GET/POST /api/v1/transactions`                    | list or record a classified transaction                 |
+| `GET/PUT/DELETE /api/v1/transactions/{id}`         | read, edit, delete                                      |
+| `POST /api/v1/transactions/{id}/override`          | set the category by hand (source `user_override`)       |
+| `GET/POST /api/v1/transactions/{id}/clarification` | read the question on a provisional row, answer it       |
+| `POST /api/v1/transactions/reclassify`             | re-run the keyword rules over rows (no model call)      |
+| `GET /api/v1/transactions/{id}/audit-trail`        | per-transaction audit trail                             |
+| `POST /api/v1/transactions/ocr-upload`             | upload a receipt for OCR (needs AI consent, paid plan)  |
+| `GET /api/v1/transactions/receipt-images/{id}`     | read back an uploaded receipt image                     |
+| `POST /api/v1/transactions/ocr-confirm`            | confirm the extracted fields and record the transaction |
+| `GET /api/v1/tax/dashboard`                        | thresholds and monthly summaries (`as_of` = today WIB)  |
+| `GET/POST /api/v1/tax/snapshots/...`               | month snapshot read / year recalculate (versioned rows) |
+| `GET /api/v1/recap/{year}`                         | annual recap (January to December rows and totals)      |
+| `POST /api/v1/recap/{year}/pdf`                    | annual workpaper PDF                                    |
+| `POST /api/v1/assistant/query`                     | read-only assistant question (needs AI consent)         |
+| `GET /api/v1/guidance`                             | static, cited guidance for the taxpayer                 |
+| `GET/PUT /api/v1/ai-consent`                       | read or set AI processing consent                       |
+| `GET /api/v1/quotas`                               | monthly quota counters                                  |
+| `GET /api/v1/subscriptions/status`                 | plan state from `paid_flag`                             |
+| `GET/POST /api/v1/subscriptions/orders`            | list or create a Midtrans Snap order                    |
+| `POST /api/v1/webhooks/payment`                    | Midtrans payment notification (signature checked)       |
+
+Category changes made after a rule miss: the AI classifier runs in the
+background only with AI consent and quota, and `reclassify` uses the rules
+only. `/api/v1/test-support/*` (subscription override, password-reset token) mounts
+only when `APP_ENV=test`.
 
 Money crosses the wire as integer rupiah and is rejected as a string or float.
+
+The annual recap has no page of its own in the frontend. The dashboard
+(`/dasbor`) shows the recap totals and the "Unduh workpaper" button. The
+purchase UI for subscription orders is not switched on in the frontend yet
+(`subscriptionPurchase` is `false` in `frontend/src/lib/capabilities.ts`), so
+orders are reachable through the API only.
 
 ### Still open
 
