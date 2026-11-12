@@ -124,18 +124,17 @@ loopback. See the [API specification](docs/api/KlasifiPajak_API_Specification.md
 | `GET/POST /api/v1/subscriptions/orders`            | list or create a Midtrans Snap order                    |
 | `POST /api/v1/webhooks/payment`                    | Midtrans payment notification (signature checked)       |
 
-Category changes made after a rule miss: the AI classifier runs in the
-background only with AI consent and quota, and `reclassify` uses the rules
-only. `/api/v1/test-support/*` (subscription override, password-reset token) mounts
+After a rule miss, the AI classifier may classify the row in the background,
+only with AI consent and quota. `POST /api/v1/transactions/reclassify` re-runs
+the keyword rules only and calls no model.
+
+`/api/v1/test-support/*` (subscription override, password-reset token) mounts
 only when `APP_ENV=test`.
 
 Money crosses the wire as integer rupiah and is rejected as a string or float.
 
 The annual recap has no page of its own in the frontend. The dashboard
-(`/dasbor`) shows the recap totals and the "Unduh workpaper" button. The
-purchase UI for subscription orders is not switched on in the frontend yet
-(`subscriptionPurchase` is `false` in `frontend/src/lib/capabilities.ts`), so
-orders are reachable through the API only.
+(`/dasbor`) shows the recap totals and the "Unduh workpaper" button.
 
 ### Still open
 
