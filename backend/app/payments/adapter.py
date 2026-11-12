@@ -55,9 +55,9 @@ def normalize_status(status: str, fraud_status: str = "") -> str:
     return "ignored"
 
 
-# Status API body codes that mean "no usable answer" rather than an order status.
-# Other codes (201 pending, 202 deny, 407 expire, ...) are real order statuses.
-_STATUS_ERROR_CODES = {"401", "403", "404", "429"}
+# Status API body codes that are real order statuses: 200 settled or captured,
+# 201 pending, 202 deny, 407 expire. Any other code is "no usable answer".
+_STATUS_ORDER_CODES = {"200", "201", "202", "407"}
 
 
 class FakeGatewayAdapter:
@@ -135,6 +135,7 @@ class MidtransAdapter:
         is_production: bool = False,
         transport: Any = None,
         timeout_s: float = 30,
+        status_timeout_s: float = 8,
     ) -> None:
         if not is_production and server_key.startswith("Mid-server-"):
             raise ValueError("Production server key cannot be used in sandbox")
@@ -152,6 +153,9 @@ class MidtransAdapter:
         )
         self.transport = transport
         self.timeout_s = timeout_s
+        # The Status API runs inside the webhook request, and Midtrans waits only a
+        # short time for the notification response, so it gets its own short timeout.
+        self.status_timeout_s = status_timeout_s
 
     def verify_notification(self, payload: dict[str, Any]) -> bool:
         """Verify SHA512 against exact received string fields in constant time."""
@@ -206,7 +210,7 @@ class MidtransAdapter:
             raise ValueError("Invalid order ID")
         token = base64.b64encode(f"{self.server_key}:".encode("utf-8")).decode("ascii")
         try:
-            with httpx2.Client(transport=self.transport, timeout=self.timeout_s) as client:
+            with httpx2.Client(transport=self.transport, timeout=self.status_timeout_s) as client:
                 response = client.get(
                     f"{self.status_base_url}/{order_id}/status",
                     headers={"Authorization": f"Basic {token}", "Accept": "application/json"},
@@ -217,10 +221,9 @@ class MidtransAdapter:
             raise GatewayUnavailable("Payment status check failed") from exc
         if not isinstance(body, dict):
             raise GatewayUnavailable("Payment status check failed")
-        # Midtrans answers some errors (unknown order, bad key) as HTTP 200 with
-        # an error code in the body.
-        code = str(body.get("status_code", ""))
-        if code in _STATUS_ERROR_CODES or code.startswith("5") or not code:
+        # Midtrans answers some errors (unknown order, bad key, bad request) as
+        # HTTP 200 with an error code in the body: accept only order-status codes.
+        if str(body.get("status_code", "")) not in _STATUS_ORDER_CODES:
             raise GatewayUnavailable("Payment status check failed")
         if body.get("order_id") != order_id:
             raise GatewayUnavailable("Payment status check failed")

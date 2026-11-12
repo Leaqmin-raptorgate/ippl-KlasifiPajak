@@ -319,6 +319,22 @@ def test_fr_pay03_status_api_request_shape_and_body():
         ),
         pytest.param(
             lambda r: __import__("httpx2").Response(
+                200, json={"status_code": "400", "order_id": "ord_1"}
+            ),
+            id="body-400",
+        ),
+        pytest.param(
+            lambda r: __import__("httpx2").Response(
+                200, json={"status_code": "412", "order_id": "ord_1"}
+            ),
+            id="body-412",
+        ),
+        pytest.param(
+            lambda r: __import__("httpx2").Response(200, json={"order_id": "ord_1"}),
+            id="body-no-code",
+        ),
+        pytest.param(
+            lambda r: __import__("httpx2").Response(
                 200, json={"status_code": "200", "order_id": "other"}
             ),
             id="other-order",
@@ -342,3 +358,22 @@ def test_fr_pay03_status_api_timeout_raises_gateway_unavailable():
 
     with pytest.raises(GatewayUnavailable):
         _status_adapter(handler).get_transaction_status("ord_1")
+
+
+def test_fr_pay03_status_api_timeout_is_short_and_separate():
+    """The Status API client uses status_timeout_s (default 8 s), not the Snap 30 s."""
+    import httpx2
+
+    seen = {}
+
+    def handler(request):
+        seen["timeout"] = request.extensions["timeout"]
+        return httpx2.Response(
+            200,
+            json={"order_id": "ord_1", "status_code": "200", "transaction_status": "settlement"},
+        )
+
+    adapter = _status_adapter(handler)
+    assert adapter.timeout_s == 30
+    adapter.get_transaction_status("ord_1")
+    assert seen["timeout"] == {"connect": 8, "read": 8, "write": 8, "pool": 8}
