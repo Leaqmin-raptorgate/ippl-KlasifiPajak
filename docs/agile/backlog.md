@@ -83,12 +83,11 @@ Done in code: `backend/tests/test_golden.py`, `backend/app/engine/compute.py`,
       `next_year_ineligible` (FR-20).
 - [x] FR-03: prior-year empty vs zero (`UNSET`).
 - [x] Versioned month snapshots (D-11 / ERD r3) + dashboard `as_of` = today WIB.
-- [x] FR-31 L3-B Bagian A columns a to e, g and h: the annual recap and the PDF
-      (`services/recap.py`) carry Bulan, a Bruto, b Akumulasi, c Tidak kena,
-      d Kena pajak, e PPh final, g Dipotong and h Selisih, per month and in total.
-- [ ] Still open: column f (Disetor sendiri) is printed empty because the app
-      does not record self-paid tax, and the KAP/KJS value (`411128-420`) is a
-      secondary, unconfirmed source (OD-3).
+- [ ] FR-31 L3-B Bagian A columns: the recap and the PDF table
+      (`services/recap.py`) list columns a to e, g and h, with f printed empty
+      because the app does not record self-paid tax. The table has not yet been
+      compared with PMK 164/2023 Lampiran D.
+- [ ] KAP/KJS value (`411128-420`) is a secondary, unconfirmed source (OD-3).
 
 ## Rubric features
 
@@ -133,7 +132,7 @@ from `max(now_utc, valid_until_utc)`). Never use production keys.
       Missing: developer-reviewed labels.
 - [ ] NFR-Q2, NFR-Q3 report heuristic accuracy: the 2026-11-09 scores in
       `backend/README.md` predate the 2026-11-11 rule changes. Missing: a
-      re-measured dev and held-out score (issue #24).
+      re-measured dev and held-out score.
 
 ## Sprint 3 — storage and dashboard
 
@@ -166,9 +165,7 @@ from `max(now_utc, valid_until_utc)`). Never use production keys.
 ## Frontend design — mockup v1.4.2 (25 Sep 2026)
 
 Static HTML mockups live in `IPPL/mockup/` (outside this repo). UI strings
-are Indonesian. The OCR, asisten and workpaper features have backend routes
-and are switched on in `frontend/src/lib/capabilities.ts`, except the
-subscription purchase UI (`subscriptionPurchase` is `false`, issue #22).
+are Indonesian.
 
 Live routes: `/`, `/masuk`, `/atur-ulang`, `/dasbor`, `/transaksi`,
 `/transaksi/baru`, `/transaksi/:id` (Klasifikasi), `/asisten`, `/kuota`,
@@ -179,10 +176,8 @@ is shown on the dashboard (`/dasbor`), with the workpaper PDF button.
       and Asisten have routes. Rekap has none by design (dashboard). Missing:
       a screen-by-screen comparison against the mockup, which lives outside
       this repo; track in Plane
-- [ ] **needs-decision** residual UI gaps: there is no Pengaturan route, and
-      the OCR upload on `/transaksi/baru` tells a free account to see the
-      Kuota page while the purchase UI there is off (issue #22). Whether to
-      add Pengaturan is undecided
+- [ ] **needs-decision** residual UI gaps: there is no Pengaturan route;
+      whether to add it is undecided
 
 ## Quality gates
 
