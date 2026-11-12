@@ -37,11 +37,12 @@ const PENDING = {
 };
 
 let orders: unknown[] = [];
+let status: unknown = STATUS;
 let post: (() => Promise<unknown>) | null = null;
 
 function route(path: string, init?: RequestInit): Promise<unknown> {
   if (path === "/quotas") return Promise.resolve(QUOTAS);
-  if (path === "/subscriptions/status") return Promise.resolve(STATUS);
+  if (path === "/subscriptions/status") return Promise.resolve(status);
   if (path === "/subscriptions/orders" && init?.method === "POST") return post!();
   if (path === "/subscriptions/orders") return Promise.resolve({ items: orders });
   return Promise.reject(new Error(`unexpected ${path}`));
@@ -71,6 +72,7 @@ describe("KuotaPage subscription purchase", () => {
 
   beforeEach(() => {
     orders = [];
+    status = STATUS;
     post = null;
     assign.mockReset();
     apiMock.mockReset();
@@ -79,6 +81,7 @@ describe("KuotaPage subscription purchase", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -175,5 +178,76 @@ describe("KuotaPage subscription purchase", () => {
     expect(text).toContain("ord_1");
     expect(text).toContain("Kedaluwarsa");
     expect(wrapper.text()).toContain("Status dibaca ulang");
+  });
+
+  it("polls the status on the return route until the tier is berbayar", async () => {
+    vi.useFakeTimers();
+    const wrapper = await pasang("/langganan/kembali");
+    const statusCalls = () =>
+      apiMock.mock.calls.filter(([path]) => path === "/subscriptions/status").length;
+    expect(statusCalls()).toBe(1);
+    expect(wrapper.text()).toContain("Pembayaran sedang dikonfirmasi...");
+
+    await vi.advanceTimersByTimeAsync(3000);
+    await flushPromises();
+    expect(statusCalls()).toBe(2);
+
+    status = {
+      ...STATUS,
+      subscription_tier: "berbayar",
+      paid_flag: true,
+      valid_until_utc: "2026-12-12T00:00:00Z",
+    };
+    await vi.advanceTimersByTimeAsync(3000);
+    await flushPromises();
+    expect(statusCalls()).toBe(3);
+    expect(wrapper.text()).not.toContain("Pembayaran sedang dikonfirmasi");
+
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(statusCalls()).toBe(3);
+  });
+
+  it("stops after four re-reads when payment never arrives", async () => {
+    vi.useFakeTimers();
+    await pasang("/langganan/kembali");
+    await vi.advanceTimersByTimeAsync(30000);
+    await flushPromises();
+    const n = apiMock.mock.calls.filter(([path]) => path === "/subscriptions/status").length;
+    expect(n).toBe(5);
+  });
+
+  it("clears the timers on unmount", async () => {
+    vi.useFakeTimers();
+    const wrapper = await pasang("/langganan/kembali");
+    wrapper.unmount();
+    await vi.advanceTimersByTimeAsync(30000);
+    const n = apiMock.mock.calls.filter(([path]) => path === "/subscriptions/status").length;
+    expect(n).toBe(1);
+  });
+
+  it("does not poll on the plain /kuota route", async () => {
+    vi.useFakeTimers();
+    const wrapper = await pasang("/kuota");
+    await vi.advanceTimersByTimeAsync(30000);
+    const n = apiMock.mock.calls.filter(([path]) => path === "/subscriptions/status").length;
+    expect(n).toBe(1);
+    expect(wrapper.text()).not.toContain("Pembayaran sedang dikonfirmasi");
+  });
+
+  it("labels the button by tier and shows the valid-until date when paid", async () => {
+    const gratis = await pasang();
+    expect(gratis.get(".plan-cta button").text()).toBe("Buat tautan bayar");
+    expect(gratis.get(".plan-cta").text()).not.toContain("Berlaku sampai");
+
+    status = {
+      ...STATUS,
+      subscription_tier: "berbayar",
+      paid_flag: true,
+      valid_until_utc: "2026-12-12T00:00:00Z",
+    };
+    const berbayar = await pasang();
+    expect(berbayar.get(".plan-cta button").text()).toBe("Perpanjang 30 hari");
+    expect(berbayar.get(".plan-cta").text()).toContain("Berlaku sampai");
+    expect(berbayar.get(".plan-cta").text()).toContain("2026");
   });
 });

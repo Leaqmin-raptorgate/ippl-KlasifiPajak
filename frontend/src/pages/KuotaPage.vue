@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** Quotas and the monthly plan. Numbers come from the API, not a local cap. */
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppCard from "@/components/ui/AppCard.vue";
@@ -45,9 +45,37 @@ function statusPesanan(status: string): string {
   return status;
 }
 
-onMounted(() => {
-  void kuota.muat();
+const ULANG_MAKS = 4;
+const ULANG_JEDA_MS = 3000;
+const mengonfirmasi = ref(false);
+let pewaktu: ReturnType<typeof setTimeout> | null = null;
+
+function hentikanUlang() {
+  if (pewaktu) clearTimeout(pewaktu);
+  pewaktu = null;
+  mengonfirmasi.value = false;
+}
+
+/** The webhook settles a moment after the buyer returns: re-read a few times. */
+function jadwalkanUlang(sisa: number) {
+  if (kuota.berbayar || sisa <= 0) {
+    hentikanUlang();
+    return;
+  }
+  mengonfirmasi.value = true;
+  pewaktu = setTimeout(async () => {
+    pewaktu = null;
+    await kuota.muat();
+    jadwalkanUlang(sisa - 1);
+  }, ULANG_JEDA_MS);
+}
+
+onMounted(async () => {
+  await kuota.muat();
+  if (route.name === "langganan-kembali") jadwalkanUlang(ULANG_MAKS);
 });
+
+onBeforeUnmount(hentikanUlang);
 
 async function bayar() {
   galat.value = "";
@@ -155,9 +183,19 @@ function gantiTema(nilai: string) {
           <p v-if="kuota.pesan || galat || kuota.bayarPesan" class="plan-tag" role="alert">
             {{ galat || kuota.bayarPesan || kuota.pesan }}
           </p>
+          <p v-if="mengonfirmasi && !kuota.berbayar" class="plan-tag" role="status">
+            Pembayaran sedang dikonfirmasi...
+          </p>
           <div v-if="CAPABILITIES.subscriptionPurchase" class="plan-cta">
+            <p v-if="kuota.berbayar && kuota.status?.valid_until_utc" class="harga-cat">
+              Berlaku sampai {{ tanggalPanjang(kuota.status.valid_until_utc) }}
+            </p>
             <AppButton variant="primary" block :disabled="kuota.memproses" @click="bayar">{{
-              kuota.memproses ? "Membuat tautan bayar…" : "Buat tautan bayar"
+              kuota.memproses
+                ? "Membuat tautan bayar…"
+                : kuota.berbayar
+                  ? "Perpanjang 30 hari"
+                  : "Buat tautan bayar"
             }}</AppButton>
           </div>
           <p v-else-if="!kuota.berbayar" class="plan-tag">
