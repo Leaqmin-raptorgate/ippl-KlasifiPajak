@@ -1,5 +1,5 @@
 /** Subscription purchase on the Kuota page: order, redirect, errors, history. */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createMemoryHistory, createRouter } from "vue-router";
@@ -78,6 +78,10 @@ describe("KuotaPage subscription purchase", () => {
     vi.stubGlobal("location", { ...window.location, assign });
   });
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("creates one order and redirects to payment_url", async () => {
     post = () => Promise.resolve(PENDING);
     const wrapper = await pasang();
@@ -130,7 +134,33 @@ describe("KuotaPage subscription purchase", () => {
     await Promise.all([first, second]);
     await flushPromises();
     expect(assign).toHaveBeenCalledTimes(1);
-    expect(button.attributes("disabled")).toBeUndefined();
+    expect(button.attributes("disabled")).toBeDefined();
+  });
+
+  it("keeps the button disabled after a successful redirect", async () => {
+    post = () => Promise.resolve(PENDING);
+    const wrapper = await pasang();
+    const button = wrapper.get(".plan-cta button");
+    await button.trigger("click");
+    await flushPromises();
+    expect(assign).toHaveBeenCalledTimes(1);
+    expect(button.attributes("disabled")).toBeDefined();
+    await button.trigger("click");
+    await flushPromises();
+    expect(posts()).toHaveLength(1);
+    expect(assign).toHaveBeenCalledTimes(1);
+  });
+
+  it("says the link is not ready for a pending order without payment_url", async () => {
+    post = () => Promise.resolve({ ...PENDING, payment_url: undefined });
+    const wrapper = await pasang();
+    await wrapper.get(".plan-cta button").trigger("click");
+    await flushPromises();
+    expect(assign).not.toHaveBeenCalled();
+    const teks = wrapper.get("[role=alert]").text();
+    expect(teks).toContain("Tautan bayar belum siap");
+    expect(teks).not.toContain("tidak menunggu pembayaran");
+    expect(wrapper.get(".plan-cta button").attributes("disabled")).toBeUndefined();
   });
 
   it("renders the order list on the return route", async () => {
