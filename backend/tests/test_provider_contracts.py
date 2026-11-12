@@ -276,3 +276,69 @@ def test_in_process_rate_limit_dicts_drop_expired_keys(monkeypatch):
         assistant._hour_hits.clear()
         classification_fallback._hour_hits.clear()
         receipts._upload_hits.clear()
+
+
+def _status_adapter(handler):
+    import httpx2
+
+    from app.payments.adapter import MidtransAdapter
+
+    return MidtransAdapter(server_key="SB-Mid-server-fake", transport=httpx2.MockTransport(handler))
+
+
+def test_fr_pay03_status_api_request_shape_and_body():
+    """The Status API call is a GET on the sandbox host with Basic auth; no live call."""
+    import httpx2
+
+    seen = {}
+
+    def handler(request):
+        seen["url"] = str(request.url)
+        seen["auth"] = request.headers["Authorization"]
+        return httpx2.Response(
+            200,
+            json={"order_id": "ord_1", "status_code": "200", "transaction_status": "settlement"},
+        )
+
+    body = _status_adapter(handler).get_transaction_status("ord_1")
+    assert body["transaction_status"] == "settlement"
+    assert seen["url"] == "https://api.sandbox.midtrans.com/v2/ord_1/status"
+    assert seen["auth"].startswith("Basic ")
+
+
+@pytest.mark.parametrize(
+    "respond",
+    [
+        pytest.param(lambda r: __import__("httpx2").Response(500, json={}), id="http-500"),
+        pytest.param(lambda r: __import__("httpx2").Response(200, text="<html>"), id="not-json"),
+        pytest.param(
+            lambda r: __import__("httpx2").Response(
+                200, json={"status_code": "404", "order_id": "ord_1"}
+            ),
+            id="body-404",
+        ),
+        pytest.param(
+            lambda r: __import__("httpx2").Response(
+                200, json={"status_code": "200", "order_id": "other"}
+            ),
+            id="other-order",
+        ),
+    ],
+)
+def test_fr_pay03_status_api_errors_raise_gateway_unavailable(respond):
+    from app.payments.adapter import GatewayUnavailable
+
+    with pytest.raises(GatewayUnavailable):
+        _status_adapter(respond).get_transaction_status("ord_1")
+
+
+def test_fr_pay03_status_api_timeout_raises_gateway_unavailable():
+    import httpx2
+
+    from app.payments.adapter import GatewayUnavailable
+
+    def handler(request):
+        raise httpx2.ReadTimeout("slow", request=request)
+
+    with pytest.raises(GatewayUnavailable):
+        _status_adapter(handler).get_transaction_status("ord_1")
