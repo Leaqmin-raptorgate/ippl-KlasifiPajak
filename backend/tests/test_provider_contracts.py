@@ -6,6 +6,7 @@ import logging
 import ssl
 from decimal import Decimal
 
+import httpx2
 import pytest
 
 
@@ -276,3 +277,119 @@ def test_in_process_rate_limit_dicts_drop_expired_keys(monkeypatch):
         assistant._hour_hits.clear()
         classification_fallback._hour_hits.clear()
         receipts._upload_hits.clear()
+
+
+def _reply(status, **kwargs):
+    """A MockTransport handler that answers every request the same way."""
+    return lambda request: httpx2.Response(status, **kwargs)
+
+
+def _status_adapter(handler):
+    from app.payments.adapter import MidtransAdapter
+
+    return MidtransAdapter(server_key="SB-Mid-server-fake", transport=httpx2.MockTransport(handler))
+
+
+def test_fr_pay03_status_api_request_shape_and_body():
+    """The Status API call is a GET on the sandbox host with Basic auth; no live call."""
+    seen = {}
+
+    def handler(request):
+        seen["url"] = str(request.url)
+        seen["auth"] = request.headers["Authorization"]
+        return httpx2.Response(
+            200,
+            json={"order_id": "ord_1", "status_code": "200", "transaction_status": "settlement"},
+        )
+
+    body = _status_adapter(handler).get_transaction_status("ord_1")
+    assert body["transaction_status"] == "settlement"
+    assert seen["url"] == "https://api.sandbox.midtrans.com/v2/ord_1/status"
+    assert seen["auth"].startswith("Basic ")
+
+
+@pytest.mark.parametrize(
+    "respond",
+    [
+        pytest.param(_reply(500, json={}), id="http-500"),
+        pytest.param(_reply(200, text="<html>"), id="not-json"),
+        pytest.param(
+            _reply(200, json={"status_code": "404", "order_id": "ord_1"}),
+            id="body-404",
+        ),
+        pytest.param(
+            _reply(200, json={"status_code": "400", "order_id": "ord_1"}),
+            id="body-400",
+        ),
+        pytest.param(
+            _reply(200, json={"status_code": "412", "order_id": "ord_1"}),
+            id="body-412",
+        ),
+        pytest.param(
+            _reply(200, json={"order_id": "ord_1"}),
+            id="body-no-code",
+        ),
+        pytest.param(
+            _reply(200, json={"status_code": "200", "order_id": "other"}),
+            id="other-order",
+        ),
+    ],
+)
+def test_fr_pay03_status_api_errors_raise_gateway_unavailable(respond):
+    from app.payments.adapter import GatewayUnavailable
+
+    with pytest.raises(GatewayUnavailable):
+        _status_adapter(respond).get_transaction_status("ord_1")
+
+
+def test_fr_pay03_status_api_timeout_raises_gateway_unavailable():
+    from app.payments.adapter import GatewayUnavailable
+
+    def handler(request):
+        raise httpx2.ReadTimeout("slow", request=request)
+
+    with pytest.raises(GatewayUnavailable):
+        _status_adapter(handler).get_transaction_status("ord_1")
+
+
+def test_fr_pay03_status_api_timeout_is_short_and_separate():
+    """The Status API client uses status_timeout_s (default 8 s), not the Snap 30 s."""
+    seen = {}
+
+    def handler(request):
+        seen["timeout"] = request.extensions["timeout"]
+        return httpx2.Response(
+            200,
+            json={"order_id": "ord_1", "status_code": "200", "transaction_status": "settlement"},
+        )
+
+    adapter = _status_adapter(handler)
+    assert adapter.timeout_s == 30
+    adapter.get_transaction_status("ord_1")
+    assert seen["timeout"] == {"connect": 8, "read": 8, "write": 8, "pool": 8}
+
+
+@pytest.mark.parametrize(
+    ("handler", "expected"),
+    [
+        (_reply(401, json={}), "401"),
+        (
+            _reply(200, json={"status_code": "404", "order_id": "ord_1"}),
+            "Payment status check failed",
+        ),
+    ],
+    ids=["http-401", "body-404"],
+)
+def test_fr_pay03_status_check_log_names_the_real_cause(monkeypatch, caplog, handler, expected):
+    """The caller only sees a 503, so the log must say why (never the key or the body)."""
+    from app.api.errors import ApiError
+    from app.services import payments
+
+    monkeypatch.setattr(payments, "get_gateway_adapter", lambda: _status_adapter(handler))
+    with caplog.at_level(logging.WARNING, logger="app.services.payments"):
+        with pytest.raises(ApiError) as caught:
+            payments._confirm_settlement("ord_1", 25_000)
+    assert caught.value.status == 503
+    assert "ord_1" in caplog.text
+    assert expected in caplog.text
+    assert "SB-Mid-server-fake" not in caplog.text
