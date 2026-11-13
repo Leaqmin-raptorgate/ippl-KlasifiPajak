@@ -450,6 +450,22 @@ def test_fr_pay03_status_api_unreachable_is_retryable_and_then_succeeds(client, 
     assert fake_gateway.status_calls == [order["order_id"]] * 2
 
 
+def test_fr_pay03_status_api_failure_is_logged_with_the_order_id(client, fake_gateway, caplog):
+    """The 503 hides the cause from the caller, so the cause goes to the log."""
+    import logging
+
+    from app.payments.adapter import GatewayUnavailable
+
+    _auth(client)
+    order = _order(client)
+    fake_gateway.script_status(GatewayUnavailable("timeout"))
+    with caplog.at_level(logging.WARNING, logger="app.services.payments"):
+        response = client.post("/api/v1/webhooks/payment", json=_notice(order["order_id"]))
+    assert response.status_code == 503, response.text
+    assert order["order_id"] in caplog.text
+    assert "timeout" in caplog.text
+
+
 def test_fr_pay03_status_api_unreadable_body_is_retryable(client, fake_gateway):
     """A Status API body without a readable amount is treated as an error, not a mismatch."""
     _auth(client)

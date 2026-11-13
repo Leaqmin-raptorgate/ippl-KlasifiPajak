@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -19,6 +20,8 @@ from app.payments.adapter import (
 )
 from app.security import iso_utc, new_id, now_utc
 from app.services.subscription import PLANS
+
+logger = logging.getLogger(__name__)
 
 # Single source of truth for price and duration: /subscriptions/status advertises PLANS.
 _PLAN = PLANS[0]
@@ -205,7 +208,11 @@ def _confirm_settlement(order_id: str, amount: int) -> None:
         if not isinstance(remote_status, str) or not isinstance(remote_fraud, str):
             raise GatewayUnavailable("Invalid status body")
         remote_amount = parse_gross_amount(body.get("gross_amount"))
-    except (GatewayUnavailable, ValueError):
+    except (GatewayUnavailable, ValueError) as exc:
+        # Log the cause (never the key or the body): the client only sees a retryable 503.
+        logger.warning(
+            "Midtrans status check failed for %s: %s (cause: %r)", order_id, exc, exc.__cause__
+        )
         raise ApiError(
             503,
             "PAYMENT_GATEWAY_UNAVAILABLE",
@@ -253,6 +260,7 @@ def process_notification(db: Session, payload: dict[str, Any]) -> dict:
     ):
         raise ApiError(400, "INVALID_WEBHOOK_STATUS", "Status pembayaran tidak sah.")
     normalized = normalize_status(status, fraud_status)
+    confirmed = False
     if normalized == "settlement":
         # Ask the Status API before taking any row lock. This read holds no lock
         # and is rolled back; the locked section below stays authoritative and
@@ -271,6 +279,7 @@ def process_notification(db: Session, payload: dict[str, Any]) -> dict:
         db.rollback()
         if pending_amount is not None:
             _confirm_settlement(order_id, pending_amount)
+            confirmed = True
     # The preliminary read selects the account lock before the order lock, as in
     # create_order; the locked re-read below is authoritative.
     initial = db.scalar(select(SubscriptionOrder).where(SubscriptionOrder.id == order_id))
@@ -301,6 +310,19 @@ def process_notification(db: Session, payload: dict[str, Any]) -> dict:
     status_code = str(payload.get("status_code", ""))
     if normalized == "settlement" and status_code != "200":
         raise ApiError(400, "INVALID_WEBHOOK_STATUS", "Status pembayaran tidak sah.")
+    if normalized == "settlement" and order.status != "settlement" and not confirmed:
+        # Fail closed: the pre-check above skipped this notice, so the Status API was never
+        # asked. Today the checks agree and this cannot happen; it keeps a later change to
+        # either copy of the grant conditions from granting access without confirmation.
+        db.rollback()
+        logger.error(
+            "Settlement for %s reached the grant without Status API confirmation", order_id
+        )
+        raise ApiError(
+            503,
+            "PAYMENT_GATEWAY_UNAVAILABLE",
+            "Layanan pembayaran belum tersedia. Coba lagi nanti.",
+        )
     existing = db.scalar(
         select(PaymentEvent.id)
         .where(
