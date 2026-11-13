@@ -11,6 +11,7 @@ export const useKuotaStore = defineStore("kuota", () => {
   const orders = ref<SubscriptionOrder[]>([]);
   const pesan = ref("");
   const bayarPesan = ref("");
+  const memproses = ref(false);
 
   const berbayar = computed(
     () => status.value?.paid_flag === true && status.value.subscription_tier === "berbayar",
@@ -54,16 +55,70 @@ export const useKuotaStore = defineStore("kuota", () => {
     }
   }
 
-  async function buatPesanan(planId = "monthly_25k") {
+  /** One order request at a time: an overlapping call joins the one in flight. */
+  let berjalan: Promise<SubscriptionOrder> | null = null;
+  let dialihkan = false;
+
+  function buatPesanan(planId = "monthly_25k"): Promise<SubscriptionOrder> {
+    if (berjalan) return berjalan;
+    memproses.value = true;
+    dialihkan = false;
     bayarPesan.value = "";
+    berjalan = kirimPesanan(planId).then(
+      (order) => {
+        // After a redirect the page is leaving: keep the guard (and the
+        // in-flight promise) so a second click cannot create another order.
+        if (!dialihkan) {
+          berjalan = null;
+          memproses.value = false;
+        }
+        return order;
+      },
+      (error) => {
+        berjalan = null;
+        memproses.value = false;
+        throw error;
+      },
+    );
+    return berjalan;
+  }
+
+  /** Release the order guard, for a page restored from the back/forward cache after the redirect. */
+  function lepasPesanan() {
+    berjalan = null;
+    dialihkan = false;
+    memproses.value = false;
+  }
+
+  async function kirimPesanan(planId: string): Promise<SubscriptionOrder> {
     const order = await api<SubscriptionOrder>("/subscriptions/orders", {
       method: "POST",
       body: JSON.stringify({ plan_id: planId }),
     });
-    if (order.payment_url) window.location.assign(order.payment_url);
-    else bayarPesan.value = "Pesanan tercatat, tetapi tautan bayar tidak ada pada jawaban.";
+    if (order.status === "pending" && order.payment_url) {
+      dialihkan = true;
+      window.location.assign(order.payment_url);
+    } else {
+      bayarPesan.value =
+        order.status === "pending"
+          ? "Tautan bayar belum siap. Coba lagi sebentar."
+          : "Pesanan ini sudah tidak menunggu pembayaran, jadi tautan bayar tidak tersedia. Status akun dan riwayat pesanan dibaca ulang.";
+      await muat();
+    }
     return order;
   }
 
-  return { quotas, status, orders, pesan, bayarPesan, berbayar, labelTier, muat, buatPesanan };
+  return {
+    quotas,
+    status,
+    orders,
+    pesan,
+    bayarPesan,
+    memproses,
+    berbayar,
+    labelTier,
+    muat,
+    buatPesanan,
+    lepasPesanan,
+  };
 });

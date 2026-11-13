@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** Quotas and the monthly plan. Numbers come from the API, not a local cap. */
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppCard from "@/components/ui/AppCard.vue";
@@ -29,6 +29,10 @@ const temaOpsi = [
 const chat = computed(() => kuota.quotas?.assistant_chat);
 const ai = computed(() => kuota.quotas?.ai_classification);
 const rencana = computed(() => kuota.status?.available_plans?.[0]);
+const berlakuSampai = computed(() => {
+  const iso = kuota.status?.valid_until_local || kuota.status?.valid_until_utc;
+  return iso ? tanggalPanjang(iso) : "";
+});
 const harga = computed(() => (kuota.status ? rupiah(rencana.value?.price_idr ?? 25_000) : "—"));
 
 function statusLabel(status?: string): string {
@@ -37,8 +41,64 @@ function statusLabel(status?: string): string {
   return status || "—";
 }
 
-onMounted(() => {
+function statusPesanan(status: string): string {
+  if (status === "pending") return "Menunggu bayar";
+  if (status === "settlement") return "Lunas";
+  if (status === "expire") return "Kedaluwarsa";
+  if (status === "fail") return "Gagal";
+  return status;
+}
+
+const ULANG_MAKS = 4;
+const ULANG_JEDA_MS = 3000;
+const mengonfirmasi = ref(false);
+const belumTerkonfirmasi = ref(false);
+let tidakAktif = false;
+let pewaktu: ReturnType<typeof setTimeout> | null = null;
+
+function hentikanUlang() {
+  if (pewaktu) clearTimeout(pewaktu);
+  pewaktu = null;
+  mengonfirmasi.value = false;
+}
+
+/** Paid, and no order is still waiting: a renewing user is `berbayar` before the webhook lands. */
+function sudahLunas(): boolean {
+  return kuota.berbayar && !kuota.orders.some((order) => order.status === "pending");
+}
+
+/** The webhook settles a moment after the buyer returns: re-read a few times. */
+function jadwalkanUlang(sisa: number) {
+  if (tidakAktif || sudahLunas() || sisa <= 0) {
+    belumTerkonfirmasi.value = !tidakAktif && !sudahLunas();
+    hentikanUlang();
+    return;
+  }
+  mengonfirmasi.value = true;
+  pewaktu = setTimeout(async () => {
+    pewaktu = null;
+    await kuota.muat();
+    jadwalkanUlang(sisa - 1);
+  }, ULANG_JEDA_MS);
+}
+
+/** A page restored from the back/forward cache keeps the order guard set and may show old data. */
+function saatDitampilkan(event: PageTransitionEvent) {
+  if (!event.persisted) return;
+  kuota.lepasPesanan();
   void kuota.muat();
+}
+
+onMounted(async () => {
+  window.addEventListener("pageshow", saatDitampilkan);
+  await kuota.muat();
+  if (route.name === "langganan-kembali" && !tidakAktif) jadwalkanUlang(ULANG_MAKS);
+});
+
+onBeforeUnmount(() => {
+  tidakAktif = true;
+  window.removeEventListener("pageshow", saatDitampilkan);
+  hentikanUlang();
 });
 
 async function bayar() {
@@ -134,9 +194,7 @@ function gantiTema(nilai: string) {
               <p class="harga figure">{{ harga }}</p>
               <p class="harga-cat">
                 Paket aktif · 30 hari
-                <template v-if="kuota.status?.valid_until_local">
-                  · berlaku sampai {{ kuota.status.valid_until_local }}
-                </template>
+                <template v-if="berlakuSampai"> · berlaku sampai {{ berlakuSampai }} </template>
               </p>
             </template>
             <template v-else>
@@ -147,16 +205,44 @@ function gantiTema(nilai: string) {
           <p v-if="kuota.pesan || galat || kuota.bayarPesan" class="plan-tag" role="alert">
             {{ galat || kuota.bayarPesan || kuota.pesan }}
           </p>
+          <p v-if="mengonfirmasi" class="plan-tag" role="status">
+            Pembayaran sedang dikonfirmasi...
+          </p>
+          <p v-else-if="belumTerkonfirmasi" class="plan-tag" role="status">
+            Pembayaran belum terkonfirmasi. Muat ulang halaman dalam beberapa menit.
+          </p>
           <div v-if="CAPABILITIES.subscriptionPurchase" class="plan-cta">
-            <AppButton variant="primary" block @click="bayar">Buat tautan bayar</AppButton>
+            <p v-if="kuota.berbayar && berlakuSampai" class="harga-cat">
+              Berlaku sampai {{ berlakuSampai }}
+            </p>
+            <AppButton variant="primary" block :disabled="kuota.memproses" @click="bayar">{{
+              kuota.memproses
+                ? "Membuat tautan bayar…"
+                : kuota.berbayar
+                  ? "Perpanjang 30 hari"
+                  : "Buat tautan bayar"
+            }}</AppButton>
           </div>
           <p v-else-if="!kuota.berbayar" class="plan-tag">
             Paket berbayar ({{ harga }} / 30 hari) sedang disiapkan dan akan segera tersedia.
           </p>
-          <ul v-if="CAPABILITIES.subscriptionPurchase && kuota.orders.length" class="fitur">
+          <h3
+            v-if="CAPABILITIES.subscriptionPurchase && kuota.orders.length"
+            id="h-pesanan"
+            class="t3"
+          >
+            Riwayat pesanan
+          </h3>
+          <ul
+            v-if="CAPABILITIES.subscriptionPurchase && kuota.orders.length"
+            class="fitur fitur-pesanan"
+            aria-labelledby="h-pesanan"
+          >
             <li v-for="order in kuota.orders" :key="order.order_id">
-              <span class="fitur-label">{{ order.order_id }}</span>
-              <span class="fitur-nilai">{{ order.status }} · {{ rupiah(order.amount_idr) }}</span>
+              <span class="fitur-label" :title="order.order_id">{{ order.order_id }}</span>
+              <span class="fitur-nilai"
+                >{{ statusPesanan(order.status) }} · {{ rupiah(order.amount_idr) }}</span
+              >
             </li>
           </ul>
           <p class="plan-kaki">
@@ -382,6 +468,25 @@ function gantiTema(nilai: string) {
 
 .fitur li.off .fitur-nilai {
   color: var(--ink-3);
+}
+
+/* Order history rows: long ids must wrap and never overlap the status text. */
+.fitur-pesanan li {
+  flex-wrap: wrap;
+  justify-content: space-between;
+  color: var(--ink);
+}
+
+.fitur-pesanan .fitur-label {
+  flex: 1 1 12rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.fitur-pesanan .fitur-nilai {
+  flex: 0 1 auto;
+  max-width: 100%;
+  white-space: nowrap;
 }
 
 .plan-cta {
