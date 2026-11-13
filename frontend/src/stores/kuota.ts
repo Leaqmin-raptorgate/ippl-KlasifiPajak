@@ -83,6 +83,13 @@ export const useKuotaStore = defineStore("kuota", () => {
     return berjalan;
   }
 
+  /** Release the order guard, for a page restored from the back/forward cache after the redirect. */
+  function lepasPesanan() {
+    berjalan = null;
+    dialihkan = false;
+    memproses.value = false;
+  }
+
   async function kirimPesanan(planId: string): Promise<SubscriptionOrder> {
     const order = await api<SubscriptionOrder>("/subscriptions/orders", {
       method: "POST",
@@ -112,5 +119,6 @@ export const useKuotaStore = defineStore("kuota", () => {
     labelTier,
     muat,
     buatPesanan,
+    lepasPesanan,
   };
 });

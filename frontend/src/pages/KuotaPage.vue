@@ -52,6 +52,8 @@ function statusPesanan(status: string): string {
 const ULANG_MAKS = 4;
 const ULANG_JEDA_MS = 3000;
 const mengonfirmasi = ref(false);
+const belumTerkonfirmasi = ref(false);
+let tidakAktif = false;
 let pewaktu: ReturnType<typeof setTimeout> | null = null;
 
 function hentikanUlang() {
@@ -60,9 +62,15 @@ function hentikanUlang() {
   mengonfirmasi.value = false;
 }
 
+/** Paid, and no order is still waiting: a renewing user is `berbayar` before the webhook lands. */
+function sudahLunas(): boolean {
+  return kuota.berbayar && !kuota.orders.some((order) => order.status === "pending");
+}
+
 /** The webhook settles a moment after the buyer returns: re-read a few times. */
 function jadwalkanUlang(sisa: number) {
-  if (kuota.berbayar || sisa <= 0) {
+  if (tidakAktif || sudahLunas() || sisa <= 0) {
+    belumTerkonfirmasi.value = !tidakAktif && !sudahLunas();
     hentikanUlang();
     return;
   }
@@ -74,12 +82,24 @@ function jadwalkanUlang(sisa: number) {
   }, ULANG_JEDA_MS);
 }
 
+/** A page restored from the back/forward cache keeps the order guard set and may show old data. */
+function saatDitampilkan(event: PageTransitionEvent) {
+  if (!event.persisted) return;
+  kuota.lepasPesanan();
+  void kuota.muat();
+}
+
 onMounted(async () => {
+  window.addEventListener("pageshow", saatDitampilkan);
   await kuota.muat();
-  if (route.name === "langganan-kembali") jadwalkanUlang(ULANG_MAKS);
+  if (route.name === "langganan-kembali" && !tidakAktif) jadwalkanUlang(ULANG_MAKS);
 });
 
-onBeforeUnmount(hentikanUlang);
+onBeforeUnmount(() => {
+  tidakAktif = true;
+  window.removeEventListener("pageshow", saatDitampilkan);
+  hentikanUlang();
+});
 
 async function bayar() {
   galat.value = "";
@@ -185,12 +205,15 @@ function gantiTema(nilai: string) {
           <p v-if="kuota.pesan || galat || kuota.bayarPesan" class="plan-tag" role="alert">
             {{ galat || kuota.bayarPesan || kuota.pesan }}
           </p>
-          <p v-if="mengonfirmasi && !kuota.berbayar" class="plan-tag" role="status">
+          <p v-if="mengonfirmasi" class="plan-tag" role="status">
             Pembayaran sedang dikonfirmasi...
           </p>
+          <p v-else-if="belumTerkonfirmasi" class="plan-tag" role="status">
+            Pembayaran belum terkonfirmasi. Muat ulang halaman dalam beberapa menit.
+          </p>
           <div v-if="CAPABILITIES.subscriptionPurchase" class="plan-cta">
-            <p v-if="kuota.berbayar && kuota.status?.valid_until_utc" class="harga-cat">
-              Berlaku sampai {{ tanggalPanjang(kuota.status.valid_until_utc) }}
+            <p v-if="kuota.berbayar && berlakuSampai" class="harga-cat">
+              Berlaku sampai {{ berlakuSampai }}
             </p>
             <AppButton variant="primary" block :disabled="kuota.memproses" @click="bayar">{{
               kuota.memproses

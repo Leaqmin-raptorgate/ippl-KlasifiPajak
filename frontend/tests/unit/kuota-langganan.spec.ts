@@ -1,6 +1,6 @@
 /** Subscription purchase on the Kuota page: order, redirect, errors, history. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { flushPromises, mount } from "@vue/test-utils";
+import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createMemoryHistory, createRouter } from "vue-router";
 import { ApiFailure } from "@/lib/api";
@@ -50,6 +50,9 @@ function route(path: string, init?: RequestInit): Promise<unknown> {
 
 const posts = () => apiMock.mock.calls.filter(([, init]) => init?.method === "POST");
 
+// Pages mount a window `pageshow` listener, so every mount is unmounted after its test.
+const montados: VueWrapper[] = [];
+
 async function pasang(path = "/kuota") {
   const pinia = createPinia();
   setActivePinia(pinia);
@@ -63,6 +66,7 @@ async function pasang(path = "/kuota") {
   await router.push(path);
   await router.isReady();
   const wrapper = mount(KuotaPage, { global: { plugins: [pinia, router] } });
+  montados.push(wrapper);
   await flushPromises();
   return wrapper;
 }
@@ -81,6 +85,7 @@ describe("KuotaPage subscription purchase", () => {
   });
 
   afterEach(() => {
+    for (const wrapper of montados.splice(0)) wrapper.unmount();
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
@@ -292,5 +297,84 @@ describe("KuotaPage subscription purchase", () => {
     const ada = await pasang();
     expect(ada.text()).toContain("Riwayat pesanan");
     expect(ada.find(".fitur-pesanan").exists()).toBe(true);
+  });
+
+  it("keeps polling a renewing paid user until the pending order settles", async () => {
+    vi.useFakeTimers();
+    const paid = {
+      ...STATUS,
+      subscription_tier: "berbayar",
+      paid_flag: true,
+      valid_until_utc: "2026-12-12T00:00:00Z",
+    };
+    status = paid;
+    orders = [{ ...PENDING }];
+    const wrapper = await pasang("/langganan/kembali");
+    const statusCalls = () =>
+      apiMock.mock.calls.filter(([path]) => path === "/subscriptions/status").length;
+    expect(wrapper.text()).toContain("Pembayaran sedang dikonfirmasi...");
+    await vi.advanceTimersByTimeAsync(3000);
+    await flushPromises();
+    expect(statusCalls()).toBe(2);
+
+    orders = [{ ...PENDING, status: "settlement", payment_url: undefined }];
+    status = { ...paid, valid_until_utc: "2027-01-11T00:00:00Z" };
+    await vi.advanceTimersByTimeAsync(3000);
+    await flushPromises();
+    expect(statusCalls()).toBe(3);
+    expect(wrapper.text()).not.toContain("Pembayaran sedang dikonfirmasi");
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(statusCalls()).toBe(3);
+  });
+
+  it("says the payment is not confirmed yet when the re-reads run out", async () => {
+    vi.useFakeTimers();
+    const wrapper = await pasang("/langganan/kembali");
+    await vi.advanceTimersByTimeAsync(30000);
+    await flushPromises();
+    expect(wrapper.text()).not.toContain("Pembayaran sedang dikonfirmasi");
+    expect(wrapper.text()).toContain("Pembayaran belum terkonfirmasi");
+  });
+
+  it("starts no timer when the page unmounts during the first read", async () => {
+    vi.useFakeTimers();
+    let release: (value: unknown) => void = () => {};
+    apiMock.mockImplementation((path: string, init?: RequestInit) =>
+      path === "/quotas" ? new Promise((resolve) => (release = resolve)) : route(path, init),
+    );
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: "/langganan/kembali", name: "langganan-kembali", component: KuotaPage }],
+    });
+    await router.push("/langganan/kembali");
+    await router.isReady();
+    const wrapper = mount(KuotaPage, { global: { plugins: [pinia, router] } });
+    montados.push(wrapper);
+    wrapper.unmount();
+    release(QUOTAS);
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(30000);
+    const n = apiMock.mock.calls.filter(([path]) => path === "/subscriptions/status").length;
+    expect(n).toBe(1);
+  });
+
+  it("releases the order guard when the page returns from the back/forward cache", async () => {
+    post = () => Promise.resolve(PENDING);
+    const wrapper = await pasang();
+    const button = wrapper.get(".plan-cta button");
+    await button.trigger("click");
+    await flushPromises();
+    expect(button.attributes("disabled")).toBeDefined();
+    const statusBefore = apiMock.mock.calls.filter(([p]) => p === "/subscriptions/status").length;
+    window.dispatchEvent(Object.assign(new Event("pageshow"), { persisted: true }));
+    await flushPromises();
+    expect(button.attributes("disabled")).toBeUndefined();
+    const statusAfter = apiMock.mock.calls.filter(([p]) => p === "/subscriptions/status").length;
+    expect(statusAfter).toBe(statusBefore + 1);
+    await button.trigger("click");
+    await flushPromises();
+    expect(posts()).toHaveLength(2);
   });
 });
