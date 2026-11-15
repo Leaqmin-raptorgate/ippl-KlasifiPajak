@@ -80,7 +80,6 @@ function isiPertanyaan(teks: string) {
     <div class="col">
       <header class="lede">
         <div class="lede-teks">
-          <h2 class="t1">Asisten pajak</h2>
           <p class="sub">
             Halo {{ session.tampilanNama }}. Asisten ini menjelaskan kertas kerja yang sudah Anda
             punya: kategori, dasar aturan, dan alasan di baliknya. Ia tidak menghitung apa pun yang
@@ -243,7 +242,8 @@ function isiPertanyaan(teks: string) {
   gap: var(--s-6);
   width: 100%;
   max-width: 48rem;
-  margin-inline: auto;
+  /* Left-aligned with the page title the shell renders above it. */
+  margin-inline: 0;
 }
 
 .lede {
