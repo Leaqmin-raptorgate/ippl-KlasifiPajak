@@ -25,19 +25,28 @@ export const useKuotaStore = defineStore("kuota", () => {
     return "";
   });
 
+  /** A 404 means "not created yet" for a brand-new account: an empty state, not an error. */
+  function belumAda(error: unknown): boolean {
+    return error instanceof ApiFailure && error.status === 404;
+  }
+
   async function muat() {
     pesan.value = "";
     try {
       quotas.value = await api<Quotas>("/quotas");
     } catch (error) {
       quotas.value = null;
-      pesan.value = error instanceof ApiFailure ? error.message : "Kuota belum tersedia.";
+      if (!belumAda(error)) {
+        pesan.value = error instanceof ApiFailure ? error.message : "Kuota belum tersedia.";
+      }
     }
     try {
       status.value = await api<SubscriptionStatus>("/subscriptions/status");
     } catch (error) {
       status.value = null;
-      if (!pesan.value && error instanceof ApiFailure) pesan.value = error.message;
+      if (!pesan.value && error instanceof ApiFailure && !belumAda(error)) {
+        pesan.value = error.message;
+      }
     }
     // Only ask for order history when the route exists. A call that can only
     // 404 is noise in the network tab and a lie in the console.

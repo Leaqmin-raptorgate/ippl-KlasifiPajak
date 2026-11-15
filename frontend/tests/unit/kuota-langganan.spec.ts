@@ -100,6 +100,20 @@ describe("KuotaPage subscription purchase", () => {
     expect(assign).toHaveBeenCalledWith(PENDING.payment_url);
   });
 
+  it("shows an empty state, not an error, when quota and status are not found yet", async () => {
+    apiMock.mockImplementation((path: string, init?: RequestInit) =>
+      path === "/quotas" || path === "/subscriptions/status"
+        ? Promise.reject(new ApiFailure(404, "NOT_FOUND", "Belum ada data."))
+        : route(path, init),
+    );
+    const wrapper = await pasang();
+    expect(wrapper.find("[role=alert]").exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("Belum ada data.");
+    expect(wrapper.text()).not.toContain("Kuota belum tersedia.");
+    expect(wrapper.get(".plan-harga .harga").text()).toBe("Rp 0");
+    expect(wrapper.text()).toContain("Akun Gratis");
+  });
+
   it("shows the 503 message inline and does not redirect", async () => {
     const pesan = "Layanan pembayaran belum tersedia. Coba lagi nanti.";
     post = () => Promise.reject(new ApiFailure(503, "PAYMENT_GATEWAY_UNAVAILABLE", pesan));
