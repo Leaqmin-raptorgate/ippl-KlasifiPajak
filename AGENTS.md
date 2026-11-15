@@ -520,4 +520,5 @@ Do not resolve these yourself. Full table: `docs/agile/open-decisions.md`
 
 Closed recently: OD-6 snapshot versioning via **D-11**; OD-7/8/9 quota defaults
 and no-trial; provenance OD-1/2/12. Rubric features OCR / Midtrans / AI / PDF
-are approved in scope (D-08) but **not implemented** yet.
+were approved in scope (D-08); the four rubric features are implemented
+(PRs #16 and #17).

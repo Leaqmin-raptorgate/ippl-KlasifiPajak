@@ -48,7 +48,8 @@ API confirmation and live keys.
 
 ### Residual risk
 
-- Rubric four (OCR, Midtrans, AI, PDF) are the bulk of remaining effort.
+- The rubric four (OCR, Midtrans, AI, PDF) are implemented. What remains is
+  the demo script, report numbers and the re-measured classifier scores.
 - Live Midtrans keys are a user task before demo freeze (Fri 27 Nov 2026
   18:00 Asia/Makassar) per D-10.
 - Coverage gate measures **engine only** (NFR-14); whole-app coverage is
@@ -56,12 +57,12 @@ API confirmation and live keys.
 
 ## Parallel tracks
 
-| Track           | Where                                       | Runs                 |
-| --------------- | ------------------------------------------- | -------------------- |
-| Docs sync       | `docs/agile/*`, API mirror                  | after each milestone |
-| Build           | `backend/app/`, `frontend/`                 | ongoing              |
-| Rubric features | OCR → AI → PDF → Midtrans (suggested order) | next                 |
-| Coursework      | FP, MBD, Keprof, IMK, PCD                   | continuously         |
+| Track           | Where                               | Runs                 |
+| --------------- | ----------------------------------- | -------------------- |
+| Docs sync       | `docs/agile/*`, API mirror          | after each milestone |
+| Build           | `backend/app/`, `frontend/`         | ongoing              |
+| Rubric features | OCR, AI, PDF, Midtrans (all landed) | done                 |
+| Coursework      | FP, MBD, Keprof, IMK, PCD           | continuously         |
 
 ## Why payments is sequenced carefully
 
