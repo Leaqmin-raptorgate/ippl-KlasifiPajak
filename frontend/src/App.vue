@@ -23,30 +23,14 @@ const bare = computed(() => route.meta.bare === true);
 </template>
 
 <style>
+/* Route change: a short fade only. Total time stays under 200ms. */
 .page-enter-active,
 .page-leave-active {
-  transition:
-    opacity var(--t-base) var(--ease-out-soft),
-    transform var(--t-base) var(--ease-out-soft);
+  transition: opacity var(--t-fast) linear;
 }
 
-.page-enter-from {
-  opacity: 0;
-  transform: translateY(6px);
-}
-
+.page-enter-from,
 .page-leave-to {
   opacity: 0;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .page-enter-active,
-  .page-leave-active {
-    transition: opacity 120ms linear;
-  }
-
-  .page-enter-from {
-    transform: none;
-  }
 }
 </style>
