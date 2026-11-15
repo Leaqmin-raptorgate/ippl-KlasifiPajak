@@ -904,7 +904,8 @@ onMounted(async () => {
   gap: var(--s-6);
   width: 100%;
   max-width: 52rem;
-  margin-inline: auto;
+  /* Left-aligned with the page title the shell renders above it. */
+  margin-inline: 0;
 }
 
 .back {
@@ -1194,8 +1195,23 @@ onMounted(async () => {
 
 .jawab {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--s-3);
   margin-top: var(--s-5);
+}
+
+/* Each answer is a full-width choice that wraps its label instead of running
+   past the card edge. */
+.jawab > * {
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  min-height: 2.75rem;
+  padding-block: var(--s-2);
+  white-space: normal;
+  text-align: left;
+  justify-content: flex-start;
+  line-height: 1.35;
 }
 
 @media (min-width: 480px) {
