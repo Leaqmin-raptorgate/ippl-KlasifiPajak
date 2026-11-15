@@ -1090,6 +1090,17 @@ async function jalankanHapus() {
   }
 }
 
+/* Controls in the rows above reach 44px on a phone. */
+@media (max-width: 767px) {
+  .baris-tunggal :deep(button),
+  .baris-tunggal :deep(a),
+  .tema-seg :deep(button),
+  .kunci-row :deep(button),
+  .kunci :deep(button) {
+    min-height: 2.75rem;
+  }
+}
+
 /* ---- Security detail --------------------------------------------------- */
 
 .kunci {
