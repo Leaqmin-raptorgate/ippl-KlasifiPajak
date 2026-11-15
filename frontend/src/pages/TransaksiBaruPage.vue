@@ -454,7 +454,7 @@ async function simpan() {
             </div>
           </div>
           <p v-else-if="galatSimpan" class="kunci" role="alert">{{ galatSimpan }}</p>
-          <div class="aksi u-hairline-top">
+          <div class="aksi">
             <AppButton variant="ghost" size="lg" @click="batal">Batal</AppButton>
             <AppButton
               type="submit"
@@ -524,8 +524,8 @@ async function simpan() {
 }
 
 .t1 {
-  font: var(--t-title-1);
-  letter-spacing: var(--track-title-1);
+  font: var(--t-title-2);
+  letter-spacing: var(--track-title-2);
 }
 
 .sub {
@@ -650,23 +650,15 @@ async function simpan() {
   margin-top: var(--s-2);
 }
 
+/* The submit row is the last thing in the form, in normal flow. It does not
+   float or stick: the page scrolls past it like any other content. */
 .aksi {
-  position: sticky;
-  bottom: var(--s-3);
   display: flex;
   flex-wrap: wrap;
   gap: var(--s-3);
-  margin: 0 calc(-1 * var(--s-5)) calc(-1 * var(--s-5));
-  padding: var(--s-4) var(--s-5) var(--s-5);
-  background: var(--surface);
-  border-radius: 0 0 var(--r-lg) var(--r-lg);
-}
-
-/* On a phone the floating tab bar owns the bottom edge of the screen. */
-@media (max-width: 767px) {
-  .aksi {
-    bottom: calc(var(--tabbar-h) + var(--safe-b) + var(--s-3));
-  }
+  margin-top: var(--s-2);
+  padding-top: var(--s-5);
+  border-top: 1px solid var(--hairline);
 }
 
 .aksi > * {
@@ -680,6 +672,12 @@ async function simpan() {
 
   .aksi > * {
     flex: none;
+  }
+}
+
+@media (max-width: 639px) {
+  .page :deep(.s-sm) {
+    --btn-h: 2.75rem;
   }
 }
 

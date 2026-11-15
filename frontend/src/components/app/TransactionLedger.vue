@@ -109,7 +109,6 @@ const anyPending = computed(() => props.rows.some((r) => r.classification?.requi
   background: var(--surface);
   border: 1px solid var(--hairline);
   border-radius: var(--r-lg);
-  box-shadow: var(--shadow-1);
   overflow: clip;
 }
 
@@ -125,6 +124,7 @@ const anyPending = computed(() => props.rows.some((r) => r.classification?.requi
 .row {
   display: grid;
   grid-template-areas:
+    "date date"
     "who who"
     "amt cat"
     "src go";
@@ -154,8 +154,20 @@ const anyPending = computed(() => props.rows.some((r) => r.classification?.requi
   min-width: 0;
 }
 
+/* The date leads each row on a phone; from 640px it moves into its own column. */
 .c.date {
-  display: none;
+  grid-area: date;
+  display: flex;
+  align-items: baseline;
+  gap: 0.375rem;
+  margin-bottom: -0.25rem;
+}
+
+.d {
+  font: var(--t-label-sm);
+  font-weight: 600;
+  color: var(--ink-2);
+  white-space: nowrap;
 }
 
 .who {
@@ -194,15 +206,9 @@ const anyPending = computed(() => props.rows.some((r) => r.classification?.requi
 }
 
 .npwp {
-  font-size: 0.6875rem;
-  color: var(--ink-3);
-  letter-spacing: 0.01em;
-}
-
-.note-line {
   font: var(--t-caption);
   color: var(--ink-3);
-  font-style: italic;
+  letter-spacing: 0.01em;
 }
 
 .amt {
@@ -236,11 +242,6 @@ const anyPending = computed(() => props.rows.some((r) => r.classification?.requi
   grid-area: go;
   justify-self: end;
   color: var(--ink-3);
-  transition: transform var(--t-fast) var(--ease-out-soft);
-}
-
-.row:hover .go {
-  transform: translateX(2px);
 }
 
 .empty {
@@ -267,24 +268,11 @@ const anyPending = computed(() => props.rows.some((r) => r.classification?.requi
   }
 
   .c.date {
-    grid-area: date;
-    display: flex;
     flex-direction: column;
     align-self: start;
     gap: 0.0625rem;
     padding-top: 0.125rem;
-  }
-
-  .d {
-    font: var(--t-label-sm);
-    font-weight: 600;
-    color: var(--ink-2);
-    white-space: nowrap;
-  }
-
-  .t {
-    font-size: 0.6875rem;
-    color: var(--ink-3);
+    margin-bottom: 0;
   }
 
   .who {
@@ -359,12 +347,6 @@ const anyPending = computed(() => props.rows.some((r) => r.classification?.requi
   .go {
     display: block;
     justify-self: end;
-    opacity: 0;
-  }
-
-  .row:hover .go,
-  .row:focus-visible .go {
-    opacity: 1;
   }
 
   .kt {
