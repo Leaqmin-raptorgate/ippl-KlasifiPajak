@@ -48,6 +48,8 @@ npm ci   # ALWAYS npm ci, never npm install (lockfile-locked)
 | `AI_*`                 | OpenAI-compatible client settings for receipt OCR, fallback classification, and assistant Q&A. Empty = fail closed to rules.  |
 | `MIDTRANS_*`           | Midtrans Snap server/client keys and production flag for subscription checkout and notification verification.                 |
 
+In the Midtrans sandbox dashboard, set the 'Finish URL' to `<frontend origin>/langganan/kembali`. The app does not send a finish callback itself, so without that setting the buyer is not returned to the app.
+
 ### Docker Compose (MySQL + migrate + API + frontend)
 
 Compose boots MySQL, runs a **one-shot `migrate` service** (`alembic upgrade head`
