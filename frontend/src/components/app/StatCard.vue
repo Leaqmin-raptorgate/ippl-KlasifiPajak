@@ -36,7 +36,6 @@ defineProps<{
   background: var(--surface);
   border: 1px solid var(--hairline);
   border-radius: var(--r-lg);
-  box-shadow: var(--shadow-1);
   min-width: 0;
 }
 
@@ -89,8 +88,10 @@ defineProps<{
   color: var(--warn-ink);
 }
 
-.t-warn .cap {
-  color: color-mix(in oklab, var(--warn-ink) 75%, transparent);
+/* Captions keep full text colour on tinted cards: a faded caption fails 4.5:1. */
+.t-warn .cap,
+.t-ask .cap {
+  color: var(--ink-2);
 }
 
 .t-ask {
@@ -101,10 +102,6 @@ defineProps<{
 .t-ask .val,
 .t-ask .ic {
   color: var(--cat-ask-ink);
-}
-
-.t-ask .cap {
-  color: color-mix(in oklab, var(--cat-ask-ink) 75%, transparent);
 }
 
 @media (min-width: 768px) {
