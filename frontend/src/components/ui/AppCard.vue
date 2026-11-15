@@ -32,13 +32,11 @@ withDefaults(
   background: var(--surface);
   border: 1px solid var(--hairline);
   border-radius: var(--r-lg);
-  box-shadow: var(--shadow-1);
   overflow: clip;
 }
 
 .inset {
   background: var(--surface-sunken);
-  box-shadow: none;
 }
 
 .flush .body {

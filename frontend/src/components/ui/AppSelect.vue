@@ -44,7 +44,7 @@ const emit = defineEmits<{ "update:modelValue": [value: string] }>();
   align-items: center;
   min-height: 2.75rem;
   background: var(--surface);
-  border: 1px solid var(--hairline-strong);
+  border: 1px solid var(--field-line);
   border-radius: var(--r-md);
   transition:
     border-color var(--t-fast) var(--ease-out-soft),

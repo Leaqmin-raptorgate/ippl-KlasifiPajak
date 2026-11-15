@@ -94,7 +94,7 @@ watch(
   border-radius: calc(var(--r-md) - 0.1875rem);
   background: var(--surface);
   box-shadow: var(--shadow-1);
-  transition: transform var(--t-base) var(--ease-spring);
+  transition: transform var(--t-fast) var(--ease-out-soft);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -135,7 +135,7 @@ watch(
 }
 
 .oc {
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   color: var(--ink-3);
 }
 

@@ -59,7 +59,7 @@ const glyph = computed(() => props.icon ?? iconFor[props.tone ?? "neutral"] ?? "
 }
 
 .sz-sm {
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   padding: 0.125rem 0.4375rem 0.125rem 0.375rem;
 }
 
