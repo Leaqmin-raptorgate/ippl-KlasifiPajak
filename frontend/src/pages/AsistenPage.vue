@@ -80,7 +80,6 @@ function isiPertanyaan(teks: string) {
     <div class="col">
       <header class="lede">
         <div class="lede-teks">
-          <h2 class="t1">Asisten pajak</h2>
           <p class="sub">
             Halo {{ session.tampilanNama }}. Asisten ini menjelaskan kertas kerja yang sudah Anda
             punya: kategori, dasar aturan, dan alasan di baliknya. Ia tidak menghitung apa pun yang
@@ -102,56 +101,71 @@ function isiPertanyaan(teks: string) {
         subtitle="Jawabannya disusun dari baris yang tersimpan, lalu ditampilkan di halaman ini."
       >
         <div class="form">
-          <AiConsentNote />
-          <AppField
-            label="Pertanyaan Anda"
-            for-id="tanya-asisten"
-            hint="Satu pertanyaan. Jawaban memakai angka yang sudah ada di kertas kerja."
-          >
-            <textarea
-              id="tanya-asisten"
-              v-model="tanya"
-              class="ta"
-              rows="4"
-              placeholder="mis. kenapa baris saya masuk pekerjaan bebas?"
-              @keydown.meta.enter.prevent="kirim"
-              @keydown.ctrl.enter.prevent="kirim"
-            />
-          </AppField>
+          <div class="info">
+            <AiConsentNote />
+          </div>
 
-          <div class="aksi">
-            <AppButton
-              variant="primary"
-              size="lg"
-              icon="obrolan"
-              :disabled="tanya.trim() === '' || berpikir || habis"
-              @click="kirim"
+          <div class="thread" role="log" aria-live="polite" aria-label="Percakapan dengan asisten">
+            <p v-if="!pertanyaanTerakhir" class="thread-kosong">
+              Belum ada pertanyaan. Tulis pertanyaan di bawah, atau pilih salah satu contoh.
+            </p>
+
+            <div v-if="pertanyaanTerakhir" class="pesan pesan-anda">
+              <p class="pesan-label">Anda</p>
+              <p class="pesan-isi">{{ pertanyaanTerakhir }}</p>
+            </div>
+
+            <div v-if="berpikir" class="berpikir" role="status">
+              <span class="jalur" aria-hidden="true"><span class="sweep kp-sweep" /></span>
+              <span class="berpikir-teks">Menyusun penjelasan dari kertas kerja…</span>
+            </div>
+
+            <div v-if="jawaban" class="pesan pesan-asisten">
+              <p class="pesan-label">Asisten</p>
+              <p class="pesan-isi">{{ jawaban.answer }}</p>
+              <ul v-if="jawaban.citations.length" class="sitasi">
+                <li v-for="sitasi in jawaban.citations" :key="sitasi">{{ sitasi }}</li>
+              </ul>
+              <p class="pesan-meta">Sisa kuota jawaban: {{ jawaban.quota_remaining }}</p>
+            </div>
+
+            <p v-if="galat" class="info info-galat" role="alert">{{ galat }}</p>
+            <p v-if="habis" class="info info-galat">
+              Kuota bulan ini sudah habis. Kertas kerja Anda tetap terbaca di halaman transaksi.
+            </p>
+          </div>
+
+          <div class="composer">
+            <AppField
+              label="Pertanyaan Anda"
+              for-id="tanya-asisten"
+              hint="Satu pertanyaan. Jawaban memakai angka yang sudah ada di kertas kerja."
             >
-              Kirim pertanyaan
-            </AppButton>
-            <p class="demo-note">Jawaban tidak disimpan sebagai arsip percakapan.</p>
+              <textarea
+                id="tanya-asisten"
+                v-model="tanya"
+                class="ta"
+                rows="4"
+                placeholder="mis. kenapa baris saya masuk pekerjaan bebas?"
+                @keydown.meta.enter.prevent="kirim"
+                @keydown.ctrl.enter.prevent="kirim"
+              />
+            </AppField>
+
+            <div class="aksi">
+              <AppButton
+                variant="primary"
+                size="lg"
+                icon="obrolan"
+                :disabled="tanya.trim() === '' || berpikir || habis"
+                @click="kirim"
+              >
+                Kirim pertanyaan
+              </AppButton>
+              <p class="demo-note">Jawaban tidak disimpan sebagai arsip percakapan.</p>
+            </div>
           </div>
         </div>
-
-        <div v-if="berpikir" class="berpikir" role="status">
-          <span class="jalur" aria-hidden="true"><span class="sweep kp-sweep" /></span>
-          <span class="berpikir-teks">Menyusun penjelasan dari kertas kerja…</span>
-        </div>
-
-        <div v-if="pertanyaanTerakhir" class="daftar">
-          <p class="u-label">Pertanyaan Anda</p>
-          <p>{{ pertanyaanTerakhir }}</p>
-        </div>
-        <p v-if="galat" class="kuota-habis" role="alert">{{ galat }}</p>
-        <div v-if="jawaban" class="daftar">
-          <p>{{ jawaban.answer }}</p>
-          <p v-for="sitasi in jawaban.citations" :key="sitasi" class="demo-note">{{ sitasi }}</p>
-          <p class="demo-note">Sisa kuota jawaban: {{ jawaban.quota_remaining }}</p>
-        </div>
-
-        <p v-if="habis" class="kuota-habis">
-          Kuota bulan ini sudah habis. Kertas kerja Anda tetap terbaca di halaman transaksi.
-        </p>
       </AppCard>
 
       <AppCard
@@ -228,7 +242,8 @@ function isiPertanyaan(teks: string) {
   gap: var(--s-6);
   width: 100%;
   max-width: 48rem;
-  margin-inline: auto;
+  /* Left-aligned with the page title the shell renders above it. */
+  margin-inline: 0;
 }
 
 .lede {
@@ -265,13 +280,149 @@ function isiPertanyaan(teks: string) {
   gap: var(--s-5);
 }
 
+/* ---- Regular information blocks: consent, quota, errors ---------------- */
+
+.info {
+  padding: var(--s-3) var(--s-4);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: var(--surface-sunken);
+  color: var(--ink-2);
+  font: var(--t-body-sm);
+  line-height: 1.5;
+}
+
+.info-galat {
+  border-color: var(--cat-ask-line);
+  background: var(--cat-ask-bg);
+  color: var(--cat-ask-ink);
+}
+
+/* ---- Conversation panel ------------------------------------------------ */
+
+/* A bordered panel on the page, not a chat surface pinned to the screen. */
+.thread {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  min-height: 8rem;
+  padding: var(--s-4);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--r-lg);
+  background: var(--canvas);
+}
+
+.thread-kosong {
+  margin: auto 0;
+  color: var(--ink-3);
+  font: var(--t-body-sm);
+  line-height: 1.5;
+}
+
+.pesan {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-4);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  max-width: 100%;
+}
+
+/* The user's turn is tinted with the accent and carries its own label. */
+.pesan-anda {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+
+.pesan-label {
+  font: var(--t-label-sm);
+  letter-spacing: var(--track-label-sm);
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.pesan-anda .pesan-label {
+  color: var(--accent-soft-ink);
+}
+
+.pesan-isi {
+  font: var(--t-body);
+  color: var(--ink);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.pesan-meta {
+  font: var(--t-body-sm);
+  color: var(--ink-3);
+}
+
+.sitasi {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--hairline);
+  font: var(--t-body-sm);
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+
+@media (min-width: 640px) {
+  .pesan-anda {
+    width: min(100%, 36rem);
+    margin-left: auto;
+  }
+}
+
+.berpikir {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+
+.jalur {
+  position: relative;
+  display: block;
+  flex: 1;
+  max-width: 14rem;
+  height: 0.375rem;
+  border-radius: var(--r-full);
+  background: var(--surface-sunken);
+  border: 1px solid var(--hairline);
+  overflow: clip;
+}
+
+.sweep {
+  display: block;
+  width: 30%;
+  height: 100%;
+  border-radius: var(--r-full);
+  background: var(--accent);
+}
+
+.berpikir-teks {
+  font: var(--t-body-sm);
+  color: var(--ink-2);
+}
+
+/* ---- Composer ---------------------------------------------------------- */
+
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+
 /* Same shell as AppInput, so a textarea does not read as a different control. */
 .ta {
   width: 100%;
   min-height: 2.75rem;
   padding: 0.6875rem var(--s-3);
   background: var(--surface);
-  border: 1px solid var(--hairline-strong);
+  border: 1px solid var(--field-line);
   border-radius: var(--r-md);
   font: var(--t-body);
   letter-spacing: var(--track-body);
@@ -301,8 +452,12 @@ function isiPertanyaan(teks: string) {
 .aksi {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: stretch;
   gap: var(--s-3);
+}
+
+.aksi > :first-child {
+  align-self: stretch;
 }
 
 .demo-note {
@@ -319,8 +474,8 @@ function isiPertanyaan(teks: string) {
     gap: var(--s-4);
   }
 
-  .aksi > * {
-    flex: none;
+  .aksi > :first-child {
+    align-self: auto;
   }
 
   /* The button keeps its intrinsic width; the prose beside it has to be allowed
@@ -331,218 +486,7 @@ function isiPertanyaan(teks: string) {
   }
 }
 
-.berpikir {
-  display: flex;
-  align-items: center;
-  gap: var(--s-3);
-  margin-top: var(--s-5);
-}
-
-.jalur {
-  position: relative;
-  display: block;
-  flex: 1;
-  max-width: 14rem;
-  height: 0.375rem;
-  border-radius: var(--r-full);
-  background: var(--surface-sunken);
-  border: 1px solid var(--hairline);
-  overflow: clip;
-}
-
-.sweep {
-  display: block;
-  width: 30%;
-  height: 100%;
-  border-radius: var(--r-full);
-  background: var(--accent);
-}
-
-.berpikir-teks {
-  font: var(--t-body-sm);
-  color: var(--ink-2);
-}
-
-.daftar {
-  margin-top: var(--s-5);
-  padding-top: var(--s-4);
-  border-top: 1px solid var(--hairline);
-}
-
-.riwayat {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-2);
-  margin-top: var(--s-3);
-}
-
-.riwayat li {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--s-2);
-  padding: var(--s-2) var(--s-3);
-  border-radius: var(--r-sm);
-  background: var(--surface-sunken);
-  font: var(--t-body-sm);
-  color: var(--ink-2);
-  line-height: 1.45;
-}
-
-.riwayat svg {
-  margin-top: 0.125rem;
-  flex: none;
-  color: var(--ink-3);
-}
-
-.kuota-habis {
-  margin-top: var(--s-4);
-  padding: var(--s-3) var(--s-4);
-  border: 1px solid var(--cat-ask-line);
-  border-radius: var(--r-md);
-  background: var(--cat-ask-bg);
-  color: var(--cat-ask-ink);
-  font: var(--t-body-sm);
-  line-height: 1.5;
-}
-
-.pertanyaan-contoh {
-  font: var(--t-title-3);
-  letter-spacing: var(--track-title-3);
-  font-weight: 600;
-  line-height: 1.4;
-  text-wrap: balance;
-  padding-bottom: var(--s-4);
-  border-bottom: 1px solid var(--hairline);
-}
-
-.skema {
-  display: grid;
-  gap: var(--s-3);
-  margin-top: var(--s-4);
-}
-
-@media (min-width: 760px) {
-  .skema {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-.skema-kepala {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--s-3);
-  margin-bottom: var(--s-3);
-}
-
-.skema-nama {
-  font: var(--t-label);
-  letter-spacing: var(--track-caption);
-  font-weight: 600;
-  text-transform: uppercase;
-  color: var(--ink-3);
-}
-
-.skema-alasan {
-  font: var(--t-body-sm);
-  color: var(--ink);
-  line-height: 1.55;
-}
-
-.skema-akibat {
-  font: var(--t-body-sm);
-  color: var(--ink-2);
-  line-height: 1.5;
-  margin-top: var(--s-3);
-  padding-top: var(--s-3);
-  border-top: 1px solid var(--hairline);
-}
-
-.kunci {
-  font: var(--t-body-sm);
-  color: var(--ink-2);
-  line-height: 1.55;
-  margin-top: var(--s-5);
-  padding-top: var(--s-4);
-  border-top: 1px solid var(--hairline);
-}
-
-.dl {
-  display: flex;
-  flex-direction: column;
-}
-
-.dl-row {
-  display: grid;
-  gap: var(--s-1);
-  padding: var(--s-3) 0;
-  border-top: 1px solid var(--hairline);
-}
-
-.dl-row:first-child {
-  border-top: 0;
-  padding-top: 0;
-}
-
-.dl dt {
-  font: var(--t-label-sm);
-  letter-spacing: var(--track-label-sm);
-  color: var(--ink-3);
-}
-
-.dl dd {
-  min-width: 0;
-}
-
-.teks {
-  font-family: var(--font-numeric);
-  letter-spacing: -0.01em;
-}
-
-@media (min-width: 620px) {
-  .dl-row {
-    grid-template-columns: minmax(0, 14rem) minmax(0, 1fr);
-    gap: var(--s-4);
-    align-items: baseline;
-  }
-}
-
-.rujuk {
-  display: flex;
-  flex-direction: column;
-  gap: 0.125rem;
-  padding: var(--s-3);
-  border: 1px solid var(--hairline-strong);
-  border-radius: var(--r-md);
-  background: var(--surface);
-  box-shadow: var(--shadow-1);
-  transition:
-    border-color var(--t-fast) var(--ease-out-soft),
-    background-color var(--t-fast) var(--ease-out-soft);
-}
-
-.rujuk:hover {
-  border-color: var(--accent-line);
-  background: var(--surface-raised);
-}
-
-.rujuk-id {
-  font-size: 0.75rem;
-  color: var(--accent);
-  font-weight: 600;
-}
-
-.rujuk-nama {
-  font: var(--t-body);
-  color: var(--ink);
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
-.rujuk-meta {
-  font: var(--t-body-sm);
-  color: var(--ink-3);
-}
+/* ---- Suggestions ------------------------------------------------------- */
 
 .saran {
   display: grid;
@@ -556,11 +500,11 @@ function isiPertanyaan(teks: string) {
   width: 100%;
   min-height: 2.75rem;
   padding: var(--s-3);
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--hairline-strong);
   border-radius: var(--r-md);
-  background: var(--surface-sunken);
+  background: var(--surface);
   font: var(--t-body-sm);
-  color: var(--ink-2);
+  color: var(--ink);
   line-height: 1.45;
   text-align: left;
   transition:
@@ -583,6 +527,8 @@ function isiPertanyaan(teks: string) {
 .saran-item:hover svg {
   color: var(--accent-soft-ink);
 }
+
+/* ---- Read-only notice -------------------------------------------------- */
 
 .batas-isi {
   display: flex;
@@ -616,6 +562,8 @@ function isiPertanyaan(teks: string) {
   margin-top: var(--s-1);
 }
 
+/* ---- Not enabled on this server --------------------------------------- */
+
 .belum-aktif {
   display: flex;
   flex-direction: column;
@@ -632,5 +580,16 @@ function isiPertanyaan(teks: string) {
   display: flex;
   flex-wrap: wrap;
   gap: var(--s-3);
+}
+
+.form :deep(.lab .u-label) {
+  font: var(--t-label);
+  letter-spacing: var(--track-label);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sweep {
+    display: none;
+  }
 }
 </style>

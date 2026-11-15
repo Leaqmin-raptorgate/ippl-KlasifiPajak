@@ -904,14 +904,15 @@ onMounted(async () => {
   gap: var(--s-6);
   width: 100%;
   max-width: 52rem;
-  margin-inline: auto;
+  /* Left-aligned with the page title the shell renders above it. */
+  margin-inline: 0;
 }
 
 .back {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
-  min-height: 2.5rem;
+  min-height: 2.75rem;
   margin-block: calc(-1 * var(--s-2));
   font: var(--t-label);
   letter-spacing: var(--track-label);
@@ -963,9 +964,15 @@ onMounted(async () => {
 }
 
 .dl dt {
-  font: var(--t-label-sm);
-  letter-spacing: var(--track-label-sm);
-  color: var(--ink-3);
+  font: var(--t-label);
+  letter-spacing: var(--track-label);
+  color: var(--ink-2);
+}
+
+/* Form labels inside the edit and override sheets are 14px like the rest. */
+.sheet-fields :deep(.lab .u-label) {
+  font: var(--t-label);
+  letter-spacing: var(--track-label);
 }
 
 .dl dd {
@@ -1000,8 +1007,16 @@ onMounted(async () => {
   font-weight: 600;
 }
 
+/* The verdict is the first thing read on the page: a stronger edge and a
+   larger category name than any card below it. */
 .putusan {
   border-color: var(--hairline-strong);
+  box-shadow: inset 4px 0 0 var(--accent);
+}
+
+.putusan .nama {
+  font: var(--t-title-1);
+  letter-spacing: var(--track-title-1);
 }
 
 .putusan-head {
@@ -1139,8 +1154,11 @@ onMounted(async () => {
   margin-top: var(--s-4);
 }
 
+/* The open question is the only action on this screen: a visible edge, and
+   answer buttons that read as a list of choices. */
 .tanya-card {
   border-color: var(--cat-ask-line);
+  box-shadow: inset 4px 0 0 var(--cat-ask-ink);
 }
 
 .tanya-head {
@@ -1177,8 +1195,23 @@ onMounted(async () => {
 
 .jawab {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--s-3);
   margin-top: var(--s-5);
+}
+
+/* Each answer is a full-width choice that wraps its label instead of running
+   past the card edge. */
+.jawab > * {
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  min-height: 2.75rem;
+  padding-block: var(--s-2);
+  white-space: normal;
+  text-align: left;
+  justify-content: flex-start;
+  line-height: 1.35;
 }
 
 @media (min-width: 480px) {
@@ -1306,7 +1339,7 @@ onMounted(async () => {
   align-items: center;
   align-self: flex-start;
   gap: 0.25rem;
-  min-height: 2.5rem;
+  min-height: 2.75rem;
   font: var(--t-label);
   letter-spacing: var(--track-label);
   font-weight: 600;
