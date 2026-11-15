@@ -275,7 +275,7 @@ async function unduh() {
     </AppCard>
 
     <section class="stats" aria-label="Ringkasan">
-      <div class="stat-grid kp-stagger">
+      <div class="stat-grid">
         <StatCard
           label="Gabungan tahun berjalan"
           :value="tahun ? rupiahShort(tahun.ytd_combined_gross_idr) : '—'"
@@ -395,9 +395,10 @@ async function unduh() {
   flex-wrap: wrap;
 }
 
+/* The shell's h1 names the page; this h2 names the figures under it. */
 .t1 {
-  font: var(--t-title-1);
-  letter-spacing: var(--track-title-1);
+  font: var(--t-title-2);
+  letter-spacing: var(--track-title-2);
 }
 
 .sub {
@@ -405,6 +406,11 @@ async function unduh() {
   color: var(--ink-2);
   max-width: 34rem;
   margin-top: var(--s-2);
+}
+
+.t3 {
+  font: var(--t-title-3);
+  letter-spacing: var(--track-title-3);
 }
 
 .acts {
@@ -513,6 +519,21 @@ async function unduh() {
   margin-top: var(--s-5);
 }
 
+/* The threshold bar is the one figure that must be read at a glance: a taller
+   track, and no grow-in animation (the shared meter's is longer than a fade). */
+.meter :deep(.track) {
+  height: 0.75rem;
+}
+
+.meter :deep(.fill) {
+  animation: none;
+}
+
+.meter :deep(.cap) {
+  font-variant-numeric: tabular-nums;
+  font-size: var(--t-label);
+}
+
 .cap {
   font: var(--t-caption);
   letter-spacing: var(--track-caption);
@@ -541,10 +562,60 @@ async function unduh() {
   border-bottom: 0;
 }
 
-/* Month label column: fixed width so rows line up at 390px (R18-N4). */
+/* Monthly rows: on a phone each row stacks (month heading, then one figure per
+   line) so nothing needs a sideways scroll. From 640px they line up in columns. */
+li.mix-row {
+  flex-wrap: wrap;
+  align-items: baseline;
+  row-gap: var(--s-1);
+  column-gap: var(--s-3);
+  padding-inline: var(--s-4);
+}
+
+/* Small buttons keep a 44px phone target. */
+@media (max-width: 639px) {
+  .page :deep(.s-sm) {
+    --btn-h: 2.75rem;
+  }
+}
+
 li.mix-row > span:first-child {
-  flex: 0 0 7.5rem;
-  white-space: nowrap;
+  flex: 1 1 100%;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+li.mix-row > span:not(:first-child) {
+  flex: 0 0 auto;
+  font-size: var(--t-body-sm);
+  color: var(--ink-2);
+}
+
+li.mix-row > span.muted {
+  flex: 1 1 100%;
+}
+
+@media (min-width: 640px) {
+  li.mix-row {
+    flex-wrap: nowrap;
+    align-items: center;
+  }
+
+  /* Month label column: fixed width so rows line up at 390px (R18-N4). */
+  li.mix-row > span:first-child {
+    flex: 0 0 7.5rem;
+    white-space: nowrap;
+  }
+
+  li.mix-row > span:not(:first-child) {
+    font-size: var(--t-body);
+    color: var(--ink);
+  }
+
+  li.mix-row > span.muted {
+    flex: 1 1 auto;
+    color: var(--ink-3);
+  }
 }
 
 .mix-row dd {
@@ -553,19 +624,21 @@ li.mix-row > span:first-child {
   white-space: nowrap;
 }
 
+/* One column on a phone, two from 640px, four where a row of four fits. */
 .stat-grid {
   display: grid;
   gap: var(--s-3);
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
 }
 
-@media (min-width: 520px) {
+@media (min-width: 640px) {
   .stat-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--s-4);
   }
 }
 
-@media (min-width: 1100px) {
+@media (min-width: 1024px) {
   .stat-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
@@ -573,9 +646,10 @@ li.mix-row > span:first-child {
 
 .sec-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: var(--s-4);
+  gap: var(--s-2) var(--s-4);
   margin-bottom: var(--s-4);
 }
 
@@ -597,11 +671,6 @@ li.mix-row > span:first-child {
 .more svg {
   width: 0.9375rem;
   height: 0.9375rem;
-  transition: transform var(--t-fast) var(--ease-out-soft);
-}
-
-.more:hover svg {
-  transform: translateX(2px);
 }
 
 .stamp {
