@@ -100,6 +100,26 @@ describe("KuotaPage subscription purchase", () => {
     expect(assign).toHaveBeenCalledWith(PENDING.payment_url);
   });
 
+  it("reads quotas, status and orders once when the page and the shell both load", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: "/kuota", name: "kuota", component: KuotaPage }],
+    });
+    await router.push("/kuota");
+    await router.isReady();
+    const wrapper = mount(KuotaPage, { global: { plugins: [pinia, router] } });
+    montados.push(wrapper);
+    // The shell asks for the same store load while the page is mounting.
+    void useKuotaStore().muat();
+    await flushPromises();
+    const calls = (path: string) => apiMock.mock.calls.filter(([p]) => p === path).length;
+    expect(calls("/quotas")).toBe(1);
+    expect(calls("/subscriptions/status")).toBe(1);
+    expect(calls("/subscriptions/orders")).toBe(1);
+  });
+
   it("shows an empty state, not an error, when quota and status are not found yet", async () => {
     apiMock.mockImplementation((path: string, init?: RequestInit) =>
       path === "/quotas" || path === "/subscriptions/status"

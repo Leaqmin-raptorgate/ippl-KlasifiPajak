@@ -77,7 +77,7 @@ function jadwalkanUlang(sisa: number) {
   mengonfirmasi.value = true;
   pewaktu = setTimeout(async () => {
     pewaktu = null;
-    await kuota.muat();
+    await kuota.muat(true);
     jadwalkanUlang(sisa - 1);
   }, ULANG_JEDA_MS);
 }
@@ -86,7 +86,7 @@ function jadwalkanUlang(sisa: number) {
 function saatDitampilkan(event: PageTransitionEvent) {
   if (!event.persisted) return;
   kuota.lepasPesanan();
-  void kuota.muat();
+  void kuota.muat(true);
 }
 
 onMounted(async () => {

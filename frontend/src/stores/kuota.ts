@@ -30,7 +30,24 @@ export const useKuotaStore = defineStore("kuota", () => {
     return error instanceof ApiFailure && error.status === 404;
   }
 
-  async function muat() {
+  let muatBerjalan: Promise<void> | null = null;
+
+  /**
+   * The one owner of the Kuota read. A plain call joins a read already in flight,
+   * so the shell and the page that mount together send one request per resource.
+   * `paksa` starts a fresh read for the re-reads that must see new data (polling,
+   * a return from the back/forward cache, a refresh after an order).
+   */
+  function muat(paksa = false): Promise<void> {
+    if (muatBerjalan && !paksa) return muatBerjalan;
+    const selesai: Promise<void> = bacaUlang().finally(() => {
+      if (muatBerjalan === selesai) muatBerjalan = null;
+    });
+    muatBerjalan = selesai;
+    return selesai;
+  }
+
+  async function bacaUlang() {
     pesan.value = "";
     try {
       quotas.value = await api<Quotas>("/quotas");
@@ -112,7 +129,7 @@ export const useKuotaStore = defineStore("kuota", () => {
         order.status === "pending"
           ? "Tautan bayar belum siap. Coba lagi sebentar."
           : "Pesanan ini sudah tidak menunggu pembayaran, jadi tautan bayar tidak tersedia. Status akun dan riwayat pesanan dibaca ulang.";
-      await muat();
+      await muat(true);
     }
     return order;
   }
