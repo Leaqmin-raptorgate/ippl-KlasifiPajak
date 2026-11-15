@@ -158,6 +158,44 @@ describe("KuotaPage subscription purchase", () => {
     expect(wrapper.text()).toContain("Lunas");
   });
 
+  it("re-reads the order list after a failed create and holds the guard until it ends", async () => {
+    post = () =>
+      Promise.reject(
+        new ApiFailure(503, "PAYMENT_GATEWAY_UNAVAILABLE", "Pembayaran belum tersedia. Coba lagi."),
+      );
+    const wrapper = await pasang();
+    const listCalls = () =>
+      apiMock.mock.calls.filter(([p, init]) => p === "/subscriptions/orders" && !init?.method)
+        .length;
+    const before = listCalls();
+
+    // Hold the re-read so a second click lands while it is still running.
+    let releaseList: (value: unknown) => void = () => {};
+    apiMock.mockImplementation((path: string, init?: RequestInit) =>
+      path === "/subscriptions/orders" && !init?.method && listCalls() > before
+        ? new Promise((resolve) => (releaseList = resolve))
+        : route(path, init),
+    );
+
+    await wrapper.get(".plan-cta button").trigger("click");
+    await flushPromises();
+    expect(listCalls()).toBe(before + 1);
+
+    // A second order request during the re-read joins the guarded call.
+    void useKuotaStore()
+      .buatPesanan()
+      .catch(() => {});
+    await flushPromises();
+    expect(posts()).toHaveLength(1);
+
+    releaseList({ items: [] });
+    await flushPromises();
+    expect(posts()).toHaveLength(1);
+    expect(assign).not.toHaveBeenCalled();
+    expect(wrapper.get("[role=alert]").text()).toContain("Pembayaran belum tersedia");
+    expect(wrapper.get(".plan-cta button").attributes("disabled")).toBeUndefined();
+  });
+
   it("creates one order when two submits overlap", async () => {
     let release: (order: unknown) => void = () => {};
     post = () => new Promise((resolve) => (release = resolve));
