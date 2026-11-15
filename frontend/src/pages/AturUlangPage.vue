@@ -4,8 +4,8 @@ import { computed, ref } from "vue";
 import { useRoute } from "vue-router";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppField from "@/components/ui/AppField.vue";
-import AppIcon from "@/components/ui/AppIcon.vue";
 import AppInput from "@/components/ui/AppInput.vue";
+import WorkpaperNote from "@/components/app/WorkpaperNote.vue";
 import { ApiFailure } from "@/lib/api";
 import { useSessionStore } from "@/stores/session";
 
@@ -49,20 +49,14 @@ async function kirim() {
 </script>
 
 <template>
-  <div class="page atur-ulang">
-    <header class="top">
-      <RouterLink to="/" class="brand">
+  <div class="atur-ulang">
+    <main class="stage">
+      <RouterLink to="/" class="brand" aria-label="KlasifiPajak, beranda">
         <span class="mark" aria-hidden="true">K</span>
         <span class="word">KlasifiPajak</span>
       </RouterLink>
-      <RouterLink to="/masuk" class="back">
-        <AppIcon name="chevronLeft" :size="15" :stroke-width="1.8" />
-        Masuk
-      </RouterLink>
-    </header>
 
-    <main class="stage">
-      <form class="card kp-materialize" @submit.prevent="kirim">
+      <form class="card" @submit.prevent="kirim">
         <h1 class="h1">{{ token ? "Kata sandi baru" : "Atur ulang kata sandi" }}</h1>
         <p v-if="pesan" class="pesan" role="status">{{ pesan }}</p>
         <p v-if="galat" class="galat" role="alert">{{ galat }}</p>
@@ -79,100 +73,94 @@ async function kirim() {
               required
             />
           </AppField>
-          <AppButton type="submit" variant="primary" block :disabled="sibuk">
+          <AppButton type="submit" variant="primary" size="lg" block :disabled="sibuk">
             {{ token ? "Simpan kata sandi" : "Kirim petunjuk" }}
           </AppButton>
         </template>
-        <AppButton v-else to="/masuk" variant="primary" block> Masuk sekarang </AppButton>
-        <RouterLink to="/masuk" class="kembali">Kembali ke masuk</RouterLink>
+        <AppButton v-else to="/masuk" variant="primary" size="lg" block> Masuk sekarang </AppButton>
+        <RouterLink to="/masuk" class="helper">Kembali ke masuk</RouterLink>
       </form>
+
+      <WorkpaperNote publik class="foot-note" />
     </main>
   </div>
 </template>
 
 <style scoped>
-.page {
+/* Tokens only. Same centred column as the sign-in page. */
+
+.atur-ulang {
   min-height: 100svh;
-  background: var(--canvas);
   display: flex;
   flex-direction: column;
+  background: var(--canvas);
+  color: var(--ink);
+  padding-inline: var(--gutter);
 }
-.atur-ulang {
-  padding: var(--s-4) var(--s-4) calc(var(--s-8) + var(--safe-b));
-}
-@media (min-width: 768px) {
-  .atur-ulang {
-    padding: var(--s-6) var(--s-6) var(--s-10);
-  }
-}
-@media (min-width: 1280px) {
-  .atur-ulang {
-    padding-inline: var(--s-10);
-  }
-}
-.top {
+
+.stage {
+  flex: 1;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--s-4);
-  min-height: var(--topbar-h);
+  justify-content: center;
+  gap: var(--s-6);
+  width: 100%;
+  max-width: 26rem;
+  margin-inline: auto;
+  padding-block: var(--s-10);
 }
+
 .brand {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: var(--s-2);
-  min-height: 2.5rem;
+  min-height: 2.75rem;
+  color: var(--ink);
+  border-radius: var(--r-md);
 }
+
 .mark {
   display: grid;
   place-items: center;
-  width: 1.75rem;
-  height: 1.75rem;
+  width: 2rem;
+  height: 2rem;
   flex: none;
-  border-radius: var(--r-sm);
+  border-radius: var(--r-md);
   background: var(--accent);
   color: var(--accent-ink);
-  font: 600 0.875rem/1 var(--font-sans);
+  font: 600 0.9375rem/1 var(--font-sans);
 }
+
 .word {
   font: var(--t-title-3);
   letter-spacing: var(--track-title-3);
   white-space: nowrap;
 }
-.back {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s-1);
-  min-height: 2.5rem;
-  font: var(--t-label);
-  letter-spacing: var(--track-label);
-  color: var(--ink-2);
-  transition: color var(--t-fast) var(--ease-out-soft);
-}
-.back:hover {
-  color: var(--ink);
-}
-.stage {
-  flex: 1;
-  display: grid;
-  place-items: center;
-  padding: var(--s-6);
-}
+
 .card {
-  width: min(100%, 24rem);
+  width: 100%;
   display: flex;
   flex-direction: column;
-  gap: var(--s-4);
+  gap: var(--s-5);
   padding: var(--s-6);
   background: var(--surface);
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--hairline-strong);
   border-radius: var(--r-lg);
-  box-shadow: var(--shadow-2);
+  box-shadow: var(--shadow-1);
 }
+
+@media (max-width: 479px) {
+  .card {
+    padding: var(--s-5);
+  }
+}
+
 .h1 {
-  font: var(--t-title-1);
-  letter-spacing: var(--track-title-1);
+  font: var(--t-title-2);
+  letter-spacing: var(--track-title-2);
 }
+
 .pesan {
   font: var(--t-body-sm);
   color: var(--cat-usaha-ink);
@@ -182,22 +170,36 @@ async function kirim() {
   border-radius: var(--r-md);
   line-height: 1.45;
 }
+
 .galat {
   font: var(--t-body-sm);
-  color: var(--danger, var(--ink));
+  color: var(--cat-ask-ink);
   background: var(--cat-ask-bg);
   border: 1px solid var(--cat-ask-line);
   padding: var(--s-3);
   border-radius: var(--r-md);
   line-height: 1.45;
 }
-.kembali {
-  font: var(--t-body-sm);
-  color: var(--ink-2);
+
+/* Helper link: 44px tap target, underlined. */
+.helper {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.75rem;
+  font: var(--t-label);
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  border-radius: var(--r-md);
   text-align: center;
-  margin-top: var(--s-2);
 }
-.kembali:hover {
-  color: var(--ink);
+
+.helper:hover {
+  color: var(--accent-hover);
+}
+
+.foot-note {
+  text-align: center;
 }
 </style>
