@@ -1294,3 +1294,30 @@ def test_tc_email_reset_sends_plaintext_only_to_sender_and_never_logs_it(
         assert row.token_hash != plaintext
     finally:
         db.close()
+
+
+def test_tc_assistant_outbound_keeps_row_ids_that_look_like_phone_numbers():
+    """A random ULID can hold 08..., 628... or a long digit run. Citations need the exact id."""
+    from app.services import assistant
+
+    ids = [
+        "01JABC0812345XYZ0123456789",  # 08 + digits: matches the mobile pattern
+        "01J628812345ABCDEFGHJKMNPQ",  # 62 + 8 + digits: matches the +62 pattern
+        "01JK12345678901234567ABCD",  # 17 digits in a row
+    ]
+    payload = {
+        "tool_results": {"baca_transaksi_sendiri": [{"id": i, "category": "usaha"} for i in ids]}
+    }
+
+    cleaned = assistant._sanitize_outbound(payload)
+
+    assert [row["id"] for row in cleaned["tool_results"]["baca_transaksi_sendiri"]] == ids
+
+
+def test_tc_assistant_outbound_still_redacts_phone_numbers_in_text():
+    from app.services import assistant
+
+    cleaned = assistant._sanitize_outbound({"question": "Hubungi 0812-3456-7890 atau a@b.id"})
+
+    assert "0812" not in cleaned["question"]
+    assert "a@b.id" not in cleaned["question"]
