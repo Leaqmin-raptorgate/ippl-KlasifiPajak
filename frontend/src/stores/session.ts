@@ -109,6 +109,11 @@ export const useSessionStore = defineStore("session", () => {
 
   function setTheme(next: Theme) {
     theme.value = next;
+    // Switch every colour in one frame. Animating backgrounds across a theme flip
+    // shows a light surface under dark ink for the length of the transition.
+    const root = document.documentElement;
+    root.classList.add("theme-switch");
+    window.setTimeout(() => root.classList.remove("theme-switch"), 60);
     document.documentElement.dataset.theme = next;
     try {
       localStorage.setItem(THEME_KEY, next);
