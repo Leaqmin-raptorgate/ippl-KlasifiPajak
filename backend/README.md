@@ -81,7 +81,7 @@ tax rates and bands do not.
 | `app/config/`                                              | Done                                                  |
 | `backend/alembic/`                                         | Done — initial head = ERD r3 / D-11                   |
 | `app/classify/`                                            | Rules, BM25 and the model client                      |
-| `app/payments/`                                            | `MidtransAdapter`; Status API confirmation still open |
+| `app/payments/`                                            | `MidtransAdapter`; Status API built, live run pending |
 | OCR / receipt bytes / PDF export                           | Built (`routes_receipts.py`, `services/recap.py`)     |
 | `frontend/`                                                | Vue 3 app with OCR, assistant and workpaper screens   |
 

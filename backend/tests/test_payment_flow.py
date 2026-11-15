@@ -10,7 +10,7 @@ from test_tax_crud_trace_quota import _auth
 from app.db import SessionLocal
 from app.models import PaymentEvent, SubscriptionOrder, User
 from app.security import now_utc
-from app.services.payments import _is_production
+from app.services.payments import _is_production, get_gateway_adapter
 
 SERVER_KEY = "SB-Mid-server-offline-test"
 
@@ -364,3 +364,209 @@ def test_fr35_order_without_payment_url_is_not_pending(client, fake_gateway):
         row.payment_url = ""
         db.commit()
     assert client.get("/api/v1/subscriptions/status").json()["subscription_tier"] != "pending"
+
+
+# --- Status API confirmation (spec 5.30, review finding R16-W3) ---
+
+
+def _event_count(order_id):
+    with SessionLocal() as db:
+        return len(db.scalars(select(PaymentEvent).where(PaymentEvent.order_id == order_id)).all())
+
+
+def test_fr_pay03_status_api_agrees_grants_access_once(client, fake_gateway):
+    """The Status API is asked once; agreement grants 30 days and a replay adds none."""
+    _auth(client)
+    user_id = client.get("/api/v1/auth/me").json()["user_id"]
+    order = _order(client)
+    first = client.post("/api/v1/webhooks/payment", json=_notice(order["order_id"]))
+    assert first.status_code == 200, first.text
+    assert first.json() == {"acknowledged": True, "idempotent_duplicate": False}
+    assert fake_gateway.status_calls == [order["order_id"]]
+    granted = _user(user_id)
+    assert granted.paid_flag is True
+    replay = client.post("/api/v1/webhooks/payment", json=_notice(order["order_id"]))
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["idempotent_duplicate"] is True
+    assert _user(user_id).valid_until_utc == granted.valid_until_utc
+    # A replay does not need a second gateway call.
+    assert fake_gateway.status_calls == [order["order_id"]]
+    assert _event_count(order["order_id"]) == 1
+
+
+@pytest.mark.parametrize(
+    "remote",
+    [
+        {"transaction_status": "pending", "status_code": "201"},
+        {"transaction_status": "expire", "status_code": "407"},
+        {"transaction_status": "capture", "fraud_status": "challenge"},
+        {"transaction_status": "settlement", "gross_amount": "1000.00"},
+        {"transaction_status": "settlement", "status_code": "201"},
+    ],
+)
+def test_fr_pay03_status_api_disagrees_grants_nothing(client, fake_gateway, remote):
+    """A signed settlement that Midtrans does not confirm is not stored and grants nothing."""
+    _auth(client)
+    user_id = client.get("/api/v1/auth/me").json()["user_id"]
+    order = _order(client)
+    fake_gateway.script_status(fake_gateway.status_body(order["order_id"], **remote))
+    response = client.post("/api/v1/webhooks/payment", json=_notice(order["order_id"]))
+    assert response.status_code == 409, response.text
+    assert response.json() == {
+        "error": {
+            "code": "PAYMENT_STATUS_MISMATCH",
+            "message": "Status pembayaran di Midtrans tidak sesuai dengan notifikasi.",
+        }
+    }
+    assert _user(user_id).paid_flag is False
+    assert _status_of(order["order_id"]) == "pending"
+    assert _event_count(order["order_id"]) == 0
+
+
+def test_fr_pay03_status_api_unreachable_is_retryable_and_then_succeeds(client, fake_gateway):
+    """Unreachable Status API: 503, nothing stored; the same notice later settles once."""
+    from app.payments.adapter import GatewayUnavailable
+
+    _auth(client)
+    user_id = client.get("/api/v1/auth/me").json()["user_id"]
+    order = _order(client)
+    fake_gateway.script_status(GatewayUnavailable("timeout"))
+    failed = client.post("/api/v1/webhooks/payment", json=_notice(order["order_id"]))
+    assert failed.status_code == 503, failed.text
+    assert failed.json() == {
+        "error": {
+            "code": "PAYMENT_GATEWAY_UNAVAILABLE",
+            "message": "Layanan pembayaran belum tersedia. Coba lagi nanti.",
+        }
+    }
+    assert _user(user_id).paid_flag is False
+    assert _status_of(order["order_id"]) == "pending"
+    assert _event_count(order["order_id"]) == 0
+    retried = client.post("/api/v1/webhooks/payment", json=_notice(order["order_id"]))
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["idempotent_duplicate"] is False
+    assert _user(user_id).paid_flag is True
+    assert _status_of(order["order_id"]) == "settlement"
+    assert fake_gateway.status_calls == [order["order_id"]] * 2
+
+
+def test_fr_pay03_status_api_failure_is_logged_with_the_order_id(client, fake_gateway, caplog):
+    """The 503 hides the cause from the caller, so the cause goes to the log."""
+    import logging
+
+    from app.payments.adapter import GatewayUnavailable
+
+    _auth(client)
+    order = _order(client)
+    fake_gateway.script_status(GatewayUnavailable("timeout"))
+    with caplog.at_level(logging.WARNING, logger="app.services.payments"):
+        response = client.post("/api/v1/webhooks/payment", json=_notice(order["order_id"]))
+    assert response.status_code == 503, response.text
+    assert order["order_id"] in caplog.text
+    assert "timeout" in caplog.text
+
+
+def test_fr_pay03_status_api_unreadable_body_is_retryable(client, fake_gateway):
+    """A Status API body without a readable amount is treated as an error, not a mismatch."""
+    _auth(client)
+    order = _order(client)
+    fake_gateway.script_status({"order_id": order["order_id"], "status_code": "200"})
+    response = client.post("/api/v1/webhooks/payment", json=_notice(order["order_id"]))
+    assert response.status_code == 503, response.text
+    assert _status_of(order["order_id"]) == "pending"
+
+
+def test_fr_pay03_non_settlement_notices_skip_status_api(client, fake_gateway):
+    """Pending, expire and fail notices never grant access, so they need no Status API call."""
+    _auth(client)
+    order = _order(client)
+    for status in ("pending", "expire"):
+        response = client.post("/api/v1/webhooks/payment", json=_notice(order["order_id"], status))
+        assert response.status_code == 200, response.text
+    assert fake_gateway.status_calls == []
+
+
+def test_fr_pay05_later_expire_does_not_reverse_confirmed_settlement(client, fake_gateway):
+    _auth(client)
+    user_id = client.get("/api/v1/auth/me").json()["user_id"]
+    order = _order(client)
+    assert (
+        client.post("/api/v1/webhooks/payment", json=_notice(order["order_id"])).status_code == 200
+    )
+    for status in ("pending", "expire", "deny"):
+        response = client.post("/api/v1/webhooks/payment", json=_notice(order["order_id"], status))
+        assert response.status_code == 200, response.text
+    assert _status_of(order["order_id"]) == "settlement"
+    assert _user(user_id).paid_flag is True
+
+
+@pytest.mark.parametrize(
+    ("raw", "host"),
+    [
+        ("true", "https://api.midtrans.com/v2"),
+        ("TRUE", "https://api.midtrans.com/v2"),
+        ("1", "https://api.sandbox.midtrans.com/v2"),
+        ("false", "https://api.sandbox.midtrans.com/v2"),
+        ("", "https://api.sandbox.midtrans.com/v2"),
+        (None, "https://api.sandbox.midtrans.com/v2"),
+    ],
+)
+def test_status_api_host_follows_is_production_flag(monkeypatch, raw, host):
+    """Spec 5.30: the Status API host follows _is_production(), so true in any case is production."""
+    monkeypatch.setenv("MIDTRANS_SERVER_KEY", "Mid-server-not-real")
+    if raw is None:
+        monkeypatch.delenv("MIDTRANS_IS_PRODUCTION", raising=False)
+    else:
+        monkeypatch.setenv("MIDTRANS_IS_PRODUCTION", raw)
+    if host.startswith("https://api.sandbox"):
+        # A production-shaped key is refused by the sandbox adapter; use a sandbox key.
+        monkeypatch.setenv("MIDTRANS_SERVER_KEY", "SB-Mid-server-not-real")
+    assert get_gateway_adapter().status_base_url == host
+
+
+def _settle_in_database(order_id, user_id):
+    """Settle the order the way a concurrent notification would, and commit."""
+    with SessionLocal() as db:
+        order = db.scalar(select(SubscriptionOrder).where(SubscriptionOrder.id == order_id))
+        owner = db.scalar(select(User).where(User.id == user_id))
+        instant = now_utc()
+        order.status = "settlement"
+        owner.paid_flag = True
+        owner.valid_until_utc = max(instant, owner.valid_until_utc or instant) + timedelta(days=30)
+        db.add(
+            PaymentEvent(
+                id="payevt_concurrent",
+                order_id=order_id,
+                user_id=user_id,
+                status="settlement",
+                raw_status="settlement",
+                gross_amount_idr=25_000,
+                transaction_time=instant,
+                received_at=instant,
+            )
+        )
+        db.commit()
+
+
+def test_fr_pay03_settlement_during_status_call_is_not_granted_twice(client, fake_gateway):
+    """A settlement committed while the Status API call is in flight is not granted again."""
+    _auth(client)
+    user_id = client.get("/api/v1/auth/me").json()["user_id"]
+    order = _order(client)
+    order_id = order["order_id"]
+
+    def concurrent_settlement(called_order_id):
+        _settle_in_database(called_order_id, user_id)
+        return fake_gateway.status_body(called_order_id)
+
+    fake_gateway.script_status(concurrent_settlement)
+    response = client.post("/api/v1/webhooks/payment", json=_notice(order_id))
+    assert response.status_code == 200, response.text
+    assert response.json() == {"acknowledged": True, "idempotent_duplicate": True}
+    assert fake_gateway.status_calls == [order_id]
+    assert _event_count(order_id) == 1
+    granted = _user(user_id)
+    assert granted.paid_flag is True
+    # Exactly one 30-day grant: the one made inside the Status call.
+    assert granted.valid_until_utc <= now_utc() + timedelta(days=30, minutes=1)
+    assert _status_of(order_id) == "settlement"

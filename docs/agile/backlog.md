@@ -107,7 +107,7 @@ from `max(now_utc, valid_until_utc)`). Never use production keys.
 - [x] Reject a tampered `gross_amount` (`ORDER_AMOUNT_MISMATCH`)
 - [x] Webhook idempotency; settlement is not reversed; 30-day renewal
 - [x] Map Snap `redirect_url` → API `payment_url` (D-11)
-- [ ] TODO: Status API confirmation before production
+- [x] Status API confirmation before access is granted (`PAYMENT_STATUS_MISMATCH` on disagreement, `503` when unreachable); live sandbox run still to do
 
 ## Sprint 1 — docs and stack
 

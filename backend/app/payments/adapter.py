@@ -6,6 +6,7 @@ import base64
 import hashlib
 import hmac
 import re
+from collections.abc import Callable
 from typing import Any, Protocol
 
 import httpx2
@@ -24,6 +25,14 @@ class GatewayAdapter(Protocol):
 
     def verify_notification(self, payload: dict[str, Any]) -> bool:
         """Check notification authenticity without reading application data."""
+        ...
+
+    def get_transaction_status(self, order_id: str) -> dict[str, Any]:
+        """Ask the gateway for an order's status (Midtrans Status API).
+
+        Return the decoded body. Raise GatewayUnavailable when the gateway cannot
+        be reached or answers an error, so the caller grants nothing.
+        """
         ...
 
 
@@ -47,8 +56,20 @@ def normalize_status(status: str, fraud_status: str = "") -> str:
     return "ignored"
 
 
+# Status API body codes that are real order statuses: 200 settled or captured,
+# 201 pending, 202 deny, 407 expire. Any other code is "no usable answer".
+_STATUS_ORDER_CODES = {"200", "201", "202", "407"}
+
+
+StatusOutcome = dict[str, Any] | Exception | Callable[[str], dict[str, Any]]
+
+
 class FakeGatewayAdapter:
-    """In-memory gateway that returns a preconfigured payment URL."""
+    """In-memory gateway that returns a preconfigured payment URL.
+
+    Status API answers are scripted with ``script_status``. With no script the
+    fake agrees with a settled 25.000 rupiah order.
+    """
 
     def __init__(
         self,
@@ -59,6 +80,48 @@ class FakeGatewayAdapter:
         self.payment_url = payment_url
         self.signature_valid = signature_valid
         self.calls: list[dict[str, Any]] = []
+        self.status_calls: list[str] = []
+        self._status_script: list[StatusOutcome] = []
+
+    def script_status(self, *outcomes: StatusOutcome) -> None:
+        """Queue Status API outcomes: a body dict, an exception to raise, or a callable.
+
+        A callable receives the order id and returns a body dict or raises; tests
+        use it to change the database while the Status API call is in flight.
+        Each call consumes one outcome; when the queue is empty the default
+        agreeing body is returned.
+        """
+        self._status_script.extend(outcomes)
+
+    @staticmethod
+    def status_body(
+        order_id: str,
+        *,
+        transaction_status: str = "settlement",
+        status_code: str = "200",
+        gross_amount: str = "25000.00",
+        fraud_status: str = "accept",
+    ) -> dict[str, Any]:
+        """Build a Status API body (agreeing with a settled order by default)."""
+        return {
+            "order_id": order_id,
+            "status_code": status_code,
+            "transaction_status": transaction_status,
+            "gross_amount": gross_amount,
+            "fraud_status": fraud_status,
+        }
+
+    def get_transaction_status(self, order_id: str) -> dict[str, Any]:
+        """Return the next scripted outcome; raise it when it is an exception."""
+        self.status_calls.append(order_id)
+        if self._status_script:
+            outcome = self._status_script.pop(0)
+            if isinstance(outcome, Exception):
+                raise outcome
+            if callable(outcome):
+                return outcome(order_id)
+            return outcome
+        return self.status_body(order_id)
 
     def create_payment(self, order_id: str, amount_idr: int) -> str:
         """Record the order and return the fake redirect URL."""
@@ -80,6 +143,7 @@ class MidtransAdapter:
         is_production: bool = False,
         transport: Any = None,
         timeout_s: float = 30,
+        status_timeout_s: float = 8,
     ) -> None:
         if not is_production and server_key.startswith("Mid-server-"):
             raise ValueError("Production server key cannot be used in sandbox")
@@ -90,8 +154,16 @@ class MidtransAdapter:
             if is_production
             else "https://app.sandbox.midtrans.com/snap/v1/transactions"
         )
+        self.status_base_url = (
+            "https://api.midtrans.com/v2"
+            if is_production
+            else "https://api.sandbox.midtrans.com/v2"
+        )
         self.transport = transport
         self.timeout_s = timeout_s
+        # The Status API runs inside the webhook request, and Midtrans waits only a
+        # short time for the notification response, so it gets its own short timeout.
+        self.status_timeout_s = status_timeout_s
 
     def verify_notification(self, payload: dict[str, Any]) -> bool:
         """Verify SHA512 against exact received string fields in constant time."""
@@ -137,3 +209,30 @@ class MidtransAdapter:
                 return url
         except (httpx2.HTTPError, KeyError, TypeError, ValueError) as exc:
             raise GatewayUnavailable("Payment gateway failed") from exc
+
+    def get_transaction_status(self, order_id: str) -> dict[str, Any]:
+        """Call GET /v2/{order_id}/status; any failure raises GatewayUnavailable."""
+        if not self.server_key:
+            raise GatewayUnavailable("Payment gateway is not configured")
+        if not isinstance(order_id, str) or not re.fullmatch(r"[A-Za-z0-9._~-]{1,50}", order_id):
+            raise ValueError("Invalid order ID")
+        token = base64.b64encode(f"{self.server_key}:".encode("utf-8")).decode("ascii")
+        try:
+            with httpx2.Client(transport=self.transport, timeout=self.status_timeout_s) as client:
+                response = client.get(
+                    f"{self.status_base_url}/{order_id}/status",
+                    headers={"Authorization": f"Basic {token}", "Accept": "application/json"},
+                )
+                response.raise_for_status()
+                body = response.json()
+        except (httpx2.HTTPError, ValueError) as exc:
+            raise GatewayUnavailable("Payment status check failed") from exc
+        if not isinstance(body, dict):
+            raise GatewayUnavailable("Payment status check failed")
+        # Midtrans answers some errors (unknown order, bad key, bad request) as
+        # HTTP 200 with an error code in the body: accept only order-status codes.
+        if str(body.get("status_code", "")) not in _STATUS_ORDER_CODES:
+            raise GatewayUnavailable("Payment status check failed")
+        if body.get("order_id") != order_id:
+            raise GatewayUnavailable("Payment status check failed")
+        return body

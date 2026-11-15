@@ -18,7 +18,10 @@ from app.db import Base
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # Keep loggers that already exist. The default would disable every app logger
+    # created before this runs (for example `app.services.payments` once a test
+    # migrates in-process), and their records would silently vanish.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 
