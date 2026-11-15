@@ -453,138 +453,199 @@ async function jalankanHapus() {
       </template>
 
       <div v-else class="form">
-        <AppField label="Nama" for-id="p-nama">
-          <AppInput id="p-nama" v-model="draft.name" />
-        </AppField>
-        <AppField label="Status NIB" for-id="p-nib">
-          <AppSelect id="p-nib" v-model="draft.nib_status" :options="nibOpsi" />
-        </AppField>
-        <AppField
-          v-if="draft.nib_status === 'has_nib'"
-          label="Empat digit terakhir NIB"
-          for-id="p-nib4"
-          hint="Hanya empat digit. NIB utuh tidak disimpan."
-        >
-          <AppInput id="p-nib4" v-model="draft.nib_last_4" mono maxlength="4" inputmode="numeric" />
-        </AppField>
-        <AppField label="KBLI" for-id="p-kbli">
-          <AppInput id="p-kbli" v-model="draft.kbli_code" />
-        </AppField>
-        <AppField label="Uraian usaha" for-id="p-usaha">
-          <AppInput id="p-usaha" v-model="draft.business_description" />
-        </AppField>
-        <AppField
-          label="Status perpajakan pasangan"
-          for-id="p-status-pasangan"
-          hint="Pilih belum tahu jika belum yakin. Hanya PH/MT yang mengaktifkan agregasi Pasal 58."
-        >
-          <AppSelect
-            id="p-status-pasangan"
-            v-model="draft.spouse_tax_status"
-            :options="spouseTaxOptions"
-          />
-          <p v-if="simpanDikunci" class="peringatan-pasangan" role="alert">
-            Agregasi Pasal 58 tercatat aktif, tetapi status perpajakan pasangan belum diketahui.
-            Pilih statusnya dulu sebelum menyimpan.
-          </p>
-        </AppField>
-        <AppField
-          label="Memilih tarif umum Pasal 17?"
-          for-id="p-pasal17"
-          hint="Belum tahu dapat dibiarkan kosong."
-        >
-          <AppSelect
-            id="p-pasal17"
-            v-model="draft.has_selected_article_17"
-            :options="jawabanOpsi"
-          />
-        </AppField>
-        <AppField
-          label="Memiliki Perseroan Perorangan?"
-          for-id="p-ptperorangan"
-          hint="Belum tahu dapat dibiarkan kosong."
-        >
-          <AppSelect
-            id="p-ptperorangan"
-            v-model="draft.has_sole_proprietor_company"
-            :options="jawabanOpsi"
-          />
-        </AppField>
-        <AppField
-          label="Menerima gaji sebagai pegawai?"
-          for-id="p-gaji"
-          hint="Belum tahu dapat dibiarkan kosong."
-        >
-          <AppSelect id="p-gaji" v-model="draft.receives_salary" :options="jawabanOpsi" />
-        </AppField>
-        <AppField
-          label="Wajib pajak baru tahun ini?"
-          for-id="p-wpbaru"
-          hint="Belum tahu dapat dibiarkan kosong."
-        >
-          <AppSelect
-            id="p-wpbaru"
-            v-model="draft.is_new_taxpayer_current_year"
-            :options="jawabanOpsi"
-          />
-        </AppField>
-        <AppField label="Omzet usaha pasangan tahun ini" for-id="p-su">
-          <AppInput id="p-su" v-model="draft.spouse_current_usaha_idr" mono inputmode="numeric" />
-        </AppField>
-        <AppField label="Pekerjaan bebas pasangan tahun ini" for-id="p-sp">
-          <AppInput
-            id="p-sp"
-            v-model="draft.spouse_current_pekerjaan_bebas_idr"
-            mono
-            inputmode="numeric"
-          />
-        </AppField>
-        <AppField label="Final tersendiri pasangan tahun ini" for-id="p-sf">
-          <AppInput
-            id="p-sf"
-            v-model="draft.spouse_current_already_final_idr"
-            mono
-            inputmode="numeric"
-          />
-        </AppField>
-        <AppField label="Usaha Anda tahun lalu" for-id="p-pu">
-          <AppInput id="p-pu" v-model="draft.prior_user_usaha_idr" mono inputmode="numeric" />
-        </AppField>
-        <AppField label="Pekerjaan bebas Anda tahun lalu" for-id="p-pp">
-          <AppInput
-            id="p-pp"
-            v-model="draft.prior_user_pekerjaan_bebas_idr"
-            mono
-            inputmode="numeric"
-          />
-        </AppField>
-        <AppField label="Final tersendiri Anda tahun lalu" for-id="p-pf">
-          <AppInput
-            id="p-pf"
-            v-model="draft.prior_user_already_final_idr"
-            mono
-            inputmode="numeric"
-          />
-        </AppField>
-        <AppField label="Usaha pasangan tahun lalu" for-id="p-psu">
-          <AppInput id="p-psu" v-model="draft.prior_spouse_usaha_idr" mono inputmode="numeric" />
-        </AppField>
-        <AppField label="Pekerjaan bebas pasangan tahun lalu" for-id="p-psp">
-          <AppInput
-            id="p-psp"
-            v-model="draft.prior_spouse_pekerjaan_bebas_idr"
-            mono
-            inputmode="numeric"
-          />
-        </AppField>
-        <AppField label="Final tersendiri pasangan tahun lalu" for-id="p-psf">
-          <AppInput
-            id="p-psf"
-            v-model="draft.prior_spouse_already_final_idr"
-            mono
-            inputmode="numeric"
-          />
-        </AppField>
+        <section class="sek" aria-labelledby="sek-identitas">
+          <header class="sek-head">
+            <h3 id="sek-identitas" class="sek-judul">Identitas usaha</h3>
+            <p class="sek-sub">Nama dan data usaha yang tampil di kertas kerja.</p>
+          </header>
+          <div class="grid">
+            <AppField label="Nama" for-id="p-nama" class="lebar">
+              <AppInput id="p-nama" v-model="draft.name" />
+            </AppField>
+            <AppField label="Status NIB" for-id="p-nib">
+              <AppSelect id="p-nib" v-model="draft.nib_status" :options="nibOpsi" />
+            </AppField>
+            <AppField
+              v-if="draft.nib_status === 'has_nib'"
+              label="Empat digit terakhir NIB"
+              for-id="p-nib4"
+              hint="Hanya empat digit. NIB utuh tidak disimpan."
+            >
+              <AppInput
+                id="p-nib4"
+                v-model="draft.nib_last_4"
+                mono
+                maxlength="4"
+                inputmode="numeric"
+              />
+            </AppField>
+            <AppField label="KBLI" for-id="p-kbli">
+              <AppInput id="p-kbli" v-model="draft.kbli_code" />
+            </AppField>
+            <AppField label="Uraian usaha" for-id="p-usaha" class="lebar">
+              <AppInput id="p-usaha" v-model="draft.business_description" />
+            </AppField>
+          </div>
+        </section>
+
+        <section class="sek" aria-labelledby="sek-pasangan">
+          <header class="sek-head">
+            <h3 id="sek-pasangan" class="sek-judul">Pasangan dan agregasi</h3>
+            <p class="sek-sub">Hanya PH/MT yang mengaktifkan agregasi Pasal 58.</p>
+          </header>
+          <div class="grid">
+            <AppField
+              label="Status perpajakan pasangan"
+              for-id="p-status-pasangan"
+              hint="Pilih belum tahu jika belum yakin. Hanya PH/MT yang mengaktifkan agregasi Pasal 58."
+              class="lebar"
+            >
+              <AppSelect
+                id="p-status-pasangan"
+                v-model="draft.spouse_tax_status"
+                :options="spouseTaxOptions"
+              />
+              <p v-if="simpanDikunci" class="peringatan-pasangan" role="alert">
+                Agregasi Pasal 58 tercatat aktif, tetapi status perpajakan pasangan belum diketahui.
+                Pilih statusnya dulu sebelum menyimpan.
+              </p>
+            </AppField>
+          </div>
+        </section>
+
+        <section class="sek" aria-labelledby="sek-status">
+          <header class="sek-head">
+            <h3 id="sek-status" class="sek-judul">Status pajak tahun ini</h3>
+            <p class="sek-sub">Jawab sesuai keadaan Anda. Belum tahu boleh dibiarkan kosong.</p>
+          </header>
+          <div class="grid">
+            <AppField
+              label="Memilih tarif umum Pasal 17?"
+              for-id="p-pasal17"
+              hint="Belum tahu dapat dibiarkan kosong."
+            >
+              <AppSelect
+                id="p-pasal17"
+                v-model="draft.has_selected_article_17"
+                :options="jawabanOpsi"
+              />
+            </AppField>
+            <AppField
+              label="Memiliki Perseroan Perorangan?"
+              for-id="p-ptperorangan"
+              hint="Belum tahu dapat dibiarkan kosong."
+            >
+              <AppSelect
+                id="p-ptperorangan"
+                v-model="draft.has_sole_proprietor_company"
+                :options="jawabanOpsi"
+              />
+            </AppField>
+            <AppField
+              label="Menerima gaji sebagai pegawai?"
+              for-id="p-gaji"
+              hint="Belum tahu dapat dibiarkan kosong."
+            >
+              <AppSelect id="p-gaji" v-model="draft.receives_salary" :options="jawabanOpsi" />
+            </AppField>
+            <AppField
+              label="Wajib pajak baru tahun ini?"
+              for-id="p-wpbaru"
+              hint="Belum tahu dapat dibiarkan kosong."
+            >
+              <AppSelect
+                id="p-wpbaru"
+                v-model="draft.is_new_taxpayer_current_year"
+                :options="jawabanOpsi"
+              />
+            </AppField>
+          </div>
+        </section>
+
+        <section class="sek" aria-labelledby="sek-kini">
+          <header class="sek-head">
+            <h3 id="sek-kini" class="sek-judul">Omzet dan penghasilan pasangan tahun ini</h3>
+            <p class="sek-sub">Angka rupiah bulat. Isi 0 jika tidak ada.</p>
+          </header>
+          <div class="grid">
+            <AppField label="Omzet usaha pasangan tahun ini" for-id="p-su">
+              <AppInput
+                id="p-su"
+                v-model="draft.spouse_current_usaha_idr"
+                mono
+                inputmode="numeric"
+              />
+            </AppField>
+            <AppField label="Pekerjaan bebas pasangan tahun ini" for-id="p-sp">
+              <AppInput
+                id="p-sp"
+                v-model="draft.spouse_current_pekerjaan_bebas_idr"
+                mono
+                inputmode="numeric"
+              />
+            </AppField>
+            <AppField label="Final tersendiri pasangan tahun ini" for-id="p-sf">
+              <AppInput
+                id="p-sf"
+                v-model="draft.spouse_current_already_final_idr"
+                mono
+                inputmode="numeric"
+              />
+            </AppField>
+          </div>
+        </section>
+
+        <section class="sek" aria-labelledby="sek-lalu">
+          <header class="sek-head">
+            <h3 id="sek-lalu" class="sek-judul">Penghasilan tahun lalu</h3>
+            <p class="sek-sub">Dikosongkan jika tidak diketahui.</p>
+          </header>
+          <div class="grid">
+            <AppField label="Usaha Anda tahun lalu" for-id="p-pu">
+              <AppInput id="p-pu" v-model="draft.prior_user_usaha_idr" mono inputmode="numeric" />
+            </AppField>
+            <AppField label="Pekerjaan bebas Anda tahun lalu" for-id="p-pp">
+              <AppInput
+                id="p-pp"
+                v-model="draft.prior_user_pekerjaan_bebas_idr"
+                mono
+                inputmode="numeric"
+              />
+            </AppField>
+            <AppField label="Final tersendiri Anda tahun lalu" for-id="p-pf">
+              <AppInput
+                id="p-pf"
+                v-model="draft.prior_user_already_final_idr"
+                mono
+                inputmode="numeric"
+              />
+            </AppField>
+            <AppField label="Usaha pasangan tahun lalu" for-id="p-psu">
+              <AppInput
+                id="p-psu"
+                v-model="draft.prior_spouse_usaha_idr"
+                mono
+                inputmode="numeric"
+              />
+            </AppField>
+            <AppField label="Pekerjaan bebas pasangan tahun lalu" for-id="p-psp">
+              <AppInput
+                id="p-psp"
+                v-model="draft.prior_spouse_pekerjaan_bebas_idr"
+                mono
+                inputmode="numeric"
+              />
+            </AppField>
+            <AppField label="Final tersendiri pasangan tahun lalu" for-id="p-psf">
+              <AppInput
+                id="p-psf"
+                v-model="draft.prior_spouse_already_final_idr"
+                mono
+                inputmode="numeric"
+              />
+            </AppField>
+          </div>
+        </section>
 
         <div class="aksi">
           <AppButton variant="ghost" @click="batalUbah">Batal</AppButton>
@@ -848,8 +909,14 @@ async function jalankanHapus() {
 
 .riwayat-judul {
   margin-bottom: var(--s-3);
+  font: var(--t-label);
   font-weight: 600;
   color: var(--ink-2);
+}
+
+.baca .u-label {
+  font: var(--t-label);
+  letter-spacing: var(--track-label);
 }
 
 /* ---- Edit mode --------------------------------------------------------- */
@@ -857,7 +924,66 @@ async function jalankanHapus() {
 .form {
   display: flex;
   flex-direction: column;
+  gap: var(--s-6);
+}
+
+/* One bordered section per topic. Fields sit in one column on a phone and in
+   two from 720px. Explanatory copy stays under the heading, not in the fields. */
+.sek {
+  display: flex;
+  flex-direction: column;
   gap: var(--s-5);
+  padding: var(--s-5);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+
+.sek-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  padding-bottom: var(--s-4);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.sek-judul {
+  font: var(--t-title-3);
+  letter-spacing: var(--track-title-3);
+  color: var(--ink);
+}
+
+.sek-sub {
+  font: var(--t-body-sm);
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--s-5);
+}
+
+.lebar {
+  min-width: 0;
+}
+
+@media (min-width: 720px) {
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .lebar {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Labels are body-size controls text (14px), not the 13px utility label. */
+.form :deep(.lab .u-label),
+.sheet-form :deep(.lab .u-label) {
+  font: var(--t-label);
+  letter-spacing: var(--track-label);
 }
 
 .aksi {
@@ -926,60 +1052,6 @@ async function jalankanHapus() {
   color: var(--ink-3);
   line-height: 1.45;
   margin-top: var(--s-1);
-}
-
-/* ---- Switch ------------------------------------------------------------ */
-
-.sw {
-  position: relative;
-  flex: none;
-  width: 2.75rem;
-  /* The button box is the hit area, so it carries the full touch height while
-     the track inside it stays the optical size. */
-  height: 2.75rem;
-  display: grid;
-  place-items: center;
-  border-radius: var(--r-full);
-}
-
-.sw-track {
-  position: relative;
-  width: 100%;
-  height: 1.625rem;
-  border-radius: var(--r-full);
-  border: 1px solid var(--hairline-strong);
-  background: var(--surface-sunken);
-  transition:
-    background-color var(--t-base) var(--ease-out-soft),
-    border-color var(--t-base) var(--ease-out-soft);
-}
-
-.knob {
-  position: absolute;
-  top: 50%;
-  left: 0.125rem;
-  width: 1.25rem;
-  height: 1.25rem;
-  border-radius: var(--r-full);
-  background: var(--surface);
-  box-shadow: var(--shadow-1);
-  transform: translate(0, -50%);
-  transition: transform var(--t-base) var(--ease-spring);
-}
-
-.sw[aria-checked="true"] .sw-track {
-  background: var(--accent);
-  border-color: var(--accent);
-}
-
-.sw[aria-checked="true"] .knob {
-  transform: translate(1.25rem, -50%);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .knob {
-    transition: none;
-  }
 }
 
 /* ---- Appearance -------------------------------------------------------- */
@@ -1107,7 +1179,12 @@ async function jalankanHapus() {
 }
 .peringatan-pasangan {
   margin: var(--s-2) 0 0;
-  color: var(--danger, #b3261e);
-  font-size: var(--t-small, 0.875rem);
+  padding: var(--s-3);
+  border: 1px solid var(--cat-ask-line);
+  border-radius: var(--r-md);
+  background: var(--cat-ask-bg);
+  color: var(--cat-ask-ink);
+  font: var(--t-body-sm);
+  line-height: 1.5;
 }
 </style>
