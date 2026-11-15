@@ -135,7 +135,8 @@ describe("KuotaPage subscription purchase", () => {
   });
 
   it("shows the 503 message inline and does not redirect", async () => {
-    const pesan = "Layanan pembayaran belum tersedia. Coba lagi nanti.";
+    // Wording of POST /subscriptions/orders, API spec 5.28 (the webhook 503 differs).
+    const pesan = "Pembayaran belum tersedia. Coba lagi.";
     post = () => Promise.reject(new ApiFailure(503, "PAYMENT_GATEWAY_UNAVAILABLE", pesan));
     const wrapper = await pasang();
     await wrapper.get(".plan-cta button").trigger("click");
