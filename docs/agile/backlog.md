@@ -133,8 +133,9 @@ from `max(now_utc, valid_until_utc)`). Never use production keys.
 - [ ] NFR-Q2, NFR-Q3 report heuristic accuracy: re-measured on 2026-11-17 at
       `ded8e03` (`ac4abe027fea`) in `backend/README.md` (dev accuracy 83/98
       = 0.85, coverage 88/98 = 0.90; held-out accuracy 23/49 = 0.47, coverage
-      27/49 = 0.55, decided accuracy 0.85). Left unticked because no numeric
-      target is stated here and the workbook labels remain unchecked.
+      27/49 = 0.55, decided accuracy 0.85). Left unticked: NFR-Q2 and NFR-Q3
+      have no numeric target in this repo or in SRS v2.7, so the figures cannot
+      be judged as met, and the workbook labels remain unchecked.
 
 ## Sprint 3 — storage and dashboard
 
