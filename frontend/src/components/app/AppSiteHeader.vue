@@ -98,7 +98,7 @@ function ubahTema() {
           :key="t.to"
           :to="t.to"
           class="link"
-          :class="{ on: aktif(t.to), act: t.action }"
+          :class="{ on: aktif(t.to) }"
           :aria-current="aktif(t.to) ? 'page' : undefined"
         >
           {{ t.label }}
@@ -263,10 +263,6 @@ function ubahTema() {
   color: var(--accent-soft-ink);
   background: var(--accent-soft);
   font-weight: 600;
-}
-
-.link.act {
-  color: var(--accent);
 }
 
 .end {
