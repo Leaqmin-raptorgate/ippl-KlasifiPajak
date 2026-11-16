@@ -155,3 +155,15 @@ input[inputmode="numeric"] {
 .u-hairline-top {
   box-shadow: 0 -0.5px 0 var(--hairline);
 }
+
+/* Browser autofill paints its own pale background. Keep the field in the theme. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+select:-webkit-autofill {
+  -webkit-text-fill-color: var(--ink);
+  caret-color: var(--ink);
+  box-shadow: 0 0 0 1000px var(--surface) inset;
+  transition: background-color 9999s ease-in-out 0s;
+}
