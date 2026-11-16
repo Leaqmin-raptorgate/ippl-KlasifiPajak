@@ -117,19 +117,14 @@ function gantiTema(nilai: string) {
 
 <template>
   <div class="page">
-    <header class="lede">
-      <div>
-        <h2 class="t1">Kuota dan langganan</h2>
-        <p class="sub">
-          Kuota klasifikasi AI dan asisten. Tidak ada batas jumlah transaksi.
-          <template v-if="route.name === 'langganan-kembali'">
-            Status dibaca ulang setelah kembali dari gerbang.</template
-          >
-        </p>
-      </div>
-    </header>
+    <p class="sub intro">
+      Kuota klasifikasi AI dan asisten. Tidak ada batas jumlah transaksi.
+      <template v-if="route.name === 'langganan-kembali'">
+        Status dibaca ulang setelah kembali dari gerbang.</template
+      >
+    </p>
 
-    <section class="meter-grid kp-stagger" aria-label="Pemakaian bulan ini">
+    <section class="meter-grid" aria-label="Pemakaian bulan ini">
       <AppCard>
         <div class="angka">
           <p class="besar figure">{{ chat ? chat.used : "—" }}</p>
@@ -262,9 +257,7 @@ function gantiTema(nilai: string) {
           />
         </span>
         <div class="tema-teks">
-          <p class="tema-judul">
-            {{ session.theme === "dark" ? "Mode gelap" : "Mode terang" }}
-          </p>
+          <p class="tema-judul">Tema</p>
           <p class="tema-sub">
             Mode gelap mengurangi cahaya saat dipakai pada malam hari. Kontras dan kebalikannya
             mengikuti setelan sistem serta aplikasi.
@@ -293,24 +286,11 @@ function gantiTema(nilai: string) {
   margin-inline: auto;
 }
 
-.lede {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: var(--s-4);
-  flex-wrap: wrap;
-}
-
-.t1 {
-  font: var(--t-title-1);
-  letter-spacing: var(--track-title-1);
-}
-
-.sub {
+/* Intro under the shell's h1. The page name is not repeated here. */
+.intro {
   font: var(--t-body);
   color: var(--ink-2);
-  max-width: 34rem;
-  margin-top: var(--s-2);
+  max-width: 40rem;
 }
 
 /* ---- Current usage --------------------------------------------------- */
@@ -367,17 +347,11 @@ function gantiTema(nilai: string) {
   margin-top: var(--s-1);
 }
 
+/* One plan card today: it takes the full width instead of half of a two-column grid. */
 .plans {
   display: grid;
   gap: var(--s-4);
-  grid-template-columns: 1fr;
-}
-
-@media (min-width: 768px) {
-  .plans {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--s-6);
-  }
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .plan {
@@ -421,7 +395,7 @@ function gantiTema(nilai: string) {
 }
 
 .harga-cat {
-  font: var(--t-caption);
+  font: var(--t-body-sm);
   color: var(--ink-3);
   line-height: 1.45;
 }
@@ -494,7 +468,7 @@ function gantiTema(nilai: string) {
 }
 
 .plan-kaki {
-  font: var(--t-caption);
+  font: var(--t-body-sm);
   color: var(--ink-3);
   line-height: 1.45;
   padding-top: var(--s-3);
@@ -549,6 +523,21 @@ function gantiTema(nilai: string) {
 
 .tema-seg {
   flex: 1 1 100%;
+}
+
+/* Segment options are 40px by default; a phone needs 44px targets. */
+.tema-seg :deep(.opt) {
+  height: 2.75rem;
+}
+
+@media (max-width: 639px) {
+  .page :deep(.s-sm) {
+    --btn-h: 2.75rem;
+  }
+}
+
+.meter :deep(.fill) {
+  animation: none;
 }
 
 @media (min-width: 560px) {

@@ -61,8 +61,11 @@ async function ubah(event: Event) {
 }
 
 .pilihan input {
+  width: 1.125rem;
+  height: 1.125rem;
   margin-top: 0.1875rem;
   flex: none;
+  accent-color: var(--accent);
 }
 
 .naskah {

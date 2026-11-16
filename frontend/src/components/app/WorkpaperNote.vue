@@ -57,6 +57,6 @@ const berlaku = computed(() => pajak.dashboard?.metadata.effective_date || PUBLI
 }
 
 .sep {
-  opacity: 0.5;
+  color: var(--ink-3);
 }
 </style>

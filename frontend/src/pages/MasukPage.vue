@@ -73,20 +73,14 @@ async function submit() {
 </script>
 
 <template>
-  <div class="page masuk">
-    <header class="top">
-      <RouterLink to="/" class="brand">
+  <div class="masuk">
+    <main class="stage">
+      <RouterLink to="/" class="brand" aria-label="KlasifiPajak, beranda">
         <span class="mark" aria-hidden="true">K</span>
         <span class="word">KlasifiPajak</span>
       </RouterLink>
-      <RouterLink to="/" class="back">
-        <AppIcon name="chevronLeft" :size="15" :stroke-width="1.8" />
-        Beranda
-      </RouterLink>
-    </header>
 
-    <main class="stage">
-      <div class="card kp-materialize">
+      <div class="card">
         <AppSegmented v-model="mode" :options="modeOpsi" aria-label="Mode akun" />
 
         <div class="lead">
@@ -94,9 +88,9 @@ async function submit() {
           <p class="sub">{{ sub }}</p>
         </div>
 
-        <p v-if="sesiBerakhir" class="sub" role="status">Sesi berakhir.</p>
-        <p v-if="info" class="sub" role="status">{{ info }}</p>
-        <p v-if="galat" class="sub" role="alert">{{ galat }}</p>
+        <p v-if="sesiBerakhir" class="pesan" role="status">Sesi berakhir.</p>
+        <p v-if="info" class="pesan" role="status">{{ info }}</p>
+        <p v-if="galat" class="galat" role="alert">{{ galat }}</p>
 
         <form class="form" @submit.prevent="submit">
           <AppField v-if="daftar" label="Nama pengguna" for-id="nama-pengguna">
@@ -140,11 +134,11 @@ async function submit() {
           </AppButton>
         </form>
 
-        <RouterLink v-if="CAPABILITIES.passwordReset" to="/atur-ulang" class="lanjut">
-          Lupa kata sandi
+        <RouterLink v-if="CAPABILITIES.passwordReset" to="/atur-ulang" class="helper">
+          Lupa kata sandi?
         </RouterLink>
 
-        <div class="trust">
+        <div class="data-note">
           <p class="tl">
             <AppIcon name="kunci" :size="16" :stroke-width="1.7" />
             Data tersimpan terpisah per akun. Satu akun tidak dapat membuka data akun lain.
@@ -154,135 +148,84 @@ async function submit() {
             Yang dihitung di sini adalah kertas kerja, bukan SPT dan bukan pelaporan ke DJP.
           </p>
         </div>
+      </div>
 
-        <WorkpaperNote publik class="stamp" />
+      <div class="foot">
+        <WorkpaperNote publik />
+        <RouterLink to="/" class="helper">Kembali ke beranda</RouterLink>
       </div>
     </main>
   </div>
 </template>
 
 <style scoped>
-.page {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-6);
-  max-width: var(--canvas-max);
-  margin-inline: auto;
-}
+/* Tokens only. Plain canvas, one centred column, no entry transform. */
 
 .masuk {
-  /* Bare route: no shell, so the page owns the canvas and its own chrome. */
   min-height: 100svh;
+  display: flex;
+  flex-direction: column;
   background: var(--canvas);
-  padding: var(--s-4) var(--s-4) calc(var(--s-8) + var(--safe-b));
+  color: var(--ink);
+  padding-inline: var(--gutter);
 }
 
-@media (min-width: 768px) {
-  .masuk {
-    padding: var(--s-6) var(--s-6) var(--s-10);
-  }
-}
-
-@media (min-width: 1280px) {
-  .masuk {
-    padding-inline: var(--s-10);
-  }
-}
-
-.top {
+.stage {
+  flex: 1;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--s-4);
-  min-height: var(--topbar-h);
+  justify-content: center;
+  gap: var(--s-6);
+  width: 100%;
+  max-width: 26rem;
+  margin-inline: auto;
+  padding-block: var(--s-10);
 }
 
+/* Product mark above the card; links home. */
 .brand {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: var(--s-2);
-  min-height: 2.5rem;
-  min-width: 0;
+  min-height: 2.75rem;
+  color: var(--ink);
+  border-radius: var(--r-md);
 }
 
 .mark {
   display: grid;
   place-items: center;
-  width: 1.75rem;
-  height: 1.75rem;
+  width: 2rem;
+  height: 2rem;
   flex: none;
-  border-radius: var(--r-sm);
+  border-radius: var(--r-md);
   background: var(--accent);
   color: var(--accent-ink);
-  font: 600 0.875rem/1 var(--font-sans);
-  letter-spacing: 0;
+  font: 600 0.9375rem/1 var(--font-sans);
 }
 
 .word {
   font: var(--t-title-3);
   letter-spacing: var(--track-title-3);
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.back {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s-1);
-  min-height: 2.5rem;
-  padding-inline: var(--s-2);
-  margin-right: calc(var(--s-2) * -1);
-  border-radius: var(--r-md);
-  flex: none;
-  font: var(--t-label);
-  letter-spacing: var(--track-label);
-  color: var(--ink-2);
-  transition: color var(--t-fast) var(--ease-out-soft);
-}
-
-.back:hover {
-  color: var(--ink);
-}
-
-.back svg {
-  transition: transform var(--t-fast) var(--ease-out-soft);
-}
-
-.back:hover svg {
-  transform: translateX(-2px);
-}
-
-.stage {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  padding-block: var(--s-4);
-}
-
-@media (min-width: 768px) {
-  .stage {
-    padding-block: var(--s-8);
-  }
 }
 
 .card {
+  width: 100%;
   display: flex;
   flex-direction: column;
   gap: var(--s-5);
-  width: min(26rem, 100%);
-  padding: var(--s-5);
+  padding: var(--s-6);
   background: var(--surface);
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-xl);
-  box-shadow: var(--shadow-2);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-1);
 }
 
-@media (min-width: 768px) {
+@media (max-width: 479px) {
   .card {
-    padding: var(--s-6);
+    padding: var(--s-5);
   }
 }
 
@@ -291,9 +234,8 @@ async function submit() {
 }
 
 .h1 {
-  font: var(--t-title-3);
-  letter-spacing: var(--track-title-3);
-  font-size: clamp(1.125rem, 2.4vw, 1.375rem);
+  font: var(--t-title-2);
+  letter-spacing: var(--track-title-2);
 }
 
 .sub {
@@ -302,38 +244,51 @@ async function submit() {
   margin-top: var(--s-1);
 }
 
+.pesan {
+  font: var(--t-body-sm);
+  color: var(--cat-usaha-ink);
+  background: var(--cat-usaha-bg);
+  border: 1px solid var(--cat-usaha-line);
+  padding: var(--s-3);
+  border-radius: var(--r-md);
+  line-height: 1.45;
+}
+
+.galat {
+  font: var(--t-body-sm);
+  color: var(--cat-ask-ink);
+  background: var(--cat-ask-bg);
+  border: 1px solid var(--cat-ask-line);
+  padding: var(--s-3);
+  border-radius: var(--r-md);
+  line-height: 1.45;
+}
+
 .form {
   display: flex;
   flex-direction: column;
   gap: var(--s-4);
 }
 
-.lanjut {
+/* Helper links: 44px tall tap targets, underlined so they read as links. */
+.helper {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: var(--s-2);
-  min-height: 2.5rem;
-  border-radius: var(--r-md);
+  min-height: 2.75rem;
   font: var(--t-label);
-  letter-spacing: var(--track-label);
-  color: var(--ink-2);
-  transition: color var(--t-fast) var(--ease-out-soft);
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  border-radius: var(--r-md);
+  text-align: center;
 }
 
-.lanjut:hover {
-  color: var(--ink);
+.helper:hover {
+  color: var(--accent-hover);
 }
 
-.lanjut svg {
-  transition: transform var(--t-fast) var(--ease-out-soft);
-}
-
-.lanjut:hover svg {
-  transform: translateX(2px);
-}
-
-.trust {
+.data-note {
   display: flex;
   flex-direction: column;
   gap: var(--s-3);
@@ -352,11 +307,16 @@ async function submit() {
 }
 
 .tl svg {
+  flex: none;
   margin-top: 0.125rem;
   color: var(--ink-3);
 }
 
-.stamp {
-  margin-top: calc(var(--s-1) * -1);
+.foot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-2);
+  text-align: center;
 }
 </style>

@@ -2,10 +2,9 @@
 /**
  * Sheet / dialog.
  *
- * Anchored to the bottom edge on a phone, where the thumb is, and presented as
- * a centered dialog from tablet up. Enter and exit share one path: the panel
- * comes from the bottom and leaves toward the bottom, so a dismissal reads as a
- * reversal rather than a detour.
+ * A centred dialog at every width. It is not a bottom sheet: the site is a
+ * conventional page, and a dialog is the honest container for a focused task.
+ * It fades in and out; nothing slides or scales.
  *
  * The scrim is the only thing that blocks input, and it dismisses on tap. There
  * is no busy state to wait out, so nothing ever locks the user mid-transition.
@@ -79,7 +78,6 @@ onBeforeUnmount(() => {
           :aria-label="title"
           tabindex="-1"
         >
-          <header class="grab" aria-hidden="true"><span class="bar" /></header>
           <header class="head">
             <div class="titles">
               <h2 class="t2">{{ title }}</h2>
@@ -104,41 +102,28 @@ onBeforeUnmount(() => {
   inset: 0;
   z-index: 80;
   display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: center;
+  padding: var(--s-4);
 }
 
 .scrim {
   position: absolute;
   inset: 0;
   background: var(--scrim);
-  backdrop-filter: blur(2px);
 }
 
 .panel {
   position: relative;
   display: flex;
   flex-direction: column;
-  max-height: 88svh;
-  background: var(--material-sheet);
-  backdrop-filter: var(--blur-bar);
-  border-radius: var(--r-2xl) var(--r-2xl) 0 0;
-  box-shadow: var(--shadow-3);
-  padding-bottom: var(--safe-b);
+  width: min(30rem, 100%);
+  max-height: 84svh;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-2);
   overflow: clip;
-}
-
-.grab {
-  display: flex;
-  justify-content: center;
-  padding-top: var(--s-2);
-}
-
-.bar {
-  width: 2.25rem;
-  height: 0.25rem;
-  border-radius: var(--r-full);
-  background: var(--hairline-strong);
 }
 
 .head {
@@ -199,72 +184,18 @@ onBeforeUnmount(() => {
   line-height: 1.45;
 }
 
-@media (min-width: 768px) {
-  .layer {
-    justify-content: center;
-    align-items: center;
-    padding: var(--s-6);
-  }
-
-  .panel {
-    width: min(30rem, 100%);
-    max-height: 84svh;
-    border-radius: var(--r-xl);
-    padding-bottom: 0;
-  }
-
-  .wide {
-    width: min(46rem, 100%);
-  }
-
-  /* The grab handle is a phone affordance; from tablet up the panel is a dialog
-     and a centered close button already says how to leave. */
-  .grab {
-    display: none;
-  }
-
-  .head {
-    padding-top: var(--s-5);
-  }
+.wide {
+  width: min(46rem, 100%);
 }
 
-/* Enter and exit along the same path: from below, and back to below. */
-.sheet-enter-active .panel,
-.sheet-leave-active .panel {
-  transition:
-    transform var(--t-base) var(--ease-out-soft),
-    opacity var(--t-base) var(--ease-out-soft);
+/* Fade only: the dialog and its scrim share one short opacity transition. */
+.sheet-enter-active,
+.sheet-leave-active {
+  transition: opacity var(--t-fast) linear;
 }
 
-.sheet-enter-active .scrim,
-.sheet-leave-active .scrim {
-  transition: opacity var(--t-base) var(--ease-out-soft);
-}
-
-.sheet-enter-from .panel,
-.sheet-leave-to .panel {
-  transform: translateY(100%);
-  opacity: 0.4;
-}
-
-.sheet-enter-from .scrim,
-.sheet-leave-to .scrim {
+.sheet-enter-from,
+.sheet-leave-to {
   opacity: 0;
-}
-
-@media (min-width: 768px) {
-  .sheet-enter-from .panel,
-  .sheet-leave-to .panel {
-    transform: scale(0.96) translateY(8px);
-    opacity: 0;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .sheet-enter-from .panel,
-  .sheet-leave-to .panel {
-    transform: none;
-    opacity: 0;
-  }
 }
 </style>

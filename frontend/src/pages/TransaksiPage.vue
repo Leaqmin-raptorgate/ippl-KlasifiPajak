@@ -185,9 +185,11 @@ function goto(id: string) {
           />
         </AppField>
 
+        <!-- Wide screens: one segmented row. Narrow screens: a select, so five
+             category names never need a sideways scroll. Only one is shown. -->
         <div class="kat">
-          <p class="u-label">Kategori</p>
-          <div class="kat-scroll">
+          <p class="u-label kat-wide">Kategori</p>
+          <div class="kat-wide">
             <AppSegmented
               class="kat-seg"
               v-model="kategori"
@@ -195,6 +197,9 @@ function goto(id: string) {
               aria-label="Saring menurut kategori"
             />
           </div>
+          <AppField label="Kategori" for-id="kategori" class="kat-narrow">
+            <AppSelect id="kategori" v-model="kategori" :options="kategoriOpsi" />
+          </AppField>
         </div>
       </div>
     </AppCard>
@@ -313,8 +318,8 @@ function goto(id: string) {
 }
 
 .t1 {
-  font: var(--t-title-1);
-  letter-spacing: var(--track-title-1);
+  font: var(--t-title-2);
+  letter-spacing: var(--track-title-2);
 }
 
 .sub {
@@ -372,11 +377,15 @@ function goto(id: string) {
   }
 }
 
-/* A phone wants 40px targets; the md button is 38px. */
+/* A phone wants 44px targets. */
 @media (max-width: 639px) {
   .acts > *,
   .baris-atasan > * {
-    height: 2.5rem;
+    height: 2.75rem;
+  }
+
+  .page :deep(.s-sm) {
+    --btn-h: 2.75rem;
   }
 }
 
@@ -386,27 +395,11 @@ function goto(id: string) {
   padding: var(--s-4) var(--s-5) var(--s-5);
 }
 
+/* Search and month share a row from 640px; the category row always spans. */
 @media (min-width: 640px) {
   .filter {
     grid-template-columns: minmax(0, 1fr) minmax(9.5rem, 12rem);
     gap: var(--s-4);
-  }
-
-  .kat {
-    grid-column: 1 / -1;
-  }
-}
-
-/* Three labelled controls on one line: search grows, the month keeps its size,
-   and the category switch takes whatever is left. */
-@media (min-width: 1024px) {
-  .filter {
-    grid-template-columns: minmax(0, 1fr) minmax(9.5rem, 12rem) minmax(0, 2fr);
-    align-items: end;
-  }
-
-  .kat {
-    grid-column: auto;
   }
 }
 
@@ -415,34 +408,33 @@ function goto(id: string) {
   flex-direction: column;
   gap: var(--s-2);
   min-width: 0;
+  grid-column: 1 / -1;
 }
 
-/* Five category names do not fit a phone in one row, so the switch scrolls
-   sideways there instead of cutting every label down to three letters. */
-.kat-scroll {
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  scrollbar-width: none;
-  /* The set of categories is wider than a phone, so the control scrolls. Fade
-     the trailing edge instead of cutting a chip in half: the cut chip is what
-     tells the reader there is more to swipe to. */
-  mask-image: linear-gradient(to right, #000 calc(100% - 1.25rem), transparent 100%);
+.kat-narrow {
+  display: block;
 }
 
-@media (min-width: 640px) {
-  .kat-scroll {
-    mask-image: none;
-  }
-}
-
-.kat-scroll::-webkit-scrollbar {
+.kat-wide {
   display: none;
 }
 
-@media (max-width: 639px) {
-  .kat-seg {
-    min-width: 45rem;
+@media (min-width: 1024px) {
+  .kat-narrow {
+    display: none;
   }
+
+  .kat-wide {
+    display: block;
+  }
+}
+
+.kat-seg {
+  width: 100%;
+}
+
+.kat-seg :deep(.opt) {
+  height: 2.75rem;
 }
 
 .baris-atasan {
@@ -465,7 +457,7 @@ function goto(id: string) {
 
 .sep {
   margin-inline: var(--s-2);
-  opacity: 0.5;
+  color: var(--ink-3);
 }
 
 .sheet-fields {

@@ -52,27 +52,27 @@ const tag = computed(() => (props.to ? "RouterLink" : props.href ? "a" : "button
   justify-content: center;
   gap: var(--s-2);
   height: var(--btn-h);
+  min-height: var(--btn-h);
   padding-inline: var(--s-4);
   border-radius: var(--r-md);
   border: 1px solid transparent;
   font: var(--t-label);
   font-weight: 600;
-  letter-spacing: var(--track-label);
   white-space: nowrap;
   user-select: none;
   position: relative;
 }
 
 .s-sm {
-  --btn-h: 2.125rem;
+  --btn-h: 2.25rem;
   padding-inline: var(--s-3);
-  font-size: 0.78125rem;
+  font-size: 0.875rem;
 }
 
 .s-lg {
   --btn-h: 3rem;
   padding-inline: var(--s-6);
-  font-size: 0.9375rem;
+  font-size: 1rem;
 }
 
 .block {
@@ -87,17 +87,11 @@ const tag = computed(() => (props.to ? "RouterLink" : props.href ? "a" : "button
 }
 
 .end {
-  margin-left: -0.0625rem;
-  transition: transform var(--t-base) var(--ease-out-soft);
+  flex: none;
 }
 
-.btn:hover .end {
-  transform: translateX(2px);
-}
-
-/* A finger needs more room than a cursor, so the coarse-pointer build is the
-   one that meets the 44px guidance. The mouse build stays compact. */
-@media (pointer: coarse) {
+/* Touch widths meet the 44px tap-target guidance; the pointer build stays compact. */
+@media (pointer: coarse), (max-width: 767px) {
   .btn {
     --btn-h: 2.75rem;
   }
@@ -111,6 +105,7 @@ const tag = computed(() => (props.to ? "RouterLink" : props.href ? "a" : "button
   }
 }
 
+/* Primary: the one filled action on a screen. */
 .v-primary {
   background: var(--accent);
   color: var(--accent-ink);
@@ -124,24 +119,26 @@ const tag = computed(() => (props.to ? "RouterLink" : props.href ? "a" : "button
   background: var(--accent-press);
 }
 
+/* Soft: a tinted action for a secondary emphasis. */
 .v-soft {
   background: var(--accent-soft);
   color: var(--accent-soft-ink);
 }
 
 .v-soft:hover {
-  background: color-mix(in oklab, var(--accent-soft) 82%, var(--accent));
+  background: var(--accent-line);
 }
 
+/* Secondary: a bordered neutral button. The border is a field-strength line so
+   the control is findable without a shadow. */
 .v-outline {
   background: var(--surface);
   color: var(--ink);
-  border-color: var(--hairline-strong);
-  box-shadow: var(--shadow-1);
+  border-color: var(--field-line);
 }
 
 .v-outline:hover {
-  background: var(--surface-raised);
+  background: var(--surface-sunken);
 }
 
 .v-ghost {
@@ -150,13 +147,17 @@ const tag = computed(() => (props.to ? "RouterLink" : props.href ? "a" : "button
 }
 
 .v-ghost:hover {
-  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  background: var(--surface-sunken);
   color: var(--ink);
 }
 
 .v-danger {
-  background: var(--cat-ask-bg);
-  color: var(--cat-ask-ink);
+  background: var(--surface);
+  color: var(--danger);
   border-color: var(--cat-ask-line);
+}
+
+.v-danger:hover {
+  background: var(--cat-ask-bg);
 }
 </style>

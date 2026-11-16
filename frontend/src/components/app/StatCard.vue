@@ -4,6 +4,9 @@
  *
  * One card, one number. The caption says which basis the number is on, because
  * a total with no basis is the thing that gets misread.
+ *
+ * `valueKind="text"` is for a word, such as a status. It sets at title size so it
+ * stays on one line where the card allows, instead of wrapping at figure size.
  */
 import AppIcon from "@/components/ui/AppIcon.vue";
 
@@ -13,6 +16,7 @@ defineProps<{
   caption?: string;
   icon?: string;
   tone?: "default" | "accent" | "warn" | "ask";
+  valueKind?: "figure" | "text";
 }>();
 </script>
 
@@ -22,7 +26,7 @@ defineProps<{
       <span class="lbl">{{ label }}</span>
       <AppIcon v-if="icon" :name="icon" :size="16" :stroke-width="1.7" class="ic" />
     </div>
-    <p class="val figure">{{ value }}</p>
+    <p class="val" :class="valueKind === 'text' ? 'is-teks' : 'figure'">{{ value }}</p>
     <p v-if="caption" class="cap">{{ caption }}</p>
   </div>
 </template>
@@ -36,7 +40,6 @@ defineProps<{
   background: var(--surface);
   border: 1px solid var(--hairline);
   border-radius: var(--r-lg);
-  box-shadow: var(--shadow-1);
   min-width: 0;
 }
 
@@ -65,6 +68,14 @@ defineProps<{
   overflow-wrap: anywhere;
 }
 
+/* A word value: title size, so "Memenuhi syarat" fits on one line in a quarter-width card. */
+.val.is-teks {
+  font: var(--t-title-3);
+  letter-spacing: var(--track-title-3);
+  font-family: var(--font-sans);
+  font-variant-numeric: normal;
+}
+
 .cap {
   font: var(--t-body-sm);
   color: var(--ink-3);
@@ -89,8 +100,10 @@ defineProps<{
   color: var(--warn-ink);
 }
 
-.t-warn .cap {
-  color: color-mix(in oklab, var(--warn-ink) 75%, transparent);
+/* Captions keep full text colour on tinted cards: a faded caption fails 4.5:1. */
+.t-warn .cap,
+.t-ask .cap {
+  color: var(--ink-2);
 }
 
 .t-ask {
@@ -103,10 +116,6 @@ defineProps<{
   color: var(--cat-ask-ink);
 }
 
-.t-ask .cap {
-  color: color-mix(in oklab, var(--cat-ask-ink) 75%, transparent);
-}
-
 @media (min-width: 768px) {
   .stat {
     padding: var(--s-5);
@@ -114,6 +123,10 @@ defineProps<{
 
   .val {
     font-size: 1.625rem;
+  }
+
+  .val.is-teks {
+    font-size: 1.125rem;
   }
 }
 </style>

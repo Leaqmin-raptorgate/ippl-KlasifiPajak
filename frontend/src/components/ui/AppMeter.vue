@@ -79,7 +79,7 @@ const tone = computed(() =>
   height: 0.5rem;
   border-radius: var(--r-full);
   background: var(--surface-sunken);
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--hairline-strong);
   overflow: clip;
 }
 

@@ -1,49 +1,51 @@
 /**
  * Design tokens.
  *
- * Derived from the two Stitch design systems (klasifipajak_calm_taxwork and
- * klasifipajak_nocturne) with the decorative layer removed and the fundamentals
- * tightened: system typeface with optical tracking, a warm neutral canvas instead
- * of a blue-tinted one, translucent chrome instead of drawn dividers, and one
- * confident accent rather than a glow vocabulary.
+ * A conventional, high-trust website: a neutral canvas, white surfaces with
+ * 1px borders, one institutional blue for actions, and green/amber/red used only
+ * as status colours. Dark mode is selected with `data-theme="dark"` on <html>,
+ * which index.html sets before first paint and the session store keeps in sync.
+ *
+ * Every colour a component uses is a token defined in BOTH blocks below. Do not
+ * hard-code a colour in a component: a token that is missing from the dark block
+ * leaves light values behind and produces unreadable text.
  */
 
 :root {
+  color-scheme: light;
+
   /* ---- Typeface -------------------------------------------------------
-   * The platform face already ships optical sizing, tracking tables and
-   * legibility tuning, so it is the default. Inter is kept as a fallback for
-   * Linux/Android where the platform face is Roboto or Noto.
+   * The system face only. No web fonts, no CDN.
    */
   --font-sans:
-    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", Inter,
-    Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-numeric:
-    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Inter, Roboto, sans-serif;
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Roboto, Arial, sans-serif;
+  --font-numeric: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
 
   /* ---- Type scale ------------------------------------------------------
-   * Tracking is size-specific: large sizes tighten, small sizes open up.
-   * Leading tracks size inversely. Never one value for all sizes.
+   * Body is 16px. Labels are 14px. The smallest text in the app is the 12px
+   * legal caption. Headings are semibold with normal tracking.
    */
-  --t-display: 600 2.25rem/1.08 var(--font-sans);
-  --t-title-1: 600 1.75rem/1.18 var(--font-sans);
-  --t-title-2: 600 1.375rem/1.22 var(--font-sans);
-  --t-title-3: 600 1.0625rem/1.3 var(--font-sans);
-  --t-body: 400 0.9375rem/1.55 var(--font-sans);
-  --t-body-sm: 400 0.8125rem/1.45 var(--font-sans);
-  --t-label: 500 0.8125rem/1.3 var(--font-sans);
-  --t-label-sm: 500 0.75rem/1.25 var(--font-sans);
-  --t-caption: 400 0.6875rem/1.35 var(--font-sans);
-  --t-figure: 500 1.5rem/1.15 var(--font-numeric);
-  --t-figure-sm: 500 1.0625rem/1.25 var(--font-numeric);
+  --t-display: 600 2rem/1.25 var(--font-sans);
+  --t-title-1: 600 1.75rem/1.25 var(--font-sans);
+  --t-title-2: 600 1.375rem/1.3 var(--font-sans);
+  --t-title-3: 600 1.125rem/1.35 var(--font-sans);
+  --t-body: 400 1rem/1.6 var(--font-sans);
+  --t-body-sm: 400 0.875rem/1.55 var(--font-sans);
+  --t-small: 400 0.875rem/1.55 var(--font-sans);
+  --t-label: 500 0.875rem/1.4 var(--font-sans);
+  --t-label-sm: 500 0.8125rem/1.35 var(--font-sans);
+  --t-caption: 400 0.75rem/1.45 var(--font-sans);
+  --t-figure: 500 1.5rem/1.2 var(--font-numeric);
+  --t-figure-sm: 500 1.125rem/1.3 var(--font-numeric);
 
-  --track-display: -0.028em;
-  --track-title-1: -0.022em;
-  --track-title-2: -0.018em;
-  --track-title-3: -0.012em;
-  --track-body: -0.006em;
-  --track-label: 0.004em;
-  --track-label-sm: 0.022em;
-  --track-caption: 0.06em;
+  --track-display: 0;
+  --track-title-1: 0;
+  --track-title-2: 0;
+  --track-title-3: 0;
+  --track-body: 0;
+  --track-label: 0;
+  --track-label-sm: 0.005em;
+  --track-caption: 0.01em;
 
   /* ---- Space: 4px base rhythm ------------------------------------------ */
   --s-1: 0.25rem;
@@ -58,73 +60,81 @@
   --s-16: 4rem;
   --s-20: 5rem;
 
-  /* ---- Radius ---------------------------------------------------------- */
-  --r-xs: 0.375rem;
-  --r-sm: 0.5rem;
-  --r-md: 0.625rem;
-  --r-lg: 0.875rem;
-  --r-xl: 1.125rem;
-  --r-2xl: 1.5rem;
+  /* ---- Radius: buttons and fields 8px, cards 12px, pills full ---------- */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-xl: 12px;
+  --r-2xl: 16px;
   --r-full: 999px;
 
   /* ---- Motion ----------------------------------------------------------
-   * --ease-out-soft is the workhorse: a critically damped, interruptible
-   * curve. CSS transitions restart from the current computed value, so an
-   * interrupted transition retargets without a jump.
-   * --ease-spring carries a little overshoot and is reserved for values that
-   * came out of a gesture (sheets, popovers).
+   * Hover and focus change colour over 150ms. Route and dialog changes are a
+   * short fade. Nothing scales, springs or slides.
    */
-  --ease-out-soft: cubic-bezier(0.32, 0.72, 0, 1);
-  --ease-in-out-soft: cubic-bezier(0.65, 0, 0.35, 1);
-  --ease-spring: cubic-bezier(0.34, 1.32, 0.64, 1);
-  --t-fast: 140ms;
-  --t-base: 240ms;
-  --t-slow: 420ms;
-  --t-press: 90ms;
+  --ease-out-soft: cubic-bezier(0.2, 0, 0, 1);
+  --ease-in-out-soft: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-spring: var(--ease-out-soft);
+  --t-fast: 150ms;
+  --t-base: 180ms;
+  --t-slow: 200ms;
+  --t-press: 0ms;
 
-  /* ---- Layout ---------------------------------------------------------- */
-  --rail-w: 5.25rem;
-  --sidebar-w: 15rem;
-  --canvas-max: 80rem;
-  --tabbar-h: 3.5rem;
-  --topbar-h: 3.25rem;
-  --safe-b: env(safe-area-inset-bottom, 0px);
-  --safe-t: env(safe-area-inset-top, 0px);
+  /* ---- Layout ----------------------------------------------------------
+   * One site header and one footer on every width. The old rail, sidebar and
+   * tab bar are retired; their variables stay defined as zero so that any
+   * stale reference collapses instead of breaking the layout.
+   */
+  --canvas-max: 72rem;
+  --gutter: 1rem;
+  --topbar-h: 4rem;
+  --header-h: 4rem;
+  --rail-w: 0px;
+  --sidebar-w: 0px;
+  --tabbar-h: 0px;
+  --safe-b: 0px;
+  --safe-t: 0px;
 
   /* ---- Neutral + accent, light ---------------------------------------- */
-  --canvas: #f6f6f4;
+  --canvas: #f7f8fa;
   --surface: #ffffff;
-  --surface-sunken: #f1f1ee;
-  --surface-raised: #fbfbfa;
-  --scrim: rgb(20 22 21 / 0.28);
+  --surface-sunken: #f1f3f6;
+  --surface-raised: #fafbfc;
+  --scrim: rgb(15 20 32 / 0.4);
 
-  --ink: #171a19;
-  --ink-2: #5b625f;
-  --ink-3: #6b6f6d;
-  --ink-inverse: #fbfbfa;
+  --ink: #1b2130;
+  --ink-2: #4a5263;
+  --ink-3: #5b6373;
+  --ink-inverse: #ffffff;
 
-  --hairline: rgb(23 26 25 / 0.09);
-  --hairline-strong: rgb(23 26 25 / 0.16);
+  --hairline: rgb(27 33 48 / 0.1);
+  --hairline-strong: rgb(27 33 48 / 0.18);
+  /* Non-text borders on fields and secondary buttons must reach 3:1 (WCAG 1.4.11). */
+  --field-line: #8a92a3;
 
-  --accent: #0f7263;
-  --accent-hover: #0c5f53;
-  --accent-press: #0a4c42;
+  --accent: #1f4e9c;
+  --accent-hover: #183f80;
+  --accent-press: #123268;
   --accent-ink: #ffffff;
-  --accent-soft: #e4f0ec;
-  --accent-soft-ink: #0a5348;
-  --accent-line: #b6d8d0;
+  --accent-soft: #e8eef8;
+  --accent-soft-ink: #173a78;
+  --accent-line: #c3d3ec;
 
-  --focus: #0f7263;
+  --focus: #1f4e9c;
 
-  --shadow-1: 0 1px 2px rgb(23 26 25 / 0.05), 0 1px 1px rgb(23 26 25 / 0.03);
-  --shadow-2: 0 2px 6px rgb(23 26 25 / 0.06), 0 6px 16px -6px rgb(23 26 25 / 0.08);
-  --shadow-3: 0 8px 20px -6px rgb(23 26 25 / 0.12), 0 20px 48px -16px rgb(23 26 25 / 0.14);
+  --danger: #b42318;
 
-  /* Translucent chrome. Content scrolls underneath. */
-  --material-bar: rgb(246 246 244 / 0.72);
-  --material-bar-line: rgb(23 26 25 / 0.07);
-  --material-sheet: rgb(255 255 255 / 0.86);
-  --blur-bar: saturate(180%) blur(20px);
+  --shadow-1: 0 1px 2px rgb(27 33 48 / 0.06);
+  --shadow-2: 0 4px 12px rgb(27 33 48 / 0.08);
+  --shadow-3: 0 12px 32px -8px rgb(27 33 48 / 0.18);
+
+  /* Chrome is solid in the new layout. The variable names stay for the
+     landing page and any older component that still reads them. */
+  --material-bar: #ffffff;
+  --material-bar-line: rgb(27 33 48 / 0.1);
+  --material-sheet: #ffffff;
+  --blur-bar: none;
 
   /* ---- Category semantics ---------------------------------------------
    * The four engine categories plus the unresolved state. Each is a text /
@@ -156,37 +166,42 @@
 }
 
 :root[data-theme="dark"] {
-  --canvas: #101413;
-  --surface: #181d1c;
-  --surface-sunken: #0c100f;
-  --surface-raised: #1f2523;
-  --scrim: rgb(0 0 0 / 0.5);
+  color-scheme: dark;
 
-  --ink: #edf0ee;
-  --ink-2: #a3aca8;
-  --ink-3: #848c89;
-  --ink-inverse: #101413;
+  --canvas: #0f1420;
+  --surface: #161c2b;
+  --surface-sunken: #0b1019;
+  --surface-raised: #1c2438;
+  --scrim: rgb(0 0 0 / 0.6);
 
-  --hairline: rgb(237 240 238 / 0.1);
-  --hairline-strong: rgb(237 240 238 / 0.18);
+  --ink: #e6eaf2;
+  --ink-2: #aab3c4;
+  --ink-3: #98a1b3;
+  --ink-inverse: #0f1420;
 
-  --accent: #3fbfa8;
-  --accent-hover: #55ccb6;
-  --accent-press: #2ea794;
-  --accent-ink: #06231e;
-  --accent-soft: #16302b;
-  --accent-soft-ink: #6fdbca;
-  --accent-line: #245049;
+  --hairline: rgb(230 234 242 / 0.1);
+  --hairline-strong: rgb(230 234 242 / 0.2);
+  --field-line: #6b7488;
 
-  --focus: #3fbfa8;
+  --accent: #6b9cf0;
+  --accent-hover: #84adf4;
+  --accent-press: #5a8fe8;
+  --accent-ink: #0f1420;
+  --accent-soft: #1b2a47;
+  --accent-soft-ink: #b4cbf7;
+  --accent-line: #2c4470;
+
+  --focus: #6b9cf0;
+
+  --danger: #f0899f;
 
   --shadow-1: 0 1px 2px rgb(0 0 0 / 0.4);
-  --shadow-2: 0 2px 8px rgb(0 0 0 / 0.45);
-  --shadow-3: 0 10px 28px -8px rgb(0 0 0 / 0.6), 0 28px 60px -20px rgb(0 0 0 / 0.5);
+  --shadow-2: 0 4px 12px rgb(0 0 0 / 0.4);
+  --shadow-3: 0 12px 32px -8px rgb(0 0 0 / 0.6);
 
-  --material-bar: rgb(16 20 19 / 0.74);
-  --material-bar-line: rgb(237 240 238 / 0.08);
-  --material-sheet: rgb(24 29 28 / 0.88);
+  --material-bar: #161c2b;
+  --material-bar-line: rgb(230 234 242 / 0.1);
+  --material-sheet: #161c2b;
 
   --cat-usaha-ink: #4ecfa4;
   --cat-usaha-bg: #0e2b22;
@@ -213,32 +228,14 @@
   --warn-line: #5a411a;
 }
 
-@media (prefers-reduced-transparency: reduce) {
-  :root {
-    --material-bar: #f6f6f4;
-    --material-sheet: #ffffff;
-    --blur-bar: none;
-  }
-
-  :root[data-theme="dark"] {
-    --material-bar: #101413;
-    --material-sheet: #181d1c;
-  }
-}
-
 @media (prefers-contrast: more) {
   :root {
-    --hairline: rgb(23 26 25 / 0.34);
-    --hairline-strong: rgb(23 26 25 / 0.6);
-    --material-bar: #f6f6f4;
-    --material-sheet: #ffffff;
-    --blur-bar: none;
+    --hairline: rgb(27 33 48 / 0.34);
+    --hairline-strong: rgb(27 33 48 / 0.6);
   }
 
   :root[data-theme="dark"] {
-    --hairline: rgb(237 240 238 / 0.4);
-    --hairline-strong: rgb(237 240 238 / 0.66);
-    --material-bar: #101413;
-    --material-sheet: #181d1c;
+    --hairline: rgb(230 234 242 / 0.4);
+    --hairline-strong: rgb(230 234 242 / 0.66);
   }
 }

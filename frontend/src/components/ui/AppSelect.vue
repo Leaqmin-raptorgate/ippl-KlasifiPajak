@@ -44,7 +44,7 @@ const emit = defineEmits<{ "update:modelValue": [value: string] }>();
   align-items: center;
   min-height: 2.75rem;
   background: var(--surface);
-  border: 1px solid var(--hairline-strong);
+  border: 1px solid var(--field-line);
   border-radius: var(--r-md);
   transition:
     border-color var(--t-fast) var(--ease-out-soft),
@@ -68,8 +68,17 @@ const emit = defineEmits<{ "update:modelValue": [value: string] }>();
   background: none;
   border: 0;
   appearance: none;
+  color: var(--ink);
+  cursor: pointer;
   font: var(--t-body);
   letter-spacing: var(--track-body);
+}
+
+/* The open list is drawn by the browser. Give it the theme's surface and ink, so the
+   options are not left as dark text on a dark list (or the reverse) in either theme. */
+.sel option {
+  background-color: var(--surface);
+  color: var(--ink);
 }
 
 @media (max-width: 767px) {

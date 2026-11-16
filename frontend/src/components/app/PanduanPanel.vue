@@ -27,8 +27,12 @@ const store = usePanduanStore();
 
 <style scoped>
 .stamp,
-.citation,
 .empty {
+  color: var(--ink-2);
+  font: var(--t-body-sm);
+}
+
+.citation {
   color: var(--ink-3);
   font: var(--t-caption);
 }
