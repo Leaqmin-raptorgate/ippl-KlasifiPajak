@@ -111,7 +111,10 @@ _DATA_DELIM = re.compile(
 )
 _PARTY_NAME_KEYS = frozenset({"client_name", "name"})
 # Row ids are random ULIDs, not private data. Redacting one would break citations.
+# Only a value that has the shape `new_id` produces is left alone: an `id` key that
+# ever holds free text still goes through the redactor.
 _OPAQUE_ID_KEYS = frozenset({"id"})
+_ROW_ID_SHAPE = re.compile(r"(?:[a-z]+_)?[0-9A-HJKMNP-TV-Z]{26}")
 
 _RESERVE_SQL = (
     "UPDATE quota_counters "
@@ -590,7 +593,7 @@ def _scrub_literals(value: Any, literals: list[str]) -> Any:
 def _sanitize_outbound(value: Any, key: str | None = None) -> Any:
     """Copy model input with private names, emails, and phone numbers removed (FR-43)."""
     if isinstance(value, str):
-        if key in _OPAQUE_ID_KEYS:
+        if key in _OPAQUE_ID_KEYS and _ROW_ID_SHAPE.fullmatch(value):
             return value
         if key in _PARTY_NAME_KEYS:
             return mask_party_name(value)

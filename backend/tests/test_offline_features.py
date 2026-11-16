@@ -1297,13 +1297,13 @@ def test_tc_email_reset_sends_plaintext_only_to_sender_and_never_logs_it(
 
 
 def test_tc_assistant_outbound_keeps_row_ids_that_look_like_phone_numbers():
-    """A random ULID can hold 08..., 628... or a long digit run. Citations need the exact id."""
+    """FR-43: a random ULID can hold 08..., 628... or a long digit run; citations need the exact id."""
     from app.services import assistant
 
     ids = [
         "01JABC0812345XYZ0123456789",  # 08 + digits: matches the mobile pattern
         "01J628812345ABCDEFGHJKMNPQ",  # 62 + 8 + digits: matches the +62 pattern
-        "01JK12345678901234567ABCD",  # 17 digits in a row
+        "tx_01JK12345678901234567ABCDE",  # prefixed, 17 digits in a row
     ]
     payload = {
         "tool_results": {"baca_transaksi_sendiri": [{"id": i, "category": "usaha"} for i in ids]}
@@ -1315,9 +1315,23 @@ def test_tc_assistant_outbound_keeps_row_ids_that_look_like_phone_numbers():
 
 
 def test_tc_assistant_outbound_still_redacts_phone_numbers_in_text():
+    """FR-43: phone numbers and emails in free text are still removed."""
     from app.services import assistant
 
     cleaned = assistant._sanitize_outbound({"question": "Hubungi 0812-3456-7890 atau a@b.id"})
 
     assert "0812" not in cleaned["question"]
     assert "a@b.id" not in cleaned["question"]
+
+
+def test_tc_assistant_outbound_redacts_an_id_key_that_holds_free_text():
+    """FR-43: the id exemption covers real row ids only, not any string under an `id` key."""
+    from app.services import assistant
+
+    cleaned = assistant._sanitize_outbound(
+        {"tool_results": {"rows": [{"id": "hubungi 0812-3456-7890 a@b.id"}]}}
+    )
+
+    text = cleaned["tool_results"]["rows"][0]["id"]
+    assert "0812" not in text
+    assert "a@b.id" not in text
