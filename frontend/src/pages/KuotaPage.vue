@@ -257,9 +257,7 @@ function gantiTema(nilai: string) {
           />
         </span>
         <div class="tema-teks">
-          <p class="tema-judul">
-            {{ session.theme === "dark" ? "Mode gelap" : "Mode terang" }}
-          </p>
+          <p class="tema-judul">Tema</p>
           <p class="tema-sub">
             Mode gelap mengurangi cahaya saat dipakai pada malam hari. Kontras dan kebalikannya
             mengikuti setelan sistem serta aplikasi.
@@ -397,7 +395,7 @@ function gantiTema(nilai: string) {
 }
 
 .harga-cat {
-  font: var(--t-caption);
+  font: var(--t-body-sm);
   color: var(--ink-3);
   line-height: 1.45;
 }
@@ -470,7 +468,7 @@ function gantiTema(nilai: string) {
 }
 
 .plan-kaki {
-  font: var(--t-caption);
+  font: var(--t-body-sm);
   color: var(--ink-3);
   line-height: 1.45;
   padding-top: var(--s-3);
