@@ -906,6 +906,13 @@ At most one `pending` row exists per user and plan. The call locks that row. If 
 }
 ```
 
+Error messages:
+
+- `503` `PAYMENT_GATEWAY_UNAVAILABLE`: "Pembayaran belum tersedia. Coba lagi." when the gateway call fails, or the new order row cannot be read back.
+- `503` `PAYMENT_GATEWAY_UNAVAILABLE`: "Pembayaran sedang disiapkan. Coba lagi." when the reused pending order inside 24 hours has no `payment_url` yet.
+
+The webhook (5.30) uses its own `503` text, "Layanan pembayaran belum tersedia. Coba lagi nanti.", for the same code. That is a different endpoint and is kept as written.
+
 ### 5.29 `GET /subscriptions/orders`
 
 `200` returns the caller's orders: `order_id`, `plan_id`, `amount_idr`, `status`, `created_at`, `expires_at_utc`. `payment_url` is included only while `status` is `pending`. No payment-instrument data.

@@ -100,8 +100,43 @@ describe("KuotaPage subscription purchase", () => {
     expect(assign).toHaveBeenCalledWith(PENDING.payment_url);
   });
 
+  it("reads quotas, status and orders once when the page and the shell both load", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: "/kuota", name: "kuota", component: KuotaPage }],
+    });
+    await router.push("/kuota");
+    await router.isReady();
+    const wrapper = mount(KuotaPage, { global: { plugins: [pinia, router] } });
+    montados.push(wrapper);
+    // The shell asks for the same store load while the page is mounting.
+    void useKuotaStore().muat();
+    await flushPromises();
+    const calls = (path: string) => apiMock.mock.calls.filter(([p]) => p === path).length;
+    expect(calls("/quotas")).toBe(1);
+    expect(calls("/subscriptions/status")).toBe(1);
+    expect(calls("/subscriptions/orders")).toBe(1);
+  });
+
+  it("shows an empty state, not an error, when quota and status are not found yet", async () => {
+    apiMock.mockImplementation((path: string, init?: RequestInit) =>
+      path === "/quotas" || path === "/subscriptions/status"
+        ? Promise.reject(new ApiFailure(404, "NOT_FOUND", "Belum ada data."))
+        : route(path, init),
+    );
+    const wrapper = await pasang();
+    expect(wrapper.find("[role=alert]").exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("Belum ada data.");
+    expect(wrapper.text()).not.toContain("Kuota belum tersedia.");
+    expect(wrapper.get(".plan-harga .harga").text()).toBe("Rp 0");
+    expect(wrapper.text()).toContain("Akun Gratis");
+  });
+
   it("shows the 503 message inline and does not redirect", async () => {
-    const pesan = "Layanan pembayaran belum tersedia. Coba lagi nanti.";
+    // Wording of POST /subscriptions/orders, API spec 5.28 (the webhook 503 differs).
+    const pesan = "Pembayaran belum tersedia. Coba lagi.";
     post = () => Promise.reject(new ApiFailure(503, "PAYMENT_GATEWAY_UNAVAILABLE", pesan));
     const wrapper = await pasang();
     await wrapper.get(".plan-cta button").trigger("click");
@@ -121,6 +156,44 @@ describe("KuotaPage subscription purchase", () => {
     expect(assign).not.toHaveBeenCalled();
     expect(wrapper.get("[role=alert]").text()).toContain("tidak menunggu pembayaran");
     expect(wrapper.text()).toContain("Lunas");
+  });
+
+  it("re-reads the order list after a failed create and holds the guard until it ends", async () => {
+    post = () =>
+      Promise.reject(
+        new ApiFailure(503, "PAYMENT_GATEWAY_UNAVAILABLE", "Pembayaran belum tersedia. Coba lagi."),
+      );
+    const wrapper = await pasang();
+    const listCalls = () =>
+      apiMock.mock.calls.filter(([p, init]) => p === "/subscriptions/orders" && !init?.method)
+        .length;
+    const before = listCalls();
+
+    // Hold the re-read so a second click lands while it is still running.
+    let releaseList: (value: unknown) => void = () => {};
+    apiMock.mockImplementation((path: string, init?: RequestInit) =>
+      path === "/subscriptions/orders" && !init?.method && listCalls() > before
+        ? new Promise((resolve) => (releaseList = resolve))
+        : route(path, init),
+    );
+
+    await wrapper.get(".plan-cta button").trigger("click");
+    await flushPromises();
+    expect(listCalls()).toBe(before + 1);
+
+    // A second order request during the re-read joins the guarded call.
+    void useKuotaStore()
+      .buatPesanan()
+      .catch(() => {});
+    await flushPromises();
+    expect(posts()).toHaveLength(1);
+
+    releaseList({ items: [] });
+    await flushPromises();
+    expect(posts()).toHaveLength(1);
+    expect(assign).not.toHaveBeenCalled();
+    expect(wrapper.get("[role=alert]").text()).toContain("Pembayaran belum tersedia");
+    expect(wrapper.get(".plan-cta button").attributes("disabled")).toBeUndefined();
   });
 
   it("creates one order when two submits overlap", async () => {
@@ -376,5 +449,25 @@ describe("KuotaPage subscription purchase", () => {
     await button.trigger("click");
     await flushPromises();
     expect(posts()).toHaveLength(2);
+  });
+});
+
+describe("useKuotaStore.muat", () => {
+  it("a forced read starts a fresh request even while a plain read is in flight", async () => {
+    setActivePinia(createPinia());
+    const releases: Array<(v: unknown) => void> = [];
+    apiMock.mockImplementation((path: string) => {
+      if (path === "/quotas") return new Promise((resolve) => releases.push(resolve));
+      return Promise.resolve(path === "/subscriptions/status" ? STATUS : { items: [] });
+    });
+    const store = useKuotaStore();
+    const first = store.muat();
+    const joined = store.muat();
+    const forced = store.muat(true);
+    releases.forEach((release) => release(QUOTAS));
+    await Promise.all([first, joined, forced]);
+    // The plain call joined the first read; the forced call made its own.
+    expect(apiMock.mock.calls.filter(([p]) => p === "/quotas").length).toBe(2);
+    apiMock.mockReset();
   });
 });

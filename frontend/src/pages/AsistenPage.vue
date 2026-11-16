@@ -62,7 +62,8 @@ async function kirim() {
       method: "POST",
       body: JSON.stringify({ question: teks }),
     });
-    await kuota.muat();
+    // Forced: an answer spends quota, so a read already in flight would show the old count.
+    await kuota.muat(true);
   } catch (error) {
     galat.value = error instanceof ApiFailure ? error.message : "Asisten belum tersedia.";
   } finally {

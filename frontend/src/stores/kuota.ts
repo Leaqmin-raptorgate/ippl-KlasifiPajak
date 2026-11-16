@@ -25,19 +25,45 @@ export const useKuotaStore = defineStore("kuota", () => {
     return "";
   });
 
-  async function muat() {
+  /** A 404 means "not created yet" for a brand-new account: an empty state, not an error. */
+  function belumAda(error: unknown): boolean {
+    return error instanceof ApiFailure && error.status === 404;
+  }
+
+  let muatBerjalan: Promise<void> | null = null;
+
+  /**
+   * The one owner of the Kuota read. A plain call joins a read already in flight,
+   * so the shell and the page that mount together send one request per resource.
+   * `paksa` starts a fresh read for the re-reads that must see new data (polling,
+   * a return from the back/forward cache, a refresh after an order).
+   */
+  function muat(paksa = false): Promise<void> {
+    if (muatBerjalan && !paksa) return muatBerjalan;
+    const selesai: Promise<void> = bacaUlang().finally(() => {
+      if (muatBerjalan === selesai) muatBerjalan = null;
+    });
+    muatBerjalan = selesai;
+    return selesai;
+  }
+
+  async function bacaUlang() {
     pesan.value = "";
     try {
       quotas.value = await api<Quotas>("/quotas");
     } catch (error) {
       quotas.value = null;
-      pesan.value = error instanceof ApiFailure ? error.message : "Kuota belum tersedia.";
+      if (!belumAda(error)) {
+        pesan.value = error instanceof ApiFailure ? error.message : "Kuota belum tersedia.";
+      }
     }
     try {
       status.value = await api<SubscriptionStatus>("/subscriptions/status");
     } catch (error) {
       status.value = null;
-      if (!pesan.value && error instanceof ApiFailure) pesan.value = error.message;
+      if (!pesan.value && error instanceof ApiFailure && !belumAda(error)) {
+        pesan.value = error.message;
+      }
     }
     // Only ask for order history when the route exists. A call that can only
     // 404 is noise in the network tab and a lie in the console.
@@ -74,9 +100,16 @@ export const useKuotaStore = defineStore("kuota", () => {
         }
         return order;
       },
-      (error) => {
-        berjalan = null;
-        memproses.value = false;
+      async (error) => {
+        // The server may have stored a pending row before the failure, so re-read the
+        // history. The guard stays up until the re-read ends: a second click cannot
+        // start an order in the meantime.
+        try {
+          await muat(true);
+        } finally {
+          berjalan = null;
+          memproses.value = false;
+        }
         throw error;
       },
     );
@@ -103,7 +136,7 @@ export const useKuotaStore = defineStore("kuota", () => {
         order.status === "pending"
           ? "Tautan bayar belum siap. Coba lagi sebentar."
           : "Pesanan ini sudah tidak menunggu pembayaran, jadi tautan bayar tidak tersedia. Status akun dan riwayat pesanan dibaca ulang.";
-      await muat();
+      await muat(true);
     }
     return order;
   }

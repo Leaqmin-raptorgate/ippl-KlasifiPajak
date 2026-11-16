@@ -17,10 +17,13 @@ import AppTabBar from "./AppTabBar.vue";
 import AppTopBar from "./AppTopBar.vue";
 
 const route = useRoute();
-onMounted(() => {
-  void usePajakStore().muat();
-  void useProfilStore().muat();
+onMounted(async () => {
   void useKuotaStore().muat();
+  const profil = useProfilStore();
+  await profil.muat();
+  // The dashboard answers 404 until the tax-year profile exists. Skip it only for that case;
+  // a failed profile read (503, dropped connection) must not leave the header without figures.
+  if (!profil.belumAda) void usePajakStore().muat();
 });
 const bare = computed(() => route.meta.bare === true);
 </script>
