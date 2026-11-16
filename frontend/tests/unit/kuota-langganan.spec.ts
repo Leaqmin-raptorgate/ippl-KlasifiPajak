@@ -451,3 +451,23 @@ describe("KuotaPage subscription purchase", () => {
     expect(posts()).toHaveLength(2);
   });
 });
+
+describe("useKuotaStore.muat", () => {
+  it("a forced read starts a fresh request even while a plain read is in flight", async () => {
+    setActivePinia(createPinia());
+    const releases: Array<(v: unknown) => void> = [];
+    apiMock.mockImplementation((path: string) => {
+      if (path === "/quotas") return new Promise((resolve) => releases.push(resolve));
+      return Promise.resolve(path === "/subscriptions/status" ? STATUS : { items: [] });
+    });
+    const store = useKuotaStore();
+    const first = store.muat();
+    const joined = store.muat();
+    const forced = store.muat(true);
+    releases.forEach((release) => release(QUOTAS));
+    await Promise.all([first, joined, forced]);
+    // The plain call joined the first read; the forced call made its own.
+    expect(apiMock.mock.calls.filter(([p]) => p === "/quotas").length).toBe(2);
+    apiMock.mockReset();
+  });
+});

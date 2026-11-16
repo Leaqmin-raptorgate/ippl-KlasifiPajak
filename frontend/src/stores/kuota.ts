@@ -104,9 +104,12 @@ export const useKuotaStore = defineStore("kuota", () => {
         // The server may have stored a pending row before the failure, so re-read the
         // history. The guard stays up until the re-read ends: a second click cannot
         // start an order in the meantime.
-        await muat(true);
-        berjalan = null;
-        memproses.value = false;
+        try {
+          await muat(true);
+        } finally {
+          berjalan = null;
+          memproses.value = false;
+        }
         throw error;
       },
     );
