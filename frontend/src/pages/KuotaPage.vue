@@ -20,7 +20,7 @@ const session = useSessionStore();
 const kuota = useKuotaStore();
 const route = useRoute();
 const galat = ref("");
-const alasanOcrBerbayar = computed(() => route.query.alasan === "ocr_berbayar");
+const alasanOcrBerbayar = computed(() => route.query.alasan === "ocr_berbayar" && !kuota.berbayar);
 
 const temaOpsi = [
   { value: "light", label: "Terang" },
