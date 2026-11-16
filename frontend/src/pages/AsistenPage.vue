@@ -98,7 +98,8 @@ async function kirim() {
       body: JSON.stringify({ question: teks }),
     });
     if (giliran) giliran.jawaban = hasil;
-    await kuota.muat();
+    // Forced: an answer spends quota, so a read already in flight would show the old count.
+    await kuota.muat(true);
   } catch (error) {
     if (giliran) {
       giliran.galat = error instanceof ApiFailure ? error.message : "Asisten belum tersedia.";

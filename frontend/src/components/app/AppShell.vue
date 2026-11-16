@@ -22,8 +22,9 @@ onMounted(async () => {
   void useKuotaStore().muat();
   const profil = useProfilStore();
   await profil.muat();
-  // The dashboard answers 404 until the tax-year profile exists, so ask only once it does.
-  if (profil.profile) void usePajakStore().muat();
+  // The dashboard answers 404 until the tax-year profile exists. Skip it only for that case;
+  // a failed profile read (503, dropped connection) must not leave the header without figures.
+  if (!profil.belumAda) void usePajakStore().muat();
 });
 </script>
 
