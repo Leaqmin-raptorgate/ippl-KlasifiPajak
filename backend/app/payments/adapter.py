@@ -19,7 +19,7 @@ class GatewayUnavailable(RuntimeError):
 class GatewayAdapter(Protocol):
     """Provider-independent creation and verification of gateway requests."""
 
-    def create_payment(self, order_id: str, amount_idr: int) -> str:
+    def create_payment(self, order_id: str, amount_idr: int, return_url: str = "") -> str:
         """Create a payment and return its redirect URL."""
         ...
 
@@ -123,9 +123,11 @@ class FakeGatewayAdapter:
             return outcome
         return self.status_body(order_id)
 
-    def create_payment(self, order_id: str, amount_idr: int) -> str:
+    def create_payment(self, order_id: str, amount_idr: int, return_url: str = "") -> str:
         """Record the order and return the fake redirect URL."""
-        self.calls.append({"order_id": order_id, "amount_idr": amount_idr})
+        self.calls.append(
+            {"order_id": order_id, "amount_idr": amount_idr, "return_url": return_url}
+        )
         return self.payment_url
 
     def verify_notification(self, payload: dict[str, Any]) -> bool:
@@ -186,7 +188,7 @@ class MidtransAdapter:
         except TypeError:
             return False
 
-    def create_payment(self, order_id: str, amount_idr: int) -> str:
+    def create_payment(self, order_id: str, amount_idr: int, return_url: str = "") -> str:
         """Create a Snap payment with an explicit 24-hour expiry."""
         if not self.server_key:
             raise GatewayUnavailable("Payment gateway is not configured")
@@ -195,13 +197,14 @@ class MidtransAdapter:
         if isinstance(amount_idr, bool) or not isinstance(amount_idr, int) or amount_idr <= 0:
             raise ValueError("amount_idr must be a positive integer")
         token = base64.b64encode(f"{self.server_key}:".encode("utf-8")).decode("ascii")
+        callback_url = return_url or f"{self.frontend_base_url}/langganan/kembali"
         body = {
             "transaction_details": {"order_id": order_id, "gross_amount": amount_idr},
             "expiry": {"duration": 24, "unit": "hour"},
             # https://docs.midtrans.com/reference/json-objects#callbacks-object
             "callbacks": {
-                "finish": f"{self.frontend_base_url}/langganan/kembali",
-                "error": f"{self.frontend_base_url}/langganan/kembali",
+                "finish": callback_url,
+                "error": callback_url,
             },
         }
         try:

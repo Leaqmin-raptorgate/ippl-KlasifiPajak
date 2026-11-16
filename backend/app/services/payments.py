@@ -128,7 +128,9 @@ def create_order(db: Session, user: User, plan_id: str) -> tuple[dict, bool]:
     db.commit()
     order_id = order.id
     try:
-        payment_url = get_gateway_adapter().create_payment(order_id, PLAN_AMOUNT_IDR)
+        payment_url = get_gateway_adapter().create_payment(
+            order_id, PLAN_AMOUNT_IDR, f"{frontend_base_url()}/langganan/kembali"
+        )
         if not isinstance(payment_url, str) or not payment_url:
             raise GatewayUnavailable("Missing payment URL")
     except (GatewayUnavailable, ValueError):
