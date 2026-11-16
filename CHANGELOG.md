@@ -22,6 +22,10 @@ Contract: API v1.3.3.
 - `API_PROXY_TARGET` sets the Vite dev proxy target. It defaults to
   `http://127.0.0.1:8000` when unset or empty.
 
+### Changed
+
+- Send frontend finish and error return URLs in Midtrans Snap requests.
+
 ### Documentation
 
 - Align the API specification, README, backend README, backlog, roadmap and

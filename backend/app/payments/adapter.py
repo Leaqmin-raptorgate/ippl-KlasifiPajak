@@ -144,10 +144,12 @@ class MidtransAdapter:
         transport: Any = None,
         timeout_s: float = 30,
         status_timeout_s: float = 8,
+        frontend_base_url: str = "http://127.0.0.1:5173",
     ) -> None:
         if not is_production and server_key.startswith("Mid-server-"):
             raise ValueError("Production server key cannot be used in sandbox")
         self.server_key = server_key
+        self.frontend_base_url = frontend_base_url.rstrip("/")
         self.is_production = is_production
         self.base_url = (
             "https://app.midtrans.com/snap/v1/transactions"
@@ -196,6 +198,11 @@ class MidtransAdapter:
         body = {
             "transaction_details": {"order_id": order_id, "gross_amount": amount_idr},
             "expiry": {"duration": 24, "unit": "hour"},
+            # https://docs.midtrans.com/reference/json-objects#callbacks-object
+            "callbacks": {
+                "finish": f"{self.frontend_base_url}/langganan/kembali",
+                "error": f"{self.frontend_base_url}/langganan/kembali",
+            },
         }
         try:
             with httpx2.Client(transport=self.transport, timeout=self.timeout_s) as client:

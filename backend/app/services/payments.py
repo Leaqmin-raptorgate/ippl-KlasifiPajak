@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.errors import ApiError
+from app.config.settings import frontend_base_url
 from app.models import PaymentEvent, SubscriptionOrder, User
 from app.payments.adapter import (
     GatewayUnavailable,
@@ -43,6 +44,7 @@ def get_gateway_adapter() -> MidtransAdapter:
     return MidtransAdapter(
         server_key=os.environ.get("MIDTRANS_SERVER_KEY", ""),
         is_production=_is_production(),
+        frontend_base_url=frontend_base_url(),
     )
 
 
