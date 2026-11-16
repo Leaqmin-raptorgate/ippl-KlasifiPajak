@@ -18,6 +18,12 @@ import { usePajakStore } from "@/stores/pajak";
 import { usePanduanStore } from "@/stores/panduan";
 import { useSessionStore } from "@/stores/session";
 import { useTransaksiStore } from "@/stores/transaksi";
+import type { MonthSummary } from "@/lib/wire";
+
+/** A table row: one month, or the folded run of empty months at the start of the year. */
+type BarisBulan =
+  | { kind: "bulan"; key: string; bulan: MonthSummary }
+  | { kind: "ringkas"; key: string; awal: string; akhir: string; tahun: string };
 
 const store = useTransaksiStore();
 const pajak = usePajakStore();
@@ -119,6 +125,72 @@ const breakdown = computed(() => {
 });
 
 const terbaru = computed(() => store.items.slice(0, 5));
+
+/** A month with no turnover, no tax and no nihil-free figure: nothing to show. */
+function bulanKosong(bulan: MonthSummary): boolean {
+  return (
+    bulan.overwithheld_status === "nihil" &&
+    [
+      bulan.usaha_omzet_idr,
+      bulan.porsi_bebas_idr,
+      bulan.porsi_kena_idr,
+      bulan.tax_0_5_pct_idr,
+      bulan.withheld_tax_idr,
+      bulan.sisa_bayar_idr,
+      bulan.overwithheld_excess_idr,
+      bulan.pekerjaan_bebas_omzet_idr,
+      bulan.already_final_omzet_idr,
+      bulan.non_object_omzet_idr,
+    ].every((nilai) => nilai === 0)
+  );
+}
+
+const tampilSemuaBulan = ref(false);
+
+/**
+ * Leading empty months of the year, collapsed into one line. Only runs of two or
+ * more are folded. Months with data always show. Not applied when the scheme
+ * result is not computed, because a zero there means "unknown", not "no turnover".
+ */
+const bulanKosongAwal = computed(() => {
+  if (skemaTidakDihitung.value) return 0;
+  const semua = pajak.dashboard?.monthly_summaries ?? [];
+  const tahun = semua[0]?.month.slice(0, 4);
+  let n = 0;
+  for (const bulan of semua) {
+    if (bulan.month.slice(0, 4) !== tahun || !bulanKosong(bulan)) break;
+    n += 1;
+  }
+  return n >= 2 ? n : 0;
+});
+
+const daftarBulan = computed<BarisBulan[]>(() => {
+  const semua = pajak.dashboard?.monthly_summaries ?? [];
+  const semuaBaris: BarisBulan[] = semua.map((bulan) => ({
+    kind: "bulan",
+    key: bulan.month,
+    bulan,
+  }));
+  const n = bulanKosongAwal.value;
+  if (n === 0 || tampilSemuaBulan.value) return semuaBaris;
+  const pertama = semua[0];
+  const terakhir = semua[n - 1];
+  if (!pertama || !terakhir) return semuaBaris;
+  return [
+    {
+      kind: "ringkas",
+      key: `ringkas-${pertama.month}`,
+      awal: namaBulanPendek(pertama.month),
+      akhir: namaBulanPendek(terakhir.month),
+      tahun: pertama.month.slice(0, 4),
+    },
+    ...semuaBaris.slice(n),
+  ];
+});
+
+function namaBulanPendek(bulanIso: string): string {
+  return bulanTahun(`${bulanIso}-01`).split(" ")[0] ?? bulanIso;
+}
 
 onMounted(() => {
   void pajak.muat().then(() => {
@@ -298,6 +370,7 @@ async function unduh() {
         <StatCard
           label="Kelayakan skema (omzet lalu)"
           :value="statusSkema"
+          value-kind="text"
           :caption="
             alasanSkema ||
             (lalu
@@ -320,26 +393,70 @@ async function unduh() {
         >
       </div>
       <AppCard flush>
-        <ul class="mix">
-          <li v-for="bulan in pajak.dashboard.monthly_summaries" :key="bulan.month" class="mix-row">
-            <span>{{ bulanTahun(bulan.month + "-01") }}</span>
-            <span class="figure">omzet {{ rupiahPlain(bulan.usaha_omzet_idr) }}</span>
-            <template v-if="skemaTidakDihitung">
-              <span class="figure">Tidak dihitung di sini</span>
-              <span class="muted">{{ alasanSkema }}</span>
+        <table id="tabel-bulan" class="tabel">
+          <caption class="sr-only">
+            Omzet, pajak, dan kurang bayar per bulan
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Bulan</th>
+              <th scope="col" class="num">Omzet usaha</th>
+              <th scope="col" class="num">Pajak</th>
+              <th scope="col" class="num">Kurang bayar</th>
+              <th scope="col">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template v-for="baris in daftarBulan" :key="baris.key">
+              <tr v-if="baris.kind === 'ringkas'" class="ringkas">
+                <td colspan="5">
+                  {{ baris.awal }} - {{ baris.akhir }} {{ baris.tahun }}: belum ada omzet
+                </td>
+              </tr>
+              <tr v-else>
+                <th scope="row" class="bulan">{{ bulanTahun(baris.bulan.month + "-01") }}</th>
+                <td class="num" data-label="Omzet usaha">
+                  {{ rupiahPlain(baris.bulan.usaha_omzet_idr) }}
+                </td>
+                <template v-if="skemaTidakDihitung">
+                  <td class="num muted" data-label="Pajak">Tidak dihitung di sini</td>
+                  <td class="num" data-label="Kurang bayar">—</td>
+                  <td class="muted" data-label="Status">{{ alasanSkema }}</td>
+                </template>
+                <template v-else>
+                  <td class="num" data-label="Pajak">
+                    {{ rupiahPlain(baris.bulan.tax_0_5_pct_idr) }}
+                  </td>
+                  <td class="num" data-label="Kurang bayar">
+                    {{ rupiahPlain(baris.bulan.sisa_bayar_idr) }}
+                  </td>
+                  <td data-label="Status">
+                    <AppPill
+                      size="sm"
+                      :label="
+                        OVER_LABEL[baris.bulan.overwithheld_status] ??
+                        baris.bulan.overwithheld_status
+                      "
+                      :tone="baris.bulan.overwithheld_status === 'nihil' ? 'neutral' : 'ask'"
+                    />
+                  </td>
+                </template>
+              </tr>
             </template>
-            <template v-else>
-              <span class="figure">pajak {{ rupiahPlain(bulan.tax_0_5_pct_idr) }}</span>
-              <span class="figure">kurang bayar {{ rupiahPlain(bulan.sisa_bayar_idr) }}</span>
-              <AppPill
-                size="sm"
-                :label="OVER_LABEL[bulan.overwithheld_status] ?? bulan.overwithheld_status"
-                :tone="bulan.overwithheld_status === 'nihil' ? 'neutral' : 'ask'"
-              />
-            </template>
-          </li>
-        </ul>
+          </tbody>
+        </table>
       </AppCard>
+      <div v-if="bulanKosongAwal > 0" class="tabel-aksi">
+        <AppButton
+          variant="ghost"
+          size="sm"
+          aria-controls="tabel-bulan"
+          :aria-expanded="tampilSemuaBulan ? 'true' : 'false'"
+          @click="tampilSemuaBulan = !tampilSemuaBulan"
+        >
+          {{ tampilSemuaBulan ? "Sembunyikan bulan kosong" : "Tampilkan semua bulan" }}
+        </AppButton>
+      </div>
       <p v-if="CAPABILITIES.workpaperExport && pajak.recap && !skemaTidakDihitung" class="sub">
         Rekap usaha {{ rupiah(pajak.recap.total_usaha_omzet_idr) }}, kena
         {{ rupiah(pajak.recap.total_porsi_kena_idr) }}, pajak
@@ -562,14 +679,87 @@ async function unduh() {
   border-bottom: 0;
 }
 
-/* Monthly rows: on a phone each row stacks (month heading, then one figure per
-   line) so nothing needs a sideways scroll. From 640px they line up in columns. */
-li.mix-row {
-  flex-wrap: wrap;
-  align-items: baseline;
-  row-gap: var(--s-1);
-  column-gap: var(--s-3);
-  padding-inline: var(--s-4);
+/* Monthly table. A real table from 640px; below that each row stacks into
+   labelled lines (the header row is still in the DOM for assistive tech). */
+.tabel-wrap {
+  overflow-x: auto;
+}
+
+.tabel {
+  width: 100%;
+  border-collapse: collapse;
+  font: var(--t-body);
+  color: var(--ink);
+}
+
+.tabel th,
+.tabel td {
+  padding: var(--s-3) var(--s-4);
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.tabel tbody tr:last-child th,
+.tabel tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.tabel thead th {
+  font: var(--t-label-sm);
+  letter-spacing: var(--track-label-sm);
+  font-weight: 600;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.tabel .num {
+  text-align: right;
+}
+
+.tabel td {
+  font-size: var(--t-body-sm);
+  color: var(--ink-2);
+}
+
+.tabel td.num {
+  font-size: var(--t-body);
+  color: var(--ink);
+}
+
+.tabel th.bulan {
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.tabel .muted {
+  color: var(--ink-2);
+}
+
+.tabel .ringkas td {
+  font: var(--t-body-sm);
+  color: var(--ink-2);
+}
+
+.tabel-aksi {
+  margin-top: var(--s-3);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.tabel td::before {
+  display: none;
 }
 
 /* Small buttons keep a 44px phone target. */
@@ -577,43 +767,55 @@ li.mix-row {
   .page :deep(.s-sm) {
     --btn-h: 2.75rem;
   }
-}
 
-li.mix-row > span:first-child {
-  flex: 1 1 100%;
-  font-weight: 600;
-  color: var(--ink);
-}
-
-li.mix-row > span:not(:first-child) {
-  flex: 0 0 auto;
-  font-size: var(--t-body-sm);
-  color: var(--ink-2);
-}
-
-li.mix-row > span.muted {
-  flex: 1 1 100%;
-}
-
-@media (min-width: 640px) {
-  li.mix-row {
-    flex-wrap: nowrap;
-    align-items: center;
-  }
-
-  /* Month label column: fixed width so rows line up at 390px (R18-N4). */
-  li.mix-row > span:first-child {
-    flex: 0 0 7.5rem;
+  .tabel thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
     white-space: nowrap;
   }
 
-  li.mix-row > span:not(:first-child) {
-    font-size: var(--t-body);
-    color: var(--ink);
+  .tabel,
+  .tabel tbody,
+  .tabel tr,
+  .tabel th,
+  .tabel td {
+    display: block;
+    width: 100%;
   }
 
-  li.mix-row > span.muted {
-    flex: 1 1 auto;
+  .tabel tr {
+    padding: var(--s-3) var(--s-4);
+    border-bottom: 1px solid var(--hairline);
+  }
+
+  .tabel tbody tr:last-child {
+    border-bottom: 0;
+  }
+
+  .tabel th,
+  .tabel td {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--s-3);
+    padding: var(--s-1) 0;
+    border-bottom: 0;
+    text-align: left;
+  }
+
+  .tabel th.bulan {
+    margin-bottom: var(--s-1);
+    font: var(--t-body);
+  }
+
+  .tabel td::before {
+    display: block;
+    flex: none;
+    content: attr(data-label);
+    font: var(--t-body-sm);
     color: var(--ink-3);
   }
 }
