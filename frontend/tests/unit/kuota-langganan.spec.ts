@@ -450,6 +450,33 @@ describe("KuotaPage subscription purchase", () => {
     await flushPromises();
     expect(posts()).toHaveLength(2);
   });
+
+  describe("paid-only receipt upload notice", () => {
+    it("shows one Indonesian notice above the plans when ?alasan=ocr_berbayar", async () => {
+      const wrapper = await pasang("/kuota?alasan=ocr_berbayar");
+      const notices = wrapper.findAll("[role=status]");
+      expect(notices).toHaveLength(1);
+      expect(notices[0].text()).toContain("Unggah struk hanya untuk akun berbayar aktif");
+      const plans = wrapper.get(".plans");
+      expect(
+        notices[0].element.compareDocumentPosition(plans.element) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    });
+
+    it("shows no notice when ?alasan is absent", async () => {
+      const wrapper = await pasang("/kuota");
+      expect(wrapper.find("[role=status]").exists()).toBe(false);
+      expect(wrapper.text()).not.toContain("Unggah struk hanya untuk akun berbayar aktif");
+    });
+
+    it("shows no notice and never renders the query value when ?alasan is unknown", async () => {
+      const wrapper = await pasang("/kuota?alasan=nilai_asing_123");
+      expect(wrapper.find("[role=status]").exists()).toBe(false);
+      expect(wrapper.text()).not.toContain("Unggah struk hanya untuk akun berbayar aktif");
+      expect(wrapper.text()).not.toContain("nilai_asing_123");
+    });
+  });
 });
 
 describe("useKuotaStore.muat", () => {

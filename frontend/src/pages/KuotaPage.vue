@@ -20,6 +20,7 @@ const session = useSessionStore();
 const kuota = useKuotaStore();
 const route = useRoute();
 const galat = ref("");
+const alasanOcrBerbayar = computed(() => route.query.alasan === "ocr_berbayar");
 
 const temaOpsi = [
   { value: "light", label: "Terang" },
@@ -171,6 +172,10 @@ function gantiTema(nilai: string) {
           <h3 id="h-paket" class="t3">Tingkat akun dan paket</h3>
         </div>
       </div>
+
+      <p v-if="alasanOcrBerbayar" class="alasan-notice" role="status">
+        Unggah struk hanya untuk akun berbayar aktif.
+      </p>
 
       <div class="plans">
         <AppCard class="plan" :class="{ on: kuota.berbayar }">
@@ -339,6 +344,17 @@ function gantiTema(nilai: string) {
 
 .sec-head {
   margin-bottom: var(--s-4);
+}
+
+.alasan-notice {
+  padding: var(--s-3) var(--s-4);
+  margin-bottom: var(--s-4);
+  border-radius: var(--r-md);
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-line);
+  color: var(--warn-ink);
+  font: var(--t-body-sm);
+  line-height: 1.5;
 }
 
 .t3 {
