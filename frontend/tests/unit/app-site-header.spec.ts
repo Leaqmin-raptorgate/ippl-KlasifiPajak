@@ -106,4 +106,21 @@ describe("AppSiteHeader mobile menu", () => {
     expect(current).toHaveLength(1);
     expect(current[0].text()).toBe("Pajak");
   });
+  it("marks only one link on /transaksi/baru, the most specific one", async () => {
+    await router.push("/transaksi/baru");
+    await nextTick();
+    const current = wrapper.findAll("nav.nav a[aria-current='page']");
+    expect(current).toHaveLength(1);
+    expect(current[0].text()).toBe("Tambah transaksi");
+    // The list link must not light up beside it.
+    expect(wrapper.findAll("nav.nav a.on")).toHaveLength(1);
+  });
+
+  it("still marks Transaksi on the list route itself", async () => {
+    await router.push("/transaksi");
+    await nextTick();
+    const current = wrapper.findAll("nav.nav a[aria-current='page']");
+    expect(current).toHaveLength(1);
+    expect(current[0].text()).toBe("Transaksi");
+  });
 });

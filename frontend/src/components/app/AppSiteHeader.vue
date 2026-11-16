@@ -23,9 +23,20 @@ const menuButton = ref<HTMLButtonElement | null>(null);
 const akunButton = ref<HTMLButtonElement | null>(null);
 const headerEl = ref<HTMLElement | null>(null);
 
+/** Does the current route sit at or under this destination? */
+function dalam(path: string, tujuan: string) {
+  return path === tujuan || path.startsWith(`${tujuan}/`);
+}
+
+/**
+ * Only the most specific destination is current. `/transaksi/baru` is under
+ * `/transaksi`, so a plain prefix test would mark two links as the current page.
+ */
 function aktif(path: string) {
-  if (path === "/transaksi/baru") return route.path === path;
-  return route.path === path || route.path.startsWith(`${path}/`);
+  if (!dalam(route.path, path)) return false;
+  return !NAVIGASI.some(
+    (t) => t.to !== path && t.to.length > path.length && dalam(route.path, t.to),
+  );
 }
 
 function tutupSemua(fokus?: HTMLButtonElement | null) {

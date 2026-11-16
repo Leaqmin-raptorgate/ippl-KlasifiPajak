@@ -110,7 +110,9 @@ describe("dasbor monthly table", () => {
     const wrapper = await renderDasbor(bulanTahun2026());
     const baris = wrapper.findAll("tbody tr");
 
-    expect(wrapper.get(".tabel tr.ringkas").text()).toBe("Jan - Sep 2026: belum ada omzet");
+    expect(wrapper.get(".tabel tr.ringkas").text()).toBe(
+      "Jan - Sep 2026: tidak ada omzet yang terhitung",
+    );
     // One folded line, Oct, then Nov and Dec.
     expect(baris).toHaveLength(4);
     expect(wrapper.text()).toContain("Okt 2026");

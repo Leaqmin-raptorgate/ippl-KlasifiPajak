@@ -410,7 +410,8 @@ async function unduh() {
             <template v-for="baris in daftarBulan" :key="baris.key">
               <tr v-if="baris.kind === 'ringkas'" class="ringkas">
                 <td colspan="5">
-                  {{ baris.awal }} - {{ baris.akhir }} {{ baris.tahun }}: belum ada omzet
+                  {{ baris.awal }} - {{ baris.akhir }} {{ baris.tahun }}: tidak ada omzet yang
+                  terhitung
                 </td>
               </tr>
               <tr v-else>
