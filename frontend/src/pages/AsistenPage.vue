@@ -1,6 +1,11 @@
 <script setup lang="ts">
-/** Read-only assistant. The answer and the remaining quota come from the API. */
-import { computed, onMounted, ref, watch } from "vue";
+/**
+ * Read-only assistant. The answers and the remaining quota come from the API.
+ *
+ * The conversation is kept in memory for this page visit only. Nothing is written
+ * to storage, the API, or the session store, so a reload starts a new thread.
+ */
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppCard from "@/components/ui/AppCard.vue";
 import AppField from "@/components/ui/AppField.vue";
@@ -14,14 +19,25 @@ import { useKuotaStore } from "@/stores/kuota";
 import { useSessionStore } from "@/stores/session";
 import type { AssistantAnswer } from "@/lib/wire";
 
+/** One question in the thread, with its answer or its failure. */
+interface Giliran {
+  id: number;
+  tanya: string;
+  berpikir: boolean;
+  jawaban: AssistantAnswer | null;
+  galat: string;
+}
+
 const session = useSessionStore();
 const kuota = useKuotaStore();
 
 const tanya = ref("");
 const berpikir = ref(false);
+/** Notices that are not tied to one question, such as a missing consent. */
 const galat = ref("");
-const jawaban = ref<AssistantAnswer | null>(null);
-const pertanyaanTerakhir = ref("");
+const riwayat = ref<Giliran[]>([]);
+const ujung = ref<HTMLElement | null>(null);
+let nomorGiliran = 0;
 
 const chat = computed(() => kuota.quotas?.assistant_chat);
 const sisa = computed(() => (chat.value ? Math.max(0, chat.value.limit - chat.value.used) : 0));
@@ -45,6 +61,22 @@ watch(
   },
 );
 
+function kurangiGerak(): boolean {
+  return typeof window.matchMedia === "function"
+    ? window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    : false;
+}
+
+/** Brings the newest message into view. Reduced motion gets an instant jump. */
+function keUjung() {
+  void nextTick(() => {
+    ujung.value?.scrollIntoView?.({
+      block: "end",
+      behavior: kurangiGerak() ? "auto" : "smooth",
+    });
+  });
+}
+
 async function kirim() {
   const teks = tanya.value.trim();
   if (!teks || berpikir.value || habis.value) return;
@@ -52,176 +84,230 @@ async function kirim() {
     galat.value = "Persetujuan pemrosesan AI diperlukan sebelum fitur ini digunakan.";
     return;
   }
+  const id = ++nomorGiliran;
+  riwayat.value.push({ id, tanya: teks, berpikir: true, jawaban: null, galat: "" });
   berpikir.value = true;
   galat.value = "";
-  jawaban.value = null;
-  pertanyaanTerakhir.value = teks;
   tanya.value = "";
+  keUjung();
+
+  const giliran = riwayat.value.find((g) => g.id === id);
   try {
-    jawaban.value = await api<AssistantAnswer>("/assistant/query", {
+    const hasil = await api<AssistantAnswer>("/assistant/query", {
       method: "POST",
       body: JSON.stringify({ question: teks }),
     });
+    if (giliran) giliran.jawaban = hasil;
     await kuota.muat();
   } catch (error) {
-    galat.value = error instanceof ApiFailure ? error.message : "Asisten belum tersedia.";
+    if (giliran) {
+      giliran.galat = error instanceof ApiFailure ? error.message : "Asisten belum tersedia.";
+    }
   } finally {
+    if (giliran) giliran.berpikir = false;
     berpikir.value = false;
+    keUjung();
   }
 }
 
 function isiPertanyaan(teks: string) {
   tanya.value = teks;
 }
+
+function hapusPercakapan() {
+  riwayat.value = [];
+  galat.value = "";
+}
 </script>
 
 <template>
   <div class="page">
-    <div class="col">
-      <header class="lede">
-        <div class="lede-teks">
-          <p class="sub">
-            Halo {{ session.tampilanNama }}. Asisten ini menjelaskan kertas kerja yang sudah Anda
-            punya: kategori, dasar aturan, dan alasan di baliknya. Ia tidak menghitung apa pun yang
-            baru, tidak mengubah klasifikasi, dan tidak mengirim apa pun ke DJP.
-          </p>
-        </div>
-        <div v-if="CAPABILITIES.assistantChat" class="kuota">
-          <AppPill
-            :tone="sisa <= 2 ? 'ask' : 'accent'"
-            icon="kuota"
-            :label="chat ? `${sisa} dari ${chat.limit} jawaban bulan ini` : 'Kuota belum dimuat'"
-          />
-        </div>
-      </header>
+    <header class="lede">
+      <div class="lede-teks">
+        <p class="sub">
+          Halo {{ session.tampilanNama }}. Asisten ini menjelaskan kertas kerja yang sudah Anda
+          punya: kategori, dasar aturan, dan alasan di baliknya. Ia tidak menghitung apa pun yang
+          baru, tidak mengubah klasifikasi, dan tidak mengirim apa pun ke DJP.
+        </p>
+      </div>
+      <div v-if="CAPABILITIES.assistantChat" class="kuota">
+        <AppPill
+          :tone="sisa <= 2 ? 'ask' : 'accent'"
+          icon="kuota"
+          :label="chat ? `Sisa ${sisa} dari ${chat.limit} jawaban bulan ini` : 'Kuota belum dimuat'"
+        />
+      </div>
+    </header>
 
-      <AppCard
-        v-if="CAPABILITIES.assistantChat"
-        title="Tanya kertas kerja Anda"
-        subtitle="Jawabannya disusun dari baris yang tersimpan, lalu ditampilkan di halaman ini."
-      >
-        <div class="form">
-          <div class="info">
-            <AiConsentNote />
-          </div>
-
-          <div class="thread" role="log" aria-live="polite" aria-label="Percakapan dengan asisten">
-            <p v-if="!pertanyaanTerakhir" class="thread-kosong">
-              Belum ada pertanyaan. Tulis pertanyaan di bawah, atau pilih salah satu contoh.
-            </p>
-
-            <div v-if="pertanyaanTerakhir" class="pesan pesan-anda">
-              <p class="pesan-label">Anda</p>
-              <p class="pesan-isi">{{ pertanyaanTerakhir }}</p>
+    <div class="asisten">
+      <div class="utama">
+        <AppCard
+          v-if="CAPABILITIES.assistantChat"
+          title="Tanya kertas kerja Anda"
+          subtitle="Jawabannya disusun dari baris yang tersimpan, lalu ditampilkan di halaman ini."
+        >
+          <div class="form">
+            <div class="info">
+              <AiConsentNote />
             </div>
 
-            <div v-if="berpikir" class="berpikir" role="status">
-              <span class="jalur" aria-hidden="true"><span class="sweep kp-sweep" /></span>
-              <span class="berpikir-teks">Menyusun penjelasan dari kertas kerja…</span>
-            </div>
-
-            <div v-if="jawaban" class="pesan pesan-asisten">
-              <p class="pesan-label">Asisten</p>
-              <p class="pesan-isi">{{ jawaban.answer }}</p>
-              <ul v-if="jawaban.citations.length" class="sitasi">
-                <li v-for="sitasi in jawaban.citations" :key="sitasi">{{ sitasi }}</li>
-              </ul>
-              <p class="pesan-meta">Sisa kuota jawaban: {{ jawaban.quota_remaining }}</p>
-            </div>
-
-            <p v-if="galat" class="info info-galat" role="alert">{{ galat }}</p>
-            <p v-if="habis" class="info info-galat">
-              Kuota bulan ini sudah habis. Kertas kerja Anda tetap terbaca di halaman transaksi.
-            </p>
-          </div>
-
-          <div class="composer">
-            <AppField
-              label="Pertanyaan Anda"
-              for-id="tanya-asisten"
-              hint="Satu pertanyaan. Jawaban memakai angka yang sudah ada di kertas kerja."
-            >
-              <textarea
-                id="tanya-asisten"
-                v-model="tanya"
-                class="ta"
-                rows="4"
-                placeholder="mis. kenapa baris saya masuk pekerjaan bebas?"
-                @keydown.meta.enter.prevent="kirim"
-                @keydown.ctrl.enter.prevent="kirim"
-              />
-            </AppField>
-
-            <div class="aksi">
-              <AppButton
-                variant="primary"
-                size="lg"
-                icon="obrolan"
-                :disabled="tanya.trim() === '' || berpikir || habis"
-                @click="kirim"
-              >
-                Kirim pertanyaan
+            <div v-if="riwayat.length" class="thread-bar">
+              <AppButton variant="ghost" size="sm" @click="hapusPercakapan">
+                Hapus percakapan
               </AppButton>
-              <p class="demo-note">Jawaban tidak disimpan sebagai arsip percakapan.</p>
+            </div>
+
+            <div
+              class="thread"
+              role="log"
+              aria-live="polite"
+              aria-label="Percakapan dengan asisten"
+              tabindex="0"
+            >
+              <div v-if="!riwayat.length" class="kosong">
+                <p class="kosong-teks">
+                  Belum ada pertanyaan. Tulis pertanyaan di bawah, atau pilih salah satu contoh.
+                </p>
+                <div class="saran">
+                  <button
+                    v-for="q in pertanyaanSiap"
+                    :key="q"
+                    type="button"
+                    class="saran-item press"
+                    @click="isiPertanyaan(q)"
+                  >
+                    <AppIcon name="chevronRight" :size="15" :stroke-width="1.8" />
+                    <span>{{ q }}</span>
+                  </button>
+                </div>
+              </div>
+
+              <template v-for="giliran in riwayat" :key="giliran.id">
+                <div class="pesan pesan-anda">
+                  <p class="pesan-label">Anda</p>
+                  <p class="pesan-isi">{{ giliran.tanya }}</p>
+                </div>
+
+                <div v-if="giliran.berpikir" class="berpikir" role="status">
+                  <span class="jalur" aria-hidden="true"><span class="sweep kp-sweep" /></span>
+                  <span class="berpikir-teks">Menyusun penjelasan dari kertas kerja…</span>
+                </div>
+
+                <div v-if="giliran.jawaban" class="pesan pesan-asisten">
+                  <p class="pesan-label">Asisten</p>
+                  <p class="pesan-isi">{{ giliran.jawaban.answer }}</p>
+                  <ul v-if="giliran.jawaban.citations.length" class="sitasi">
+                    <li v-for="sitasi in giliran.jawaban.citations" :key="sitasi">
+                      {{ sitasi }}
+                    </li>
+                  </ul>
+                  <p class="pesan-meta">
+                    Sisa kuota jawaban: {{ giliran.jawaban.quota_remaining }}
+                  </p>
+                </div>
+
+                <p v-if="giliran.galat" class="info info-galat" role="alert">
+                  {{ giliran.galat }}
+                </p>
+              </template>
+
+              <p v-if="galat" class="info info-galat" role="alert">{{ galat }}</p>
+              <p v-if="habis" class="info info-galat">
+                Kuota bulan ini sudah habis. Kertas kerja Anda tetap terbaca di halaman transaksi.
+              </p>
+              <div ref="ujung" class="ujung" aria-hidden="true" />
+            </div>
+
+            <div class="composer">
+              <AppField
+                label="Pertanyaan Anda"
+                for-id="tanya-asisten"
+                hint="Satu pertanyaan. Jawaban memakai angka yang sudah ada di kertas kerja. Tekan Ctrl+Enter untuk mengirim."
+              >
+                <textarea
+                  id="tanya-asisten"
+                  v-model="tanya"
+                  class="ta"
+                  rows="3"
+                  placeholder="mis. kenapa baris saya masuk pekerjaan bebas?"
+                  @keydown.meta.enter.prevent="kirim"
+                  @keydown.ctrl.enter.prevent="kirim"
+                />
+              </AppField>
+
+              <div class="aksi">
+                <AppButton
+                  class="kirim"
+                  variant="primary"
+                  size="lg"
+                  icon="obrolan"
+                  :disabled="tanya.trim() === '' || berpikir || habis"
+                  @click="kirim"
+                >
+                  Kirim pertanyaan
+                </AppButton>
+                <p class="demo-note">Jawaban tidak disimpan sebagai arsip percakapan.</p>
+              </div>
+
+              <details v-if="riwayat.length" class="contoh">
+                <summary>Contoh pertanyaan</summary>
+                <div class="saran">
+                  <button
+                    v-for="q in pertanyaanSiap"
+                    :key="q"
+                    type="button"
+                    class="saran-item press"
+                    @click="isiPertanyaan(q)"
+                  >
+                    <AppIcon name="chevronRight" :size="15" :stroke-width="1.8" />
+                    <span>{{ q }}</span>
+                  </button>
+                </div>
+              </details>
             </div>
           </div>
-        </div>
-      </AppCard>
+        </AppCard>
 
-      <AppCard
-        v-if="CAPABILITIES.assistantChat"
-        title="Pertanyaan yang sering diajukan"
-        subtitle="Ketuk satu untuk mengisi kolom di atas."
-      >
-        <div class="saran">
-          <button
-            v-for="q in pertanyaanSiap"
-            :key="q"
-            type="button"
-            class="saran-item press"
-            @click="isiPertanyaan(q)"
-          >
-            <AppIcon name="chevronRight" :size="15" :stroke-width="1.8" />
-            <span>{{ q }}</span>
-          </button>
-        </div>
-      </AppCard>
-
-      <AppCard
-        v-if="!CAPABILITIES.assistantChat"
-        title="Tanya kertas kerja"
-        subtitle="Layanan asisten interaktif saat ini belum diaktifkan pada server ini."
-      >
-        <div class="belum-aktif">
-          <p class="belum-aktif-teks">
-            Fitur tanya-jawab asisten berbasis model bahasa sedang dalam tahap penyiapan. Kertas
-            kerja dan ringkasan pajak Anda tetap dapat dipantau langsung melalui dasbor dan daftar
-            transaksi.
-          </p>
-          <div class="belum-aktif-aksi">
-            <AppButton to="/dasbor" variant="outline" icon="dasbor"> Buka dasbor pajak </AppButton>
-            <AppButton to="/transaksi" variant="outline" icon="transaksi">
-              Buka daftar transaksi
-            </AppButton>
-          </div>
-        </div>
-      </AppCard>
-
-      <AppCard class="batas-ases" inset>
-        <div class="batas-isi">
-          <span class="batas-ic"><AppIcon name="info" :size="18" /></span>
-          <div>
-            <p class="batas-judul">Asisten hanya membaca</p>
-            <p class="batas-sub">
-              Semua yang tampil di halaman ini dibaca dari transaksi yang sudah tersimpan dan dari
-              kertas kerja yang sudah tersimpan. Tidak ada hitungan baru, tidak ada pengajuan, dan
-              tidak ada kewajiban yang muncul dari sini.
+        <AppCard
+          v-if="!CAPABILITIES.assistantChat"
+          title="Tanya kertas kerja"
+          subtitle="Layanan asisten interaktif saat ini belum diaktifkan pada server ini."
+        >
+          <div class="belum-aktif">
+            <p class="belum-aktif-teks">
+              Fitur tanya-jawab asisten berbasis model bahasa sedang dalam tahap penyiapan. Kertas
+              kerja dan ringkasan pajak Anda tetap dapat dipantau langsung melalui dasbor dan daftar
+              transaksi.
             </p>
+            <div class="belum-aktif-aksi">
+              <AppButton to="/dasbor" variant="outline" icon="dasbor">
+                Buka dasbor pajak
+              </AppButton>
+              <AppButton to="/transaksi" variant="outline" icon="transaksi">
+                Buka daftar transaksi
+              </AppButton>
+            </div>
           </div>
-        </div>
-      </AppCard>
+        </AppCard>
+      </div>
 
-      <WorkpaperNote />
+      <aside class="samping" aria-label="Catatan tentang asisten">
+        <AppCard class="batas-ases" inset>
+          <div class="batas-isi">
+            <span class="batas-ic"><AppIcon name="info" :size="18" /></span>
+            <div>
+              <p class="batas-judul">Asisten hanya membaca</p>
+              <p class="batas-sub">
+                Semua yang tampil di halaman ini dibaca dari transaksi yang sudah tersimpan dan dari
+                kertas kerja yang sudah tersimpan. Tidak ada hitungan baru, tidak ada pengajuan, dan
+                tidak ada kewajiban yang muncul dari sini.
+              </p>
+            </div>
+          </div>
+        </AppCard>
+
+        <WorkpaperNote />
+      </aside>
     </div>
   </div>
 </template>
@@ -235,15 +321,27 @@ function isiPertanyaan(teks: string) {
   margin-inline: auto;
 }
 
-/* A reading column. The canvas is wider than a paragraph wants to run. */
-.col {
+/* Main column first; the notes sit beside it from 1024px and below it before that. */
+.asisten {
+  display: grid;
+  gap: var(--s-6);
+  align-items: start;
+  min-width: 0;
+}
+
+.utama,
+.samping {
   display: flex;
   flex-direction: column;
   gap: var(--s-6);
-  width: 100%;
-  max-width: 48rem;
-  /* Left-aligned with the page title the shell renders above it. */
-  margin-inline: 0;
+  min-width: 0;
+}
+
+@media (min-width: 1024px) {
+  .asisten {
+    grid-template-columns: minmax(0, 1fr) 20rem;
+    gap: var(--s-8);
+  }
 }
 
 .lede {
@@ -256,11 +354,6 @@ function isiPertanyaan(teks: string) {
 
 .lede-teks {
   min-width: 0;
-}
-
-.t1 {
-  font: var(--t-title-1);
-  letter-spacing: var(--track-title-1);
 }
 
 .sub {
@@ -300,23 +393,47 @@ function isiPertanyaan(teks: string) {
 
 /* ---- Conversation panel ------------------------------------------------ */
 
-/* A bordered panel on the page, not a chat surface pinned to the screen. */
+.thread-bar {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: calc(var(--s-2) * -1);
+}
+
+/* A bordered panel on the page. It scrolls inside itself so the composer stays
+   where it is however long the thread gets. */
 .thread {
   display: flex;
   flex-direction: column;
   gap: var(--s-4);
-  min-height: 8rem;
+  min-height: 10rem;
+  max-height: min(70vh, 40rem);
+  overflow-y: auto;
+  overflow-wrap: anywhere;
   padding: var(--s-4);
   border: 1px solid var(--hairline-strong);
   border-radius: var(--r-lg);
   background: var(--canvas);
 }
 
-.thread-kosong {
-  margin: auto 0;
-  color: var(--ink-3);
+.thread:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.kosong {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+
+.kosong-teks {
+  color: var(--ink-2);
   font: var(--t-body-sm);
   line-height: 1.5;
+}
+
+.ujung {
+  height: 0;
 }
 
 .pesan {
@@ -368,6 +485,7 @@ function isiPertanyaan(teks: string) {
   font: var(--t-body-sm);
   color: var(--ink-2);
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 @media (min-width: 640px) {
@@ -395,6 +513,7 @@ function isiPertanyaan(teks: string) {
   overflow: clip;
 }
 
+/* The sweep itself is the shared kp-sweep keyframes; it is removed under reduced motion. */
 .sweep {
   display: block;
   width: 30%;
@@ -460,6 +579,15 @@ function isiPertanyaan(teks: string) {
   align-self: stretch;
 }
 
+/* Disabled send: a neutral well with a label that still reads at 4.5:1 or better.
+   The shared disabled opacity would wash the white label out against the blue. */
+.kirim.is-disabled {
+  opacity: 1;
+  background: var(--surface-sunken);
+  border-color: var(--hairline-strong);
+  color: var(--ink-3);
+}
+
 .demo-note {
   font: var(--t-body-sm);
   color: var(--ink-3);
@@ -488,6 +616,33 @@ function isiPertanyaan(teks: string) {
 
 /* ---- Suggestions ------------------------------------------------------- */
 
+.contoh {
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--hairline);
+}
+
+.contoh summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  padding-inline: var(--s-2);
+  margin-inline: calc(var(--s-2) * -1);
+  border-radius: var(--r-md);
+  font: var(--t-label);
+  color: var(--accent);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.contoh summary:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.contoh[open] .saran {
+  margin-top: var(--s-3);
+}
+
 .saran {
   display: grid;
   gap: var(--s-2);
@@ -507,6 +662,7 @@ function isiPertanyaan(teks: string) {
   color: var(--ink);
   line-height: 1.45;
   text-align: left;
+  overflow-wrap: anywhere;
   transition:
     border-color var(--t-fast) var(--ease-out-soft),
     color var(--t-fast) var(--ease-out-soft),
@@ -517,6 +673,11 @@ function isiPertanyaan(teks: string) {
   border-color: var(--accent-line);
   background: var(--accent-soft);
   color: var(--accent-soft-ink);
+}
+
+.saran-item:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }
 
 .saran-item svg {
