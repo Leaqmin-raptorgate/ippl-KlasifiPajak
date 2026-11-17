@@ -127,12 +127,15 @@ from `max(now_utc, valid_until_utc)`). Never use production keys.
 - [x] Non-object and already-final keyword table
 - [ ] NFR-Q1 labeled set of at least 40 transactions: the evaluator
       (`backend/scripts/evaluate_classifier.py`) and the dev and held-out
-      workbooks exist outside the repo, but the labels are drafted, not checked
-      by the developer, and the rules changed after the last measurement.
-      Missing: developer-reviewed labels.
-- [ ] NFR-Q2, NFR-Q3 report heuristic accuracy: the 2026-11-09 scores in
-      `backend/README.md` predate the 2026-11-11 rule changes. Missing: a
-      re-measured dev and held-out score.
+      workbooks exist outside the repo (98 labelled dev rows, 49 labelled
+      held-out rows), but the labels are drafted and not checked by the
+      developer. Missing: developer-reviewed labels.
+- [ ] NFR-Q2, NFR-Q3 report heuristic accuracy: re-measured on 2026-11-17 at
+      `ded8e03` (`ac4abe027fea`) in `backend/README.md` (dev accuracy 83/98
+      = 0.85, coverage 88/98 = 0.90; held-out accuracy 23/49 = 0.47, coverage
+      27/49 = 0.55, decided accuracy 0.85). Left unticked: NFR-Q2 and NFR-Q3
+      have no numeric target in this repo or in SRS v2.7, so the figures cannot
+      be judged as met, and the workbook labels remain unchecked.
 
 ## Sprint 3 — storage and dashboard
 
