@@ -18,7 +18,8 @@ COPY backend ./backend
 # CI helper scripts (pip-audit severity gate) are exercised by backend/tests.
 COPY scripts ./scripts
 
-RUN chown -R appuser:appuser /app
+RUN mkdir -p /var/lib/klasifipajak/receipts \
+    && chown -R appuser:appuser /app /var/lib/klasifipajak
 
 USER appuser
 
