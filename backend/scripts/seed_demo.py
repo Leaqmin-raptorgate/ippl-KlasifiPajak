@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from sqlalchemy import select  # noqa: E402
 
+from app.config.settings import Settings  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.models import Transaction as TransactionRow  # noqa: E402
 from app.models import User  # noqa: E402
@@ -175,6 +176,8 @@ def ensure_transactions(db, user: User, spec: dict, ruleset) -> int:
 
 
 def main() -> None:
+    if Settings().is_production:
+        raise SystemExit("seed_demo.py refuses to run when APP_ENV=production")
     init_db()
     ruleset = active_ruleset()
     db = SessionLocal()
