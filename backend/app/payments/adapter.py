@@ -146,12 +146,10 @@ class MidtransAdapter:
         transport: Any = None,
         timeout_s: float = 30,
         status_timeout_s: float = 8,
-        frontend_base_url: str = "http://127.0.0.1:5173",
     ) -> None:
         if not is_production and server_key.startswith("Mid-server-"):
             raise ValueError("Production server key cannot be used in sandbox")
         self.server_key = server_key
-        self.frontend_base_url = frontend_base_url.rstrip("/")
         self.is_production = is_production
         self.base_url = (
             "https://app.midtrans.com/snap/v1/transactions"
@@ -196,8 +194,10 @@ class MidtransAdapter:
             raise ValueError("Invalid order ID")
         if isinstance(amount_idr, bool) or not isinstance(amount_idr, int) or amount_idr <= 0:
             raise ValueError("amount_idr must be a positive integer")
+        if not return_url:
+            raise ValueError("return_url is required")
         token = base64.b64encode(f"{self.server_key}:".encode("utf-8")).decode("ascii")
-        callback_url = return_url or f"{self.frontend_base_url}/langganan/kembali"
+        callback_url = return_url
         body = {
             "transaction_details": {"order_id": order_id, "gross_amount": amount_idr},
             "expiry": {"duration": 24, "unit": "hour"},
