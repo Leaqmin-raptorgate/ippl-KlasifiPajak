@@ -919,9 +919,9 @@ The webhook (5.30) uses its own `503` text, "Layanan pembayaran belum tersedia. 
 
 ### 5.30 `POST /webhooks/payment`
 
-Midtrans sends `signature_key` in the JSON body. Compute SHA512 of the exact UTF-8 concatenation `order_id + status_code + gross_amount + ServerKey` with no separators, then compare its hexadecimal digest in constant time before any order lookup. Preserve `status_code` and `gross_amount` exactly as received for hashing; `gross_amount` is a string, for example `"25000.00"`. After signature verification parse the amount as integer rupiah and compare it to the order.
+Midtrans sends `signature_key` in the JSON body. Compute SHA512 of the exact UTF-8 concatenation `order_id + status_code + gross_amount + SignatureSecretKey` with no separators, where `SignatureSecretKey` is `MIDTRANS_SIGNATURE_KEY` (falling back to `MIDTRANS_SERVER_KEY` when unset or empty), then compare its hexadecimal digest in constant time before any order lookup. Preserve `status_code` and `gross_amount` exactly as received for hashing; `gross_amount` is a string, for example `"25000.00"`. After signature verification parse the amount as integer rupiah and compare it to the order.
 
-Because Midtrans's `signature_key` covers `order_id + status_code + gross_amount + ServerKey` but does NOT sign `transaction_status` or `fraud_status`, settlement transitions require verifying that `status_code == "200"` in addition to signature validity and matching order amount. A signed `settlement`, or a `capture` whose `fraud_status` is `accept`, returns `400` `INVALID_WEBHOOK_STATUS` and is not stored when `status_code` is not `"200"`. The refusal is raised before the payment event is inserted. A later notice with `status_code` `"200"` can still settle the order.
+Because Midtrans's `signature_key` covers `order_id + status_code + gross_amount + SignatureSecretKey` but does NOT sign `transaction_status` or `fraud_status`, settlement transitions require verifying that `status_code == "200"` in addition to signature validity and matching order amount. A signed `settlement`, or a `capture` whose `fraud_status` is `accept`, returns `400` `INVALID_WEBHOOK_STATUS` and is not stored when `status_code` is not `"200"`. The refusal is raised before the payment event is inserted. A later notice with `status_code` `"200"` can still settle the order.
 
 Before access is granted from a signed `settlement` (or a `capture` with `fraud_status` `accept`), the server calls the Midtrans Status API for that order, `GET /v2/{order_id}/status` with the ServerKey as Basic auth, and requires it to agree with the notice. The answer must have `status_code` `"200"`, a status that maps to settlement (`settlement`, or `capture` with `fraud_status` `accept`), and a `gross_amount` equal to the order amount. The call is made after the signature, order, amount and `status_code` checks and only for a notice that would grant access: a replay, a notice for an order that is already settled, and `pending`, `expire` and `fail` notices do not call it. The call is made before any row lock is taken, so no database lock is held while it is in flight. The locked section then runs as before and decides: it re-checks existing events and an already settled order, so a settlement that lands during the call is not granted twice.
 
@@ -936,7 +936,7 @@ This build keeps these checks: a valid signature, an order that exists, an amoun
 
 Midtrans retries a notification that does not get a 2xx response. A `400` and a `404` are retried twice, a `500` once, a `503` four times, and other failures up to five times, spaced from about 2 minutes to 3.5 hours. The `400` for a settlement whose `status_code` is not `"200"` is therefore delivered again a few times. Those repeats are harmless because nothing was stored.
 
-Example with ServerKey `example-server-key`:
+Example with Signature Secret Key `example-server-key`:
 
 ```json
 {

@@ -79,6 +79,11 @@ def frontend_base_url() -> str:
     return raw.rstrip("/")
 
 
+def midtrans_signature_key() -> str:
+    """Return the Midtrans notification signature key, falling back to MIDTRANS_SERVER_KEY."""
+    return _env_str("MIDTRANS_SIGNATURE_KEY") or _env_str("MIDTRANS_SERVER_KEY")
+
+
 def _ai_timeout_s() -> float:
     raw = _env_str("AI_TIMEOUT_S", "30") or "30"
     try:
@@ -131,6 +136,7 @@ class Settings:
     ruleset_path: Path | None = field(default_factory=_ruleset_path)
     database_url: str = field(default_factory=_database_url)
     jwt_secret: str = field(default_factory=_jwt_secret)
+    midtrans_signature_key: str = field(default_factory=midtrans_signature_key)
     ai_base_url: str = field(default_factory=lambda: _env_str("AI_BASE_URL"))
     ai_api_key: str = field(default_factory=lambda: _env_str("AI_API_KEY"))
     ai_model_classifier: str = field(default_factory=lambda: _env_str("AI_MODEL_CLASSIFIER"))

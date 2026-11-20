@@ -71,10 +71,11 @@ Environment-derived settings currently read by the API process: `APP_ENV`,
 `MIGRATE_DATABASE_URL` is used by Alembic (`backend/alembic/env.py`), not by
 `Settings`. AI (`AI_BASE_URL`, `AI_API_KEY`, `AI_MODEL_*`, `AI_TIMEOUT_S`) is
 read by `Settings` and the OCR, classifier, and assistant clients (D-09).
-Midtrans `MIDTRANS_SERVER_KEY` and `MIDTRANS_IS_PRODUCTION` are read by
-`services/payments.py` (D-10). `MIDTRANS_CLIENT_KEY` is only in `.env.example`
-and is not read. Thresholds and quotas that are product-configurable live here;
-tax rates and bands do not.
+Midtrans `MIDTRANS_SERVER_KEY`, `MIDTRANS_SIGNATURE_KEY` (falling back to
+`MIDTRANS_SERVER_KEY` when unset or empty), and `MIDTRANS_IS_PRODUCTION` are
+read by `services/payments.py` and `config/settings.py` (D-10).
+`MIDTRANS_CLIENT_KEY` is only in `.env.example` and is not read. Thresholds and
+quotas that are product-configurable live here; tax rates and bands do not.
 
 ## Status vs empty placeholders
 

@@ -142,6 +142,7 @@ class MidtransAdapter:
         self,
         *,
         server_key: str,
+        signature_key: str | None = None,
         is_production: bool = False,
         transport: Any = None,
         timeout_s: float = 30,
@@ -150,6 +151,7 @@ class MidtransAdapter:
         if not is_production and server_key.startswith("Mid-server-"):
             raise ValueError("Production server key cannot be used in sandbox")
         self.server_key = server_key
+        self.signature_key = (signature_key or "").strip() or server_key
         self.is_production = is_production
         self.base_url = (
             "https://app.midtrans.com/snap/v1/transactions"
@@ -169,7 +171,7 @@ class MidtransAdapter:
 
     def verify_notification(self, payload: dict[str, Any]) -> bool:
         """Verify SHA512 against exact received string fields in constant time."""
-        if not self.server_key or not isinstance(payload, dict):
+        if not self.signature_key or not isinstance(payload, dict):
             return False
         fields = [
             payload.get(name)
@@ -179,7 +181,7 @@ class MidtransAdapter:
             return False
         order_id, status_code, gross_amount, signature = fields
         digest = hashlib.sha512(
-            (order_id + status_code + gross_amount + self.server_key).encode("utf-8")
+            (order_id + status_code + gross_amount + self.signature_key).encode("utf-8")
         ).hexdigest()
         try:
             return hmac.compare_digest(digest, signature)
