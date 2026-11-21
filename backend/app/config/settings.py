@@ -4,9 +4,11 @@ Thresholds and quotas live here because they are configurable. Tax rates and
 bands do not, because they belong to the ruleset (invariant 9).
 """
 
+import ipaddress
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 #: Origins allowed to call the API. The Vue dev server is the default; a
 #: deployed frontend is added through ``CORS_ORIGINS`` at startup.
@@ -44,6 +46,37 @@ def _app_env() -> str:
 
 def _env_str(name: str, default: str = "") -> str:
     return os.environ.get(name, default).strip()
+
+
+def frontend_base_url() -> str:
+    """Resolve the frontend URL, requiring an explicit non-local URL outside dev/test."""
+    raw = _env_str("FRONTEND_BASE_URL")
+    if not raw and _app_env() in ("development", "test"):
+        raw = "http://127.0.0.1:5173"
+    try:
+        parts = urlsplit(raw)
+        host = parts.hostname
+        port = parts.port
+        del port
+    except ValueError as exc:
+        raise ValueError("Invalid FRONTEND_BASE_URL") from exc
+    if (
+        parts.scheme not in ("http", "https")
+        or not host
+        or parts.username
+        or parts.password
+        or parts.query
+        or parts.fragment
+    ):
+        raise ValueError("Invalid FRONTEND_BASE_URL")
+    if _app_env() not in ("development", "test"):
+        try:
+            local = ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            local = host.lower() == "localhost" or host.lower().endswith(".localhost")
+        if local:
+            raise ValueError("FRONTEND_BASE_URL must not be local outside development/test")
+    return raw.rstrip("/")
 
 
 def _ai_timeout_s() -> float:

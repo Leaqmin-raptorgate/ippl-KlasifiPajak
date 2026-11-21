@@ -894,7 +894,7 @@ The only plan in this release is `monthly_25k`, duration `30` days, price `25000
 { "plan_id": "monthly_25k" }
 ```
 
-At most one `pending` row exists per user and plan. The call locks that row. If it is inside 24 hours, the response is `200` and reuses it. If it is older, the same transaction marks it `expire` and inserts a new row, which returns `201`. A concurrent insert that loses the unique pending slot retries the read. Expiry is `now_utc + 24 hours`. `payment_url` is an opaque gateway URL.
+At most one `pending` row exists per user and plan. The call locks that row. If it is inside 24 hours, the response is `200` and reuses it. If it is older, the same transaction marks it `expire` and inserts a new row, which returns `201`. A concurrent insert that loses the unique pending slot retries the read. Expiry is `now_utc + 24 hours`. `payment_url` is an opaque gateway URL. The Snap request supplies finish and error callbacks to `FRONTEND_BASE_URL` followed by `/langganan/kembali`. The base URL defaults to `http://127.0.0.1:5173` only in development and test; other environments require an explicit non-local HTTP(S) URL.
 
 ```json
 {

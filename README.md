@@ -48,7 +48,7 @@ npm ci   # ALWAYS npm ci, never npm install (lockfile-locked)
 | `AI_*`                 | OpenAI-compatible client settings for receipt OCR, fallback classification, and assistant Q&A. Empty = fail closed to rules.  |
 | `MIDTRANS_*`           | Midtrans Snap server/client keys and production flag for subscription checkout and notification verification.                 |
 
-In the Midtrans sandbox dashboard, set the 'Finish URL' to `<frontend origin>/langganan/kembali`. The app does not send a finish callback itself, so without that setting the buyer is not returned to the app.
+Set `FRONTEND_BASE_URL` to the frontend base URL outside development or test. The backend sends the finish and error return URLs to Snap. As a fallback, set the Finish and Error URLs in the Midtrans dashboard to `<frontend origin>/langganan/kembali`; some payment methods use dashboard settings.
 
 ### Docker Compose (MySQL + migrate + API + frontend)
 

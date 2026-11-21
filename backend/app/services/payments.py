@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.errors import ApiError
+from app.config.settings import frontend_base_url
 from app.models import PaymentEvent, SubscriptionOrder, User
 from app.payments.adapter import (
     GatewayUnavailable,
@@ -82,6 +83,13 @@ def create_order(db: Session, user: User, plan_id: str) -> tuple[dict, bool]:
     """Reserve one pending order under the account lock, then call the gateway unlocked."""
     if plan_id != PLAN_ID:
         raise ApiError(422, "INVALID_PLAN", "Paket langganan tidak dikenal.")
+    try:
+        return_url = f"{frontend_base_url()}/langganan/kembali"
+    except ValueError:
+        logger.error("FRONTEND_BASE_URL is invalid or missing")
+        raise ApiError(
+            503, "PAYMENT_GATEWAY_UNAVAILABLE", "Pembayaran belum tersedia. Coba lagi."
+        ) from None
     instant = now_utc()
     # Serializes concurrent order creation for the same account without locking
     # any database row while waiting on the external gateway.
@@ -126,7 +134,7 @@ def create_order(db: Session, user: User, plan_id: str) -> tuple[dict, bool]:
     db.commit()
     order_id = order.id
     try:
-        payment_url = get_gateway_adapter().create_payment(order_id, PLAN_AMOUNT_IDR)
+        payment_url = get_gateway_adapter().create_payment(order_id, PLAN_AMOUNT_IDR, return_url)
         if not isinstance(payment_url, str) or not payment_url:
             raise GatewayUnavailable("Missing payment URL")
     except (GatewayUnavailable, ValueError):
