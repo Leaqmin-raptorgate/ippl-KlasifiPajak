@@ -393,3 +393,57 @@ def test_fr_pay03_status_check_log_names_the_real_cause(monkeypatch, caplog, han
     assert "ord_1" in caplog.text
     assert expected in caplog.text
     assert "SB-Mid-server-fake" not in caplog.text
+
+
+def test_fr_pay03_adapter_uses_signature_key_for_verification_and_server_key_for_api():
+    """FR-PAY-03, FR-PAY-07: signature_key verifies notices while server_key authorizes API calls."""
+    import base64
+
+    from app.payments.adapter import MidtransAdapter
+
+    seen_auth: list[str] = []
+
+    def handler(request):
+        seen_auth.append(request.headers["Authorization"])
+        if str(request.url).endswith("/status"):
+            return httpx2.Response(
+                200,
+                json={
+                    "order_id": "ord_1",
+                    "status_code": "200",
+                    "transaction_status": "settlement",
+                },
+            )
+        return httpx2.Response(200, json={"redirect_url": "https://gateway.example.test/pay"})
+
+    server_key = "SB-Mid-server-api-key"
+    sig_key = "Mid-signature-secret-no-sb"
+    adapter = MidtransAdapter(
+        server_key=server_key,
+        signature_key=sig_key,
+        is_production=False,
+        transport=httpx2.MockTransport(handler),
+    )
+
+    sig_payload = {
+        "order_id": "ord_1",
+        "status_code": "200",
+        "gross_amount": "25000.00",
+        "signature_key": hashlib.sha512(f"ord_120025000.00{sig_key}".encode()).hexdigest(),
+    }
+    srv_payload = {
+        "order_id": "ord_1",
+        "status_code": "200",
+        "gross_amount": "25000.00",
+        "signature_key": hashlib.sha512(f"ord_120025000.00{server_key}".encode()).hexdigest(),
+    }
+    assert adapter.verify_notification(sig_payload) is True
+    assert adapter.verify_notification(srv_payload) is False
+
+    adapter.create_payment("ord_1", 25000, "https://example.test/langganan/kembali")
+    adapter.get_transaction_status("ord_1")
+    expected_auth = "Basic " + base64.b64encode(f"{server_key}:".encode("utf-8")).decode("ascii")
+    assert seen_auth == [expected_auth, expected_auth]
+
+    fallback = MidtransAdapter(server_key=server_key, signature_key="")
+    assert fallback.verify_notification(srv_payload) is True

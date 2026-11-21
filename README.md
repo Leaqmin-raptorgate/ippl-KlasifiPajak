@@ -37,16 +37,16 @@ npm ci   # ALWAYS npm ci, never npm install (lockfile-locked)
 
 ### Environment that matters
 
-| Variable               | Role                                                                                                                          |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `APP_ENV`              | `development` / `test` / `production`. Controls Bagian A mount, test-support mount, and JWT secret fail-closed in production. |
-| `DATABASE_URL`         | Runtime **DML** user (`klasifipajak_app`). Used by the API process.                                                           |
-| `MIGRATE_DATABASE_URL` | **DDL** user (`klasifipajak_migrate`). Used only by Alembic / the compose `migrate` service.                                  |
-| `JWT_SECRET`           | Session signing secret (≥ 32 bytes in production).                                                                            |
-| `TRUSTED_PROXY_IPS`    | Comma-separated peer IPs/CIDRs allowed to supply `X-Forwarded-For`. Empty = trust none.                                       |
-| `TRUSTED_PROXY_COUNT`  | How many rightmost XFF hops to peel when the peer is trusted (default `0`).                                                   |
-| `AI_*`                 | OpenAI-compatible client settings for receipt OCR, fallback classification, and assistant Q&A. Empty = fail closed to rules.  |
-| `MIDTRANS_*`           | Midtrans Snap server/client keys and production flag for subscription checkout and notification verification.                 |
+| Variable               | Role                                                                                                                           |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `APP_ENV`              | `development` / `test` / `production`. Controls Bagian A mount, test-support mount, and JWT secret fail-closed in production.  |
+| `DATABASE_URL`         | Runtime **DML** user (`klasifipajak_app`). Used by the API process.                                                            |
+| `MIGRATE_DATABASE_URL` | **DDL** user (`klasifipajak_migrate`). Used only by Alembic / the compose `migrate` service.                                   |
+| `JWT_SECRET`           | Session signing secret (≥ 32 bytes in production).                                                                             |
+| `TRUSTED_PROXY_IPS`    | Comma-separated peer IPs/CIDRs allowed to supply `X-Forwarded-For`. Empty = trust none.                                        |
+| `TRUSTED_PROXY_COUNT`  | How many rightmost XFF hops to peel when the peer is trusted (default `0`).                                                    |
+| `AI_*`                 | OpenAI-compatible client settings for receipt OCR, fallback classification, and assistant Q&A. Empty = fail closed to rules.   |
+| `MIDTRANS_*`           | Midtrans Snap server, signature, and client keys plus production flag for subscription checkout and notification verification. |
 
 Set `FRONTEND_BASE_URL` to the frontend base URL outside development or test. The backend sends the finish and error return URLs to Snap. As a fallback, set the Finish and Error URLs in the Midtrans dashboard to `<frontend origin>/langganan/kembali`; some payment methods use dashboard settings.
 

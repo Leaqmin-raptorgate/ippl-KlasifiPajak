@@ -40,6 +40,8 @@ def _notice(
     fraud="accept",
     status_code="200",
     server_key=SERVER_KEY,
+    *,
+    secret_key=None,
 ):
     """FR-PAY-03: independently compute the exact signed text."""
     payload = {
@@ -49,8 +51,9 @@ def _notice(
         "transaction_status": status,
         "fraud_status": fraud,
     }
+    signing_key = server_key if secret_key is None else secret_key
     payload["signature_key"] = hashlib.sha512(
-        (order_id + status_code + amount + server_key).encode()
+        (order_id + status_code + amount + signing_key).encode()
     ).hexdigest()
     return payload
 
@@ -570,3 +573,69 @@ def test_fr_pay03_settlement_during_status_call_is_not_granted_twice(client, fak
     # Exactly one 30-day grant: the one made inside the Status call.
     assert granted.valid_until_utc <= now_utc() + timedelta(days=30, minutes=1)
     assert _status_of(order_id) == "settlement"
+
+
+def test_fr_pay03_webhook_uses_signature_key_over_server_key(client, fake_gateway, monkeypatch):
+    """FR-PAY-03: verify notices with MIDTRANS_SIGNATURE_KEY and reject server-key signatures."""
+    _auth(client)
+    user_id = client.get("/api/v1/auth/me").json()["user_id"]
+    order = _order(client)
+    sig_key = "SB-Mid-signature-secret-distinct"
+    monkeypatch.setenv("MIDTRANS_SIGNATURE_KEY", sig_key)
+
+    rejected = client.post(
+        "/api/v1/webhooks/payment", json=_notice(order["order_id"], secret_key=SERVER_KEY)
+    )
+    assert rejected.status_code == 401, rejected.text
+    assert rejected.json()["error"]["code"] == "INVALID_WEBHOOK_SIGNATURE"
+    assert _user(user_id).paid_flag is False
+
+    accepted = client.post(
+        "/api/v1/webhooks/payment", json=_notice(order["order_id"], secret_key=sig_key)
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json() == {"acknowledged": True, "idempotent_duplicate": False}
+    assert _user(user_id).paid_flag is True
+    assert _status_of(order["order_id"]) == "settlement"
+
+
+@pytest.mark.parametrize("raw_signature_key", [pytest.param(None, id="unset"), ""])
+def test_fr_pay03_signature_key_falls_back_to_server_key_when_unset_or_empty(
+    client, fake_gateway, monkeypatch, raw_signature_key
+):
+    """FR-PAY-03: unset or empty MIDTRANS_SIGNATURE_KEY falls back to MIDTRANS_SERVER_KEY."""
+    _auth(client)
+    user_id = client.get("/api/v1/auth/me").json()["user_id"]
+    order = _order(client)
+    if raw_signature_key is None:
+        monkeypatch.delenv("MIDTRANS_SIGNATURE_KEY", raising=False)
+    else:
+        monkeypatch.setenv("MIDTRANS_SIGNATURE_KEY", raw_signature_key)
+
+    response = client.post(
+        "/api/v1/webhooks/payment", json=_notice(order["order_id"], secret_key=SERVER_KEY)
+    )
+    assert response.status_code == 200, response.text
+    assert response.json() == {"acknowledged": True, "idempotent_duplicate": False}
+    assert _user(user_id).paid_flag is True
+
+
+def test_fr_pay07_sandbox_signature_key_without_sb_prefix_avoids_503_guard(
+    client, fake_gateway, monkeypatch
+):
+    """FR-PAY-03, FR-PAY-07: sandbox Signature Secret Key without SB- prefix does not trip 503 guard."""
+    _auth(client)
+    user_id = client.get("/api/v1/auth/me").json()["user_id"]
+    order = _order(client)
+    sig_key = "Mid-signature-secret-without-sb-prefix"
+    monkeypatch.setenv("MIDTRANS_IS_PRODUCTION", "false")
+    monkeypatch.setenv("MIDTRANS_SERVER_KEY", SERVER_KEY)
+    monkeypatch.setenv("MIDTRANS_SIGNATURE_KEY", sig_key)
+
+    response = client.post(
+        "/api/v1/webhooks/payment", json=_notice(order["order_id"], secret_key=sig_key)
+    )
+    assert response.status_code == 200, response.text
+    assert response.json() == {"acknowledged": True, "idempotent_duplicate": False}
+    assert _user(user_id).paid_flag is True
+    assert _status_of(order["order_id"]) == "settlement"

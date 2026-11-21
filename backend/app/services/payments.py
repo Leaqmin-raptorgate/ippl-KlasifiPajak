@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.errors import ApiError
-from app.config.settings import frontend_base_url
+from app.config.settings import frontend_base_url, midtrans_signature_key
 from app.models import PaymentEvent, SubscriptionOrder, User
 from app.payments.adapter import (
     GatewayUnavailable,
@@ -43,6 +43,7 @@ def get_gateway_adapter() -> MidtransAdapter:
     """Construct the configured gateway; missing keys fail closed on use."""
     return MidtransAdapter(
         server_key=os.environ.get("MIDTRANS_SERVER_KEY", ""),
+        signature_key=midtrans_signature_key(),
         is_production=_is_production(),
     )
 
@@ -244,6 +245,7 @@ def process_notification(db: Session, payload: dict[str, Any]) -> dict:
     try:
         verifier = MidtransAdapter(
             server_key=os.environ.get("MIDTRANS_SERVER_KEY", ""),
+            signature_key=midtrans_signature_key(),
             is_production=_is_production(),
         )
     except ValueError:

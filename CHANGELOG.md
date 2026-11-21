@@ -26,6 +26,11 @@ Contract: API v1.3.3.
 
 - Send frontend finish and error return URLs in Midtrans Snap requests.
 
+### Fixed
+
+- Verify Midtrans webhook notifications with `MIDTRANS_SIGNATURE_KEY`, falling
+  back to `MIDTRANS_SERVER_KEY` when unset or empty.
+
 ### Documentation
 
 - Align the API specification, README, backend README, backlog, roadmap and
