@@ -2,7 +2,8 @@
 
 Run from the project root:
 
-    PYTHONPATH=backend .venv/bin/python backend/scripts/seed_demo.py
+    docker compose -p kpa up -d --build mysql migrate api
+    docker compose -p kpa exec -T api python backend/scripts/seed_demo.py
 
 Idempotent: an existing account keeps its id, its password is reset to the
 documented demo password, and transactions are skipped when their invoice
@@ -17,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from sqlalchemy import select  # noqa: E402
 
+from app.config.settings import Settings  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.models import Transaction as TransactionRow  # noqa: E402
 from app.models import User  # noqa: E402
@@ -48,6 +50,15 @@ ACCOUNTS = (
                 "source_channel": "corporate_client",
             },
             {
+                "tx_date": "2026-10-15",
+                "amount_idr": 1_000_000,
+                "client_name": "Pelanggan Contoh",
+                "description": "Pembayaran sesuatu",
+                "invoice_no": "INV-G-003",
+                "withheld_tax_amount_idr": 0,
+                "source_channel": "retail",
+            },
+            {
                 "tx_date": "2026-10-12",
                 "amount_idr": 4_000_000,
                 "client_name": "Bapak Andi",
@@ -67,6 +78,15 @@ ACCOUNTS = (
         "kbli": "56210",
         "description": "Katering dan penjualan makanan",
         "transactions": (
+            {
+                "tx_date": "2026-09-01",
+                "amount_idr": 3_900_000_000,
+                "client_name": "Pelanggan Contoh",
+                "description": "Penjualan katering",
+                "invoice_no": "INV-B-003",
+                "withheld_tax_amount_idr": 0,
+                "source_channel": "retail",
+            },
             {
                 "tx_date": "2026-10-06",
                 "amount_idr": 25_000_000,
@@ -156,6 +176,8 @@ def ensure_transactions(db, user: User, spec: dict, ruleset) -> int:
 
 
 def main() -> None:
+    if Settings().is_production:
+        raise SystemExit("seed_demo.py refuses to run when APP_ENV=production")
     init_db()
     ruleset = active_ruleset()
     db = SessionLocal()
