@@ -1335,3 +1335,100 @@ def test_tc_assistant_outbound_redacts_an_id_key_that_holds_free_text():
     text = cleaned["tool_results"]["rows"][0]["id"]
     assert "0812" not in text
     assert "a@b.id" not in text
+
+
+def test_tc_assistant_grounding_ignores_row_ids_with_zero_padded_digits(client, monkeypatch):
+    """FR-27, FR-28: opaque row IDs with zero-padded digit runs are not treated as rupiah figures."""
+    from app.classify.model_client import FakeModelClient
+    from app.security import new_id as real_new_id
+    from app.services import assistant, transactions
+
+    pinned_id = "tx_01M7XH63M0JH8P7DVSCNZJ0240"
+    bare_ulid = "01M7XH63M0JH8P7DVSCNZJ0240"
+    sample_tools = {
+        "baca_transaksi_sendiri": [
+            {"id": pinned_id, "amount_idr": 50_000},
+            {"id": bare_ulid, "amount_idr": 75_000},
+        ]
+    }
+    assert assistant._rupiah_figures(f"Transaksi {pinned_id} butuh klarifikasi.") == []
+    assert assistant._rupiah_figures(f"Transaksi {bare_ulid} butuh klarifikasi.") == []
+    assert assistant._figures_supported(f"Transaksi {pinned_id} butuh klarifikasi.", sample_tools)
+    assert assistant._figures_supported(f"Transaksi {bare_ulid} butuh klarifikasi.", sample_tools)
+
+    _register_login(client, email="assistant-id-ground@example.test", username="assistantidground")
+    _profile(client)
+    monkeypatch.setattr(
+        transactions,
+        "new_id",
+        lambda prefix: pinned_id if prefix == "tx_" else real_new_id(prefix),
+    )
+    created = _transaction(
+        client,
+        tx_date="2026-11-09",
+        amount_idr=50_000,
+        description="Penjualan dengan ID terseleksi",
+        invoice_no="PINNED-ID-001",
+    )
+    assert created["id"] == pinned_id
+    _set_ai_consent(client)
+
+    expected_answer = f"Transaksi {pinned_id} butuh klarifikasi."
+    fake = FakeModelClient([expected_answer])
+    monkeypatch.setattr(assistant, "get_model_client", lambda: fake)
+
+    response = client.post(f"{API}/assistant/query", json={"question": "transaksi mana yang butuh"})
+    assert response.status_code == 200, response.text
+    assert response.json()["answer"] == expected_answer
+    assert response.json()["answer"] != assistant.FALLBACK_ANSWER
+
+
+def test_tc_assistant_grounding_rejects_invented_figure_alongside_row_id(client, monkeypatch):
+    """FR-27, FR-28: a valid row ID never excuses an invented rupiah figure or stray digits."""
+    from app.classify.model_client import FakeModelClient
+    from app.security import new_id as real_new_id
+    from app.services import assistant, transactions
+
+    pinned_id = "tx_01M7XH63M0JH8P7DVSCNZJ0240"
+    sample_tools = {
+        "baca_transaksi_sendiri": [{"id": pinned_id, "amount_idr": 50_000}],
+    }
+    assert not assistant._figures_supported(
+        f"Transaksi {pinned_id} memiliki pajak Rp 999.999.", sample_tools
+    )
+    assert not assistant._figures_supported(
+        f"Transaksi {pinned_id} memiliki angka 888777.", sample_tools
+    )
+    assert not assistant._figures_supported(
+        f"Transaksi 123{pinned_id} butuh klarifikasi.", sample_tools
+    )
+    assert not assistant._figures_supported(
+        f"Transaksi {pinned_id}999 butuh klarifikasi.", sample_tools
+    )
+
+    user_id = _register_login(
+        client, email="assistant-id-invented@example.test", username="assistantidinvented"
+    )
+    _profile(client)
+    monkeypatch.setattr(
+        transactions,
+        "new_id",
+        lambda prefix: pinned_id if prefix == "tx_" else real_new_id(prefix),
+    )
+    _transaction(
+        client,
+        tx_date="2026-11-09",
+        amount_idr=50_000,
+        description="Penjualan dengan angka rekaan",
+        invoice_no="PINNED-ID-002",
+    )
+    _set_ai_consent(client)
+    initial_used = client.get(f"{API}/quotas").json()["assistant_chat"]["used"]
+
+    fake = FakeModelClient([f"Transaksi {pinned_id} memiliki pajak Rp 999.999."])
+    monkeypatch.setattr(assistant, "get_model_client", lambda: fake)
+
+    response = client.post(f"{API}/assistant/query", json={"question": "berapa pajaknya"})
+    assert response.status_code == 200, response.text
+    assert response.json()["answer"] == assistant.FALLBACK_ANSWER
+    assert _quota_chat_used(user_id) == initial_used
