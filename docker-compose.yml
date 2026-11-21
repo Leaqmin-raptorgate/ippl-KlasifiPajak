@@ -70,6 +70,21 @@ services:
       DATABASE_URL: mysql+pymysql://klasifipajak_app:klasifipajak_app@mysql:3306/klasifipajak
       MIGRATE_DATABASE_URL: mysql+pymysql://klasifipajak_migrate:klasifipajak_migrate@mysql:3306/klasifipajak
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+      AI_BASE_URL: ${AI_BASE_URL:-}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_MODEL_CLASSIFIER: ${AI_MODEL_CLASSIFIER:-}
+      AI_MODEL_OCR: ${AI_MODEL_OCR:-}
+      AI_MODEL_ASSISTANT: ${AI_MODEL_ASSISTANT:-}
+      AI_TIMEOUT_S: ${AI_TIMEOUT_S:-30}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      MIDTRANS_SERVER_KEY: ${MIDTRANS_SERVER_KEY:-}
+      MIDTRANS_CLIENT_KEY: ${MIDTRANS_CLIENT_KEY:-}
+      MIDTRANS_IS_PRODUCTION: ${MIDTRANS_IS_PRODUCTION:-false}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
     volumes:
       - ./backend:/app/backend
     depends_on:
