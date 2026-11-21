@@ -115,6 +115,7 @@ _PARTY_NAME_KEYS = frozenset({"client_name", "name"})
 # ever holds free text still goes through the redactor.
 _OPAQUE_ID_KEYS = frozenset({"id"})
 _ROW_ID_SHAPE = re.compile(r"(?:[a-z]+_)?[0-9A-HJKMNP-TV-Z]{26}")
+_ROW_ID_TOKEN = re.compile(rf"(?<![A-Za-z0-9_]){_ROW_ID_SHAPE.pattern}(?![A-Za-z0-9_])")
 
 _RESERVE_SQL = (
     "UPDATE quota_counters "
@@ -643,6 +644,7 @@ def _strip_data_delimiters(text: str) -> str:
 
 def _rupiah_figures(text: str) -> list[int]:
     """Collect integer rupiah amounts from ``Rp 999.999.999`` and plain digit styles."""
+    text = _ROW_ID_TOKEN.sub(" ", text)
     occupied: list[tuple[int, int]] = []
     found: list[int] = []
 
