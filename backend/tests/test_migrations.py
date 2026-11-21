@@ -1026,6 +1026,34 @@ def test_tc_hard_26_dockerfile_healthcheck():
     assert "/health" in text
 
 
+def test_dockerfile_receipt_storage_dir_owned_by_appuser():
+    """FR-06: Dockerfile creates and owns /var/lib/klasifipajak/receipts for appuser.
+
+    Skips inside the runtime image (``COPY backend`` only; no repo-root Dockerfile).
+    """
+    if not DOCKERFILE.is_file():
+        pytest.skip(
+            f"Dockerfile not present at {DOCKERFILE} "
+            "(runtime image copies backend/ only; host/CI checkout runs this assert)"
+        )
+    text = DOCKERFILE.read_text(encoding="utf-8")
+    logical_lines = re.sub(r"\\\r?\n", " ", text)
+    mkdir_match = re.search(
+        r"mkdir\s+-p\b[^\n]*/var/lib/klasifipajak/receipts\b",
+        logical_lines,
+    )
+    chown_match = re.search(
+        r"chown\s+-R\s+appuser:appuser\b[^\n]*/var/lib/klasifipajak\b",
+        logical_lines,
+    )
+    user_match = re.search(r"^USER\s+appuser\s*$", logical_lines, re.M)
+    assert mkdir_match is not None, "Dockerfile must mkdir -p /var/lib/klasifipajak/receipts"
+    assert chown_match is not None, "Dockerfile must chown -R appuser:appuser /var/lib/klasifipajak"
+    assert user_match is not None
+    assert mkdir_match.start() < user_match.start()
+    assert chown_match.start() < user_match.start()
+
+
 def test_init_db_never_calls_create_all(monkeypatch):
     """B-11 / HB-18: init_db must not create_all for any APP_ENV (including unset)."""
     import app.db as db_mod
