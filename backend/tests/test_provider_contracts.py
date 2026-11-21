@@ -25,6 +25,155 @@ def test_fr12_unconfigured_model_fails_closed():
         client.complete([{"role": "user", "content": "data"}])
 
 
+def _openai_client(handler):
+    from app.classify.model_client import OpenAICompatibleClient
+
+    return OpenAICompatibleClient(
+        base_url="https://model.example.test/v1",
+        api_key="test-key",
+        model="test-model",
+        transport=httpx2.MockTransport(handler),
+    )
+
+
+def test_fr12_openai_client_returns_standard_completion_content():
+    """FR-12: a standard single-JSON completion returns choices[0].message.content."""
+    expected = json.dumps(
+        {
+            "category": "usaha",
+            "confidence": 0.91,
+            "citation": "PP 20/2026",
+            "rationale": "Retail sale",
+        }
+    )
+    payload = {
+        "id": "chatcmpl-1",
+        "object": "chat.completion",
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": expected}}],
+    }
+
+    def handler(_request):
+        return httpx2.Response(200, json=payload)
+
+    assert _openai_client(handler).complete([{"role": "user", "content": "data"}]) == expected
+
+
+@pytest.mark.parametrize(
+    ("raw_body", "content_type"),
+    [
+        pytest.param(
+            json.dumps(
+                {
+                    "id": "chatcmpl-9r",
+                    "object": "chat.completion",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": '{"category":"usaha","confidence":0.93}',
+                            },
+                        }
+                    ],
+                }
+            )
+            + "data: [DONE]\n\n",
+            "text/event-stream",
+            id="trailing-sse-done",
+        ),
+        pytest.param(
+            "  \n"
+            + json.dumps(
+                {
+                    "id": "chatcmpl-concat",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": '{"category":"usaha","confidence":0.93}',
+                            },
+                        }
+                    ],
+                }
+            )
+            + json.dumps({"usage": {"total_tokens": 42}}),
+            "application/json",
+            id="concatenated-json-objects",
+        ),
+        pytest.param(
+            json.dumps(
+                {
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": '{"category":"usaha","confidence":0.93}',
+                            },
+                        }
+                    ]
+                }
+            )
+            + "\ntrailing-proxy-bytes",
+            "application/json",
+            id="trailing-non-json-bytes",
+        ),
+    ],
+)
+def test_fr12_openai_client_handles_trailing_extra_data(raw_body, content_type):
+    """FR-12: trailing proxy bytes after the first valid completion JSON still succeed."""
+
+    def handler(_request):
+        return httpx2.Response(
+            200,
+            content=raw_body.encode("utf-8"),
+            headers={"Content-Type": content_type},
+        )
+
+    result = _openai_client(handler).complete([{"role": "user", "content": "data"}])
+    assert result == '{"category":"usaha","confidence":0.93}'
+
+
+@pytest.mark.parametrize(
+    ("status", "raw_body"),
+    [
+        pytest.param(200, "", id="empty-body"),
+        pytest.param(200, "   \n\t ", id="whitespace-body"),
+        pytest.param(200, "{not valid json", id="malformed-json"),
+        pytest.param(200, "<html>502 Bad Gateway</html>", id="html-error-page"),
+        pytest.param(200, "data: [DONE]\n\n", id="only-sse-done"),
+        pytest.param(200, "[1, 2, 3]", id="non-dict-json-list"),
+        pytest.param(200, "[1, 2, 3]data: [DONE]\n\n", id="non-dict-json-list-extra-data"),
+        pytest.param(200, "null", id="non-dict-json-null"),
+        pytest.param(200, '"plain string"', id="non-dict-json-string"),
+        pytest.param(200, "{}", id="missing-choices"),
+        pytest.param(200, '{"error": {"message": "bad"}}data: [DONE]\n\n', id="error-obj-extra"),
+        pytest.param(200, '{"choices": []}', id="empty-choices"),
+        pytest.param(200, '{"choices": "not-a-list"}', id="non-list-choices"),
+        pytest.param(200, '{"choices": ["not-a-dict"]}', id="non-dict-choice-item"),
+        pytest.param(200, '{"choices": [{}]}', id="missing-message"),
+        pytest.param(200, '{"choices": [{"message": "not-a-dict"}]}', id="non-dict-message"),
+        pytest.param(200, '{"choices": [{"message": {}}]}', id="missing-content"),
+        pytest.param(200, '{"choices": [{"message": {"content": null}}]}', id="null-content"),
+        pytest.param(
+            502,
+            '{"choices": [{"message": {"content": "ok"}}]}',
+            id="http-502",
+        ),
+    ],
+)
+def test_fr12_openai_client_fails_closed_on_invalid_responses(status, raw_body):
+    """FR-12, FR-38: malformed, non-dict, empty, or incomplete payloads raise ModelUnavailable."""
+    from app.classify.model_client import ModelUnavailable
+
+    def handler(_request):
+        return httpx2.Response(status, content=raw_body.encode("utf-8"))
+
+    with pytest.raises(ModelUnavailable):
+        _openai_client(handler).complete([{"role": "user", "content": "data"}])
+
+
 def test_fr12_fake_model_records_calls_without_network():
     """FR-12: tests exercise the same model boundary through a fake."""
     from app.classify.model_client import FakeModelClient

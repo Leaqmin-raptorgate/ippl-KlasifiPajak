@@ -199,6 +199,34 @@ class FakeModelClient:
         return response
 
 
+def _decode_completion_content(response: httpx2.Response) -> Any:
+    """Extract choices[0].message.content, tolerating trailing proxy bytes after valid JSON."""
+    try:
+        payload = response.json()
+    except json.JSONDecodeError as exc:
+        if exc.msg != "Extra data":
+            raise
+        text = response.text.lstrip()
+        if not text:
+            raise
+        payload, _ = json.JSONDecoder().raw_decode(text)
+    if not isinstance(payload, dict):
+        raise ValueError("Model response payload must be a JSON object")
+    choices = payload["choices"]
+    if not isinstance(choices, list) or not choices:
+        raise ValueError("Model response missing choices")
+    choice = choices[0]
+    if not isinstance(choice, dict):
+        raise ValueError("Model response choice must be an object")
+    message = choice["message"]
+    if not isinstance(message, dict):
+        raise ValueError("Model response message must be an object")
+    content = message["content"]
+    if content is None:
+        raise ValueError("Model response message content is null")
+    return content
+
+
 class OpenAICompatibleClient:
     """OpenAI-compatible structured completion client with injectable transport."""
 
@@ -256,6 +284,6 @@ class OpenAICompatibleClient:
                     json=body,
                 )
                 response.raise_for_status()
-                return response.json()["choices"][0]["message"]["content"]
+                return _decode_completion_content(response)
         except (httpx2.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
             raise ModelUnavailable("Model provider failed") from exc
