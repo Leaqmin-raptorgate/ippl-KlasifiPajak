@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createMemoryHistory, createRouter } from "vue-router";
+import { ApiFailure } from "@/lib/api";
 import KuotaPage from "@/pages/KuotaPage.vue";
 import TransaksiBaruPage from "@/pages/TransaksiBaruPage.vue";
 import { useKuotaStore } from "@/stores/kuota";
@@ -263,5 +264,114 @@ describe("receipt upload without consent", () => {
       "Unggah struk hanya untuk akun berbayar aktif",
     );
     kuota.unmount();
+  });
+
+  it("offers the upgrade link and refreshes quotas when server rejects OCR for inactive plan", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    vi.spyOn(useProfilStore(), "muat").mockResolvedValue(undefined);
+    const kuotaStore = useKuotaStore();
+    kuotaStore.status = PAID;
+    const muatKuota = vi.spyOn(kuotaStore, "muat").mockResolvedValue(undefined);
+    const upload = vi
+      .spyOn(useTransaksiStore(), "unggahStruk")
+      .mockRejectedValue(
+        new ApiFailure(403, "PAID_SUBSCRIPTION_REQUIRED", "Langganan berbayar sudah berakhir."),
+      );
+    useSessionStore().user = {
+      user_id: "u",
+      email: "a@b.test",
+      username: "a",
+      ai_consent_at: "2026-11-01T00:00:00Z",
+    };
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: "/", component: TransaksiBaruPage },
+        { path: "/kuota", name: "kuota", component: KuotaPage },
+        { path: "/profil", component: { template: "<div />" } },
+      ],
+    });
+    await router.push("/");
+    await router.isReady();
+    const wrapper = mount(TransaksiBaruPage, {
+      global: { plugins: [pinia, router], stubs: { AppIcon: true } },
+    });
+    await flushPromises();
+    muatKuota.mockClear();
+
+    const realCreate = document.createElement.bind(document);
+    const input = realCreate("input");
+    const spy = vi
+      .spyOn(document, "createElement")
+      .mockImplementation(((tag: string) =>
+        tag === "input" ? input : realCreate(tag)) as typeof document.createElement);
+    await wrapper.get(".drop").trigger("click");
+    spy.mockRestore();
+    Object.defineProperty(input, "files", {
+      configurable: true,
+      value: [new File(["a"], "a.jpg", { type: "image/jpeg" })],
+    });
+    input.onchange?.(new Event("change"));
+    await flushPromises();
+
+    expect(upload).toHaveBeenCalledOnce();
+    expect(muatKuota).toHaveBeenCalledWith(true);
+    const galat = wrapper.get(".kunci");
+    expect(galat.attributes("role")).toBe("alert");
+    expect(galat.get("a").attributes("href")).toBe("/kuota?alasan=ocr_berbayar");
+  });
+
+  it("keeps the OCR upgrade link visible when tax profile is missing", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const profil = useProfilStore();
+    profil.belumAda = true;
+    vi.spyOn(profil, "muat").mockResolvedValue(undefined);
+    vi.spyOn(useKuotaStore(), "muat").mockResolvedValue(undefined);
+    const upload = vi.spyOn(useTransaksiStore(), "unggahStruk");
+    useSessionStore().user = {
+      user_id: "u",
+      email: "a@b.test",
+      username: "a",
+      ai_consent_at: "2026-11-01T00:00:00Z",
+    };
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: "/", component: TransaksiBaruPage },
+        { path: "/kuota", name: "kuota", component: KuotaPage },
+        { path: "/profil", component: { template: "<div />" } },
+      ],
+    });
+    await router.push("/");
+    await router.isReady();
+    const wrapper = mount(TransaksiBaruPage, {
+      global: { plugins: [pinia, router], stubs: { AppIcon: true } },
+    });
+    await flushPromises();
+
+    const realCreate = document.createElement.bind(document);
+    const input = realCreate("input");
+    const spy = vi
+      .spyOn(document, "createElement")
+      .mockImplementation(((tag: string) =>
+        tag === "input" ? input : realCreate(tag)) as typeof document.createElement);
+    await wrapper.get(".drop").trigger("click");
+    spy.mockRestore();
+    Object.defineProperty(input, "files", {
+      configurable: true,
+      value: [new File(["a"], "a.jpg", { type: "image/jpeg" })],
+    });
+    input.onchange?.(new Event("change"));
+    await flushPromises();
+
+    expect(upload).not.toHaveBeenCalled();
+    expect(wrapper.find(".peringatan-profil").exists()).toBe(true);
+    const galat = wrapper.get(".kunci");
+    expect(galat.isVisible()).toBe(true);
+    expect(galat.get("a").attributes("href")).toBe("/kuota?alasan=ocr_berbayar");
+    const submit = wrapper.get("button[type='submit']");
+    expect((submit.element as HTMLButtonElement).disabled).toBe(true);
   });
 });

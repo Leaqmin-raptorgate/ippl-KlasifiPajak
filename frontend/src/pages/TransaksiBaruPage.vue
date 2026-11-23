@@ -210,7 +210,12 @@ async function unggah() {
     if (calon.invoice_no) faktur.value = calon.invoice_no;
   } catch (error) {
     imageId.value = "";
-    galatSimpan.value = error instanceof ApiFailure ? error.message : "Unggah gagal.";
+    if (error instanceof ApiFailure && error.code === "PAID_SUBSCRIPTION_REQUIRED") {
+      galatSimpan.value = PESAN_UNGGAH_BERBAYAR;
+      void kuota.muat(true);
+    } else {
+      galatSimpan.value = error instanceof ApiFailure ? error.message : "Unggah gagal.";
+    }
   }
 }
 
@@ -455,7 +460,7 @@ async function simpan() {
               </AppButton>
             </div>
           </div>
-          <p v-else-if="galatSimpan === PESAN_UNGGAH_BERBAYAR" class="kunci" role="alert">
+          <p v-if="galatSimpan === PESAN_UNGGAH_BERBAYAR" class="kunci" role="alert">
             Unggah struk hanya untuk akun berbayar aktif. Isi transaksi secara manual, atau lihat
             paket di halaman <RouterLink to="/kuota?alasan=ocr_berbayar">Kuota</RouterLink>.
           </p>
