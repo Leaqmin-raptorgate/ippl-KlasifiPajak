@@ -62,7 +62,7 @@ requirements to close an OD-*.
 
 ## Decisions for the proposed SRS v2.8 changes
 
-- D-12: Use the developer-supplied 9router endpoint, with `AI_BASE_URL=https://9router.putrahomelab.com/v1`. The model ids stay in `AI_MODEL_CLASSIFIER`, `AI_MODEL_OCR`, and `AI_MODEL_ASSISTANT`; those variables are the configuration, and the software accepts whatever ids they hold. On `main` at `bf65f27c7f25794812bf9babf0d86d1f2257fa14`, classifier fallback, receipt OCR, and the assistant each passed through that gateway with `xai/grok-4.7` (issue #29). SMTP password-reset case 8 on that issue was not run.
+- D-12: Use the developer-supplied 9router endpoint, with `AI_BASE_URL=https://9router.putrahomelab.com/v1`. The model ids stay in `AI_MODEL_CLASSIFIER`, `AI_MODEL_OCR`, and `AI_MODEL_ASSISTANT`; those variables are the configuration, and the software accepts whatever ids they hold. On `main` at `bf65f27c7f25794812bf9babf0d86d1f2257fa14`, classifier fallback, receipt OCR, and the assistant each passed through that gateway with `xai/grok-4.7` ([issue #29 re-verification](https://github.com/Leaqmin-raptorgate/ippl-KlasifiPajak/issues/29#issuecomment-7056219036)). SMTP password-reset case 8 on that issue was not run.
 - Data leaves the application for the configured AI host (`AI_BASE_URL`).
 - D-13: A failed recalculation rolls back the entire transaction and retains previous figures.
 - D-14: Withholding status is `nihil` when equal, `kurang_potong` below, and `belum_diperhitungkan` above tax.

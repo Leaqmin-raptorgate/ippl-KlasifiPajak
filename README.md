@@ -48,7 +48,7 @@ npm ci   # ALWAYS npm ci, never npm install (lockfile-locked)
 | `AI_*`                 | OpenAI-compatible client settings for receipt OCR, fallback classification, and assistant Q&A. Empty = fail closed to rules.   |
 | `MIDTRANS_*`           | Midtrans Snap server, signature, and client keys plus production flag for subscription checkout and notification verification. |
 
-The model ids stay in `AI_MODEL_CLASSIFIER`, `AI_MODEL_OCR`, and `AI_MODEL_ASSISTANT`. They are not fixed in source. On `main` at `bf65f27c7f25794812bf9babf0d86d1f2257fa14`, classifier fallback, receipt OCR, and the assistant each passed through the configurable 9router gateway with model id `xai/grok-4.7` ([issue #29](https://github.com/Leaqmin-raptorgate/ippl-KlasifiPajak/issues/29)). SMTP password-reset case 8 on that issue was not run.
+The model ids stay in `AI_MODEL_CLASSIFIER`, `AI_MODEL_OCR`, and `AI_MODEL_ASSISTANT`. They are not fixed in source. On `main` at `bf65f27c7f25794812bf9babf0d86d1f2257fa14`, classifier fallback, receipt OCR, and the assistant each passed through the configurable 9router gateway with model id `xai/grok-4.7` ([issue #29 re-verification](https://github.com/Leaqmin-raptorgate/ippl-KlasifiPajak/issues/29#issuecomment-7056219036)). SMTP password-reset case 8 on that issue was not run.
 
 Set `FRONTEND_BASE_URL` to the frontend base URL outside development or test. The backend sends the finish and error return URLs to Snap. As a fallback, set the Finish and Error URLs in the Midtrans dashboard to `<frontend origin>/langganan/kembali`; some payment methods use dashboard settings.
 

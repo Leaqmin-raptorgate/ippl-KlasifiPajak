@@ -5,9 +5,9 @@ Goal: working demo before December. Optimize for finishing, not for completeness
 Tracking lives in Plane, project IPPL. This file explains the sequence and the
 reasoning; Plane holds the items.
 
-## Current state (3 Nov 2026)
+## Current state (23 Nov 2026)
 
-Done on `main` (M50 PRs #1–#4 merged; tip `3d5ced0`):
+Done on `main` (pre-freeze baseline `bf65f27`):
 
 - Tax engine at `backend/app/engine/`, pure Python, no framework, no model.
 - Ruleset as data at `backend/app/engine/ruleset/pp20_2026.json`.
@@ -49,8 +49,11 @@ Status API returns `503`. Still open: the live sandbox run and live keys.
 
 ### Residual risk
 
-- The rubric four (OCR, Midtrans, AI, PDF) are implemented. What remains is
-  the demo script, report numbers and the re-measured classifier scores.
+- The rubric four (OCR, Midtrans, AI, PDF) and the demo script
+  (`docs/demo/DEMO_SCRIPT.md`) are implemented, and the 2026-11-17 rules-only
+  classifier measurements are recorded in `backend/README.md`. What remains is
+  the release rehearsal measurements (report numbers) and the developer's
+  label review / held-out v2 check.
 - Live Midtrans keys are a user task before demo freeze (Fri 27 Nov 2026
   18:00 Asia/Makassar) per D-10.
 - Coverage gate measures **engine only** (NFR-14); whole-app coverage is
