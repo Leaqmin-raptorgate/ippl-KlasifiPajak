@@ -28,6 +28,9 @@ Contract: API v1.3.3.
 
 ### Fixed
 
+- A free account blocked from uploading a receipt can open
+  `/kuota?alasan=ocr_berbayar` from that error and can still enter the
+  transaction manually.
 - Verify Midtrans webhook notifications with `MIDTRANS_SIGNATURE_KEY`, falling
   back to `MIDTRANS_SERVER_KEY` when unset or empty.
 

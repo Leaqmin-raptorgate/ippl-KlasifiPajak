@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createMemoryHistory, createRouter } from "vue-router";
+import KuotaPage from "@/pages/KuotaPage.vue";
 import TransaksiBaruPage from "@/pages/TransaksiBaruPage.vue";
 import { useKuotaStore } from "@/stores/kuota";
 import { useProfilStore } from "@/stores/profil";
@@ -199,5 +200,68 @@ describe("receipt upload without consent", () => {
     expect(upload).not.toHaveBeenCalled();
     expect(wrapper.text()).toContain("hanya untuk akun berbayar aktif");
     expect(router.currentRoute.value.path).toBe("/");
+  });
+
+  it("links a blocked free-account upload to the paid-plan notice", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    vi.spyOn(useProfilStore(), "muat").mockResolvedValue(undefined);
+    vi.spyOn(useKuotaStore(), "muat").mockResolvedValue(undefined);
+    const upload = vi.spyOn(useTransaksiStore(), "unggahStruk");
+    useSessionStore().user = {
+      user_id: "u",
+      email: "a@b.test",
+      username: "a",
+      ai_consent_at: "2026-11-01T00:00:00Z",
+    };
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: "/", component: TransaksiBaruPage },
+        { path: "/kuota", name: "kuota", component: KuotaPage },
+        { path: "/profil", component: { template: "<div />" } },
+      ],
+    });
+    await router.push("/");
+    await router.isReady();
+    const wrapper = mount(TransaksiBaruPage, {
+      global: { plugins: [pinia, router], stubs: { AppIcon: true } },
+    });
+    await flushPromises();
+
+    const realCreate = document.createElement.bind(document);
+    const input = realCreate("input");
+    const spy = vi
+      .spyOn(document, "createElement")
+      .mockImplementation(((tag: string) =>
+        tag === "input" ? input : realCreate(tag)) as typeof document.createElement);
+    await wrapper.get(".drop").trigger("click");
+    spy.mockRestore();
+    Object.defineProperty(input, "files", {
+      configurable: true,
+      value: [new File(["a"], "a.jpg", { type: "image/jpeg" })],
+    });
+    input.onchange?.(new Event("change"));
+    await flushPromises();
+
+    expect(upload).not.toHaveBeenCalled();
+    const galat = wrapper.get(".kunci");
+    expect(galat.attributes("role")).toBe("alert");
+    expect(galat.isVisible()).toBe(true);
+    expect(galat.text().replace(/\s+/g, " ").trim()).toBe(
+      "Unggah struk hanya untuk akun berbayar aktif. Isi transaksi secara manual, atau lihat paket di halaman Kuota.",
+    );
+    const href = galat.get("a").attributes("href");
+    expect(href).toBe("/kuota?alasan=ocr_berbayar");
+
+    await router.push(href!);
+    const kuota = mount(KuotaPage, {
+      global: { plugins: [pinia, router], stubs: { AppIcon: true } },
+    });
+    await flushPromises();
+    expect(kuota.get(".alasan-notice").text()).toContain(
+      "Unggah struk hanya untuk akun berbayar aktif",
+    );
+    kuota.unmount();
   });
 });

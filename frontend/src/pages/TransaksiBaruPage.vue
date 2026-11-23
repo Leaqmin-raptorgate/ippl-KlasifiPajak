@@ -45,6 +45,9 @@ const dipotong = ref("");
 const kanal = ref<SourceChannel>("other");
 const sudahCobaSimpan = ref(false);
 const galatSimpan = ref("");
+/** Free-account upload block. The template links "Kuota" only for this exact text. */
+const PESAN_UNGGAH_BERBAYAR =
+  "Unggah struk hanya untuk akun berbayar aktif. Isi transaksi secara manual, atau lihat paket di halaman Kuota.";
 /** Server 422 field map. */
 const galatServer = reactive<Record<string, string>>({});
 const sibuk = ref(false);
@@ -190,8 +193,7 @@ async function unggah() {
     return;
   }
   if (!kuota.berbayar) {
-    galatSimpan.value =
-      "Unggah struk hanya untuk akun berbayar aktif. Isi transaksi secara manual, atau lihat paket di halaman Kuota.";
+    galatSimpan.value = PESAN_UNGGAH_BERBAYAR;
     return;
   }
   if (!session.persetujuanAi) {
@@ -453,6 +455,10 @@ async function simpan() {
               </AppButton>
             </div>
           </div>
+          <p v-else-if="galatSimpan === PESAN_UNGGAH_BERBAYAR" class="kunci" role="alert">
+            Unggah struk hanya untuk akun berbayar aktif. Isi transaksi secara manual, atau lihat
+            paket di halaman <RouterLink to="/kuota?alasan=ocr_berbayar">Kuota</RouterLink>.
+          </p>
           <p v-else-if="galatSimpan" class="kunci" role="alert">{{ galatSimpan }}</p>
           <div class="aksi">
             <AppButton variant="ghost" size="lg" @click="batal">Batal</AppButton>
