@@ -156,14 +156,14 @@ from `max(now_utc, valid_until_utc)`). Never use production keys.
       `GET /transactions/{id}/clarification` is a fixed template, not written
       by the model, and the model reply carries no question
 - [x] Override and stale recompute (rules/user path on main)
-- [x] Quota counters and `paid_flag` read models (reserve-on-AI still open)
+- [x] Quota counters and `paid_flag` read models (reserved before the model call)
 
 ## Sprint 5 — trace and demo
 
 - [x] Per-transaction audit trail endpoint (PR #4)
 - [x] FR-6.x read-only assistant (rubric)
 - [x] FR-8.x annual workpaper PDF (rubric)
-- [ ] Demo script, report numbers
+- [ ] Demo script, report numbers. The script exists (`docs/demo/DEMO_SCRIPT.md`); the measured final-report numbers wait for the release rehearsal.
 
 ## Frontend design — mockup v1.4.2 (25 Sep 2026)
 

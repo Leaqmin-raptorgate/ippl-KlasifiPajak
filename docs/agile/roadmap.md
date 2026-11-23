@@ -26,8 +26,9 @@ Done on `main` (M50 PRs #1–#4 merged; tip `3d5ced0`):
 
 **Rubric features (D-08):** OCR receipt upload (FR-06*), Midtrans orders and
 webhook (FR-PAY-*), the AI classifier and assistant (9router / D-09) and the
-annual recap PDF (`fpdf2` / D-11) are implemented. Still open: Midtrans Status
-API confirmation and live keys.
+annual recap PDF (`fpdf2` / D-11) are implemented. Status API confirmation is
+built: disagreement returns `PAYMENT_STATUS_MISMATCH`, and an unreachable
+Status API returns `503`. Still open: the live sandbox run and live keys.
 
 ### Recorded deviations
 
@@ -67,8 +68,10 @@ API confirmation and live keys.
 ## Why payments is sequenced carefully
 
 Payments is a lecturer requirement (D-08), so it is in scope. API v1.3.3 §5.30
-defines the webhook contract, rewritten for real Midtrans. Status API
-confirmation is still open.
+defines the webhook contract, rewritten for real Midtrans. Before a settlement
+grants access, the app asks the Midtrans Status API. Disagreement returns
+`PAYMENT_STATUS_MISMATCH`, and an unreachable Status API returns `503`. The
+live sandbox run is still open.
 D-10 allows building against placeholders first; live sandbox keys come before
 demo freeze. Never run against production keys.
 
