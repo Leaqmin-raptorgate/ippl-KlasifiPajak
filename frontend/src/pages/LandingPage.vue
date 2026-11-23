@@ -49,9 +49,9 @@ const CARA: Record<Kategori, string> = {
   pekerjaan_bebas:
     "Jasa atau pekerjaan yang dikerjakan atas nama pribadi. Diperhitungkan dengan norma, bukan dari tarif omzet.",
   already_final:
-    "Penghasilan yang PPh final-nya sudah dipotong atau dibayar sendiri, seperti dividen. Tidak dihitung dua kali.",
+    "Penghasilan yang PPh final-nya sudah dipotong atau dibayar sendiri, seperti sewa tanah atau bangunan. Tidak dihitung dua kali.",
   non_object:
-    "Pengembalian, modal, dan transfer yang bukan penghasilan. Tercatat untuk rekap, tidak masuk perhitungan PPh Final.",
+    "Bukan omzet usaha, termasuk pengembalian, modal, transfer, bunga deposito, dividen, dan hadiah undian. Tidak masuk basis 0,5% dan tidak masuk uji Rp 4,8 miliar.",
 };
 
 const kategori: { key: Kategori; label: string; tone: Tone; teks: string }[] = (

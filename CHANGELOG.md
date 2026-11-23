@@ -30,6 +30,10 @@ Contract: API v1.3.3.
 
 - Verify Midtrans webhook notifications with `MIDTRANS_SIGNATURE_KEY`, falling
   back to `MIDTRANS_SERVER_KEY` when unset or empty.
+- Ordinary bank-deposit or savings interest, personal dividends, and personal
+  lottery prizes (`hadiah undian`) classify as `non_object`. They stay out of
+  the 0,5% base and the Rp 4,8 miliar test. Rows already stored keep their
+  category until the user reclassifies them.
 
 ### Documentation
 

@@ -254,12 +254,25 @@ def test_tc_cap_warning_exact_integer_boundary(client, amount, warning):
 
 
 @pytest.mark.parametrize(
-    "description", ["bunga deposito", "bunga bank", "dividen", "hadiah undian"]
+    ("description", "rule_id"),
+    [
+        ("bunga deposito", "non_object.deposit"),
+        ("bunga bank", "non_object.bank"),
+        ("bunga tabungan", "non_object.savings"),
+        ("dividen", "non_object.dividend"),
+        ("hadiah undian", "non_object.prize"),
+    ],
 )
-def test_final_taxed_passive_income_is_already_final(description):
-    """Interest, dividends and lottery prizes stay ``already_final`` until Pasal 58(1)(a)
-    is signed off; they are never the 0.5% usaha base."""
-    assert classify(description)[0] == "already_final"
+def test_passive_interest_dividend_and_lottery_are_non_object(description, rule_id):
+    """FR-11: deposit interest, savings interest, dividends and lottery prizes are non_object.
+
+    The owner decided this on 2026-11-23. The stored id names ``non_object``.
+    These phrases are not the 0,5% usaha base.
+    """
+    category, got_rule, _, needs_clarification, _ = classify(description)
+    assert needs_clarification is False
+    assert (category, got_rule) == ("non_object", rule_id)
+    assert not got_rule.startswith("already_final")
 
 
 def test_fr10_business_rent_remains_final():
@@ -276,10 +289,11 @@ _CAP_PROBE = 4_800_000_001
         ("jasa penerjemahan", "pekerjaan_bebas", "pekerjaan_bebas.translation", False, True),
         ("sewa tanah", "already_final", "already_final.rent", False, True),
         ("sewa bangunan", "already_final", "already_final.rent_building", False, True),
-        ("bunga deposito", "already_final", "already_final.deposit", False, True),
-        ("bunga bank", "already_final", "already_final.bank", False, True),
-        ("dividen", "already_final", "already_final.dividend", False, True),
-        ("hadiah undian", "already_final", "already_final.prize", False, True),
+        ("bunga deposito", "non_object", "non_object.deposit", False, False),
+        ("bunga bank", "non_object", "non_object.bank", False, False),
+        ("bunga tabungan", "non_object", "non_object.savings", False, False),
+        ("dividen", "non_object", "non_object.dividend", False, False),
+        ("hadiah undian", "non_object", "non_object.prize", False, False),
         ("hadiah lomba", None, "", False, False),
         ("pemberian orang tua", "non_object", "non_object.parents", False, False),
     ],
@@ -287,11 +301,14 @@ _CAP_PROBE = 4_800_000_001
 def test_income_matrix_pins_today_category_base_and_cap(
     description, category, rule_id, in_base, in_cap, ruleset
 ):
-    """Pin today's category, the 0.5% base, and the Rp4.8bn test.
+    """Pin the category, the 0,5% base, and the Rp 4,8 miliar test.
 
-    ``hadiah lomba`` is a competition prize, not a lottery. It stays
-    clarification and is not passed to the engine. ``hadiah undian`` is the
-    only prize phrase that classifies.
+    Deposit interest, savings interest, dividends and ``hadiah undian`` are
+    ``non_object``: out of the base and out of the test. Land or building
+    rent stays ``already_final`` and stays in the test. ``hadiah lomba`` is
+    a competition prize, not a lottery, so it stays clarification and is not
+    passed to the engine. ``hadiah undian`` is the only prize phrase that
+    classifies.
     """
     got_category, got_rule, _, needs_clarification, _ = classify(description)
     profile = TaxProfile(is_new_taxpayer_current_year=True)
@@ -337,7 +354,11 @@ def test_income_matrix_pins_today_category_base_and_cap(
         "Penjualan pulsa dan top up e-wallet pelanggan",
         "Jual kaos, refund 1 pcs",
         "Sewa ruko dan pembatalan",
-        "Dividen dan gaji bulan ini",
+        "Dividen dan sewa tanah",
+        "Bunga deposito, penjualan kaos",
+        "Hadiah undian sewa bangunan",
+        "Bunga tabungan dan jasa penerjemahan",
+        "Bunga bank dan kos",
         "Sewa tanah dan gaji",
         # ``penjual`` is an ordinary sale word beside a refund phrase.
         "Pembatalan order, uang dikembalikan penjual",
@@ -357,6 +378,84 @@ def test_decisive_match_does_not_override_a_different_category(description):
 def test_explicit_statement_still_settles_the_category(description):
     """``bukan usaha`` and a final-tax marker name the answer, so they are not second-guessed."""
     assert classify(description)[3] is False
+
+
+@pytest.mark.parametrize("description", ["bunga", "Bunga", "hadiah", "tabungan"])
+def test_bare_interest_savings_or_prize_words_stay_clarification(description):
+    """A lone bunga can be lending-business interest. hadiah or tabungan alone is not this rule."""
+    category, rule_id, _, needs_clarification, _ = classify(description)
+    assert needs_clarification is True
+    assert rule_id == ""
+    assert category == "usaha"
+
+
+@pytest.mark.parametrize(
+    ("description", "category", "rule_id"),
+    [
+        ("sewa tanah", "already_final", "already_final.rent"),
+        ("Sewa kamar kos dari penghuni", "already_final", "already_final.kos"),
+        (
+            "Proyek renovasi dapur, bukti potong PPh final",
+            "already_final",
+            "already_final.marker_pph",
+        ),
+        ("penjualan barang", "usaha", "usaha.sale"),
+        ("Jasa penerjemahan jurnal", "pekerjaan_bebas", "pekerjaan_bebas.translation"),
+        ("Dividen dan gaji bulan ini", "non_object", "non_object.dividend"),
+    ],
+)
+def test_unrelated_categories_stay_put(description, category, rule_id):
+    """Rent, kos, a final-tax marker, a shop sale and a Pasal 56 phrase keep their categories."""
+    got_category, got_rule, _, needs_clarification, _ = classify(description)
+    assert needs_clarification is False
+    assert (got_category, got_rule) == (category, rule_id)
+
+
+def test_usaha_plus_personal_dividend_stays_under_the_cap(ruleset):
+    """Usaha of Rp 4_750_000_000 plus a personal dividend of Rp 100_000_000.
+
+    The owner's worked example (2026-11-23): the test counts Rp 4_750_000_000.
+    The old ``already_final`` mapping would count Rp 4_850_000_000 and flag the
+    cap. The dividend is also outside the 0,5% base, so tax matches usaha alone.
+    """
+    category, rule_id, _, needs_clarification, _ = classify("dividen")
+    assert needs_clarification is False
+    assert category == "non_object"
+    assert rule_id == "non_object.dividend"
+    profile = TaxProfile(is_new_taxpayer_current_year=True)
+    usaha = Transaction(id="usaha", amount=4_750_000_000, date="2026-06-01", category="usaha")
+    dividend = Transaction(id="dividen", amount=100_000_000, date="2026-06-02", category=category)
+    as_of = "2026-11-01"
+    usaha_only = compute([usaha], profile, ruleset, as_of)
+    snapshot = compute([usaha, dividend], profile, ruleset, as_of)
+    counted = (
+        snapshot.ytd_usaha_omzet + snapshot.pekerjaan_bebas_total + snapshot.already_final_total
+    )
+    assert snapshot.ytd_usaha_omzet == 4_750_000_000
+    assert snapshot.non_object_total == 100_000_000
+    assert snapshot.already_final_total == 0
+    assert counted == 4_750_000_000
+    assert counted <= ruleset.eligibility_cap_idr
+    assert counted + 100_000_000 > ruleset.eligibility_cap_idr
+    assert snapshot.current_year_crossed_cap is False
+    assert snapshot.final_tax == usaha_only.final_tax
+    assert usaha_only.final_tax > 0
+    counted_as_final = compute(
+        [
+            usaha,
+            Transaction(
+                id="dividen",
+                amount=100_000_000,
+                date="2026-06-02",
+                category="already_final",
+            ),
+        ],
+        profile,
+        ruleset,
+        as_of,
+    )
+    assert counted_as_final.current_year_crossed_cap is True
+    assert counted_as_final.already_final_total == 100_000_000
 
 
 @pytest.mark.parametrize(

@@ -75,10 +75,14 @@ RULES: tuple[Rule, ...] = (
     _d("non_object.parents", "non_object", "orang tua"),
     _d("non_object.crypto", "non_object", "kripto"),
     _d("non_object.btc", "non_object", "btc"),
-    _d("already_final.deposit", "already_final", "bunga deposito"),
-    _d("already_final.bank", "already_final", "bunga bank"),
-    _d("already_final.dividend", "already_final", "dividen"),
-    _d("already_final.prize", "already_final", "hadiah undian"),
+    # Outside the 0,5% base and the Rp 4,8 miliar test. A bare ``bunga`` or
+    # ``hadiah`` is not a phrase: lending interest and a non-lottery prize
+    # can still be business turnover.
+    _d("non_object.deposit", "non_object", "bunga deposito"),
+    _d("non_object.bank", "non_object", "bunga bank"),
+    _d("non_object.savings", "non_object", "bunga tabungan"),
+    _d("non_object.dividend", "non_object", "dividen"),
+    _d("non_object.prize", "non_object", "hadiah undian"),
     _d("non_object.salary", "non_object", "gaji"),
     _d("non_object.severance", "non_object", "pesangon"),
     _d("non_object.employer", "non_object", "pemberi kerja"),

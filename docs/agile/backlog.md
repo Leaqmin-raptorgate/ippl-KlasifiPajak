@@ -125,6 +125,7 @@ from `max(now_utc, valid_until_utc)`). Never use production keys.
 
 - [x] Heuristic-first path, zero model calls — keyword table on transaction create
 - [x] Non-object and already-final keyword table
+- [x] OD-13, decided by the owner on 2026-11-23: `bunga deposito`, `bunga bank`, `bunga tabungan`, `dividen` and `hadiah undian` classify as `non_object` and stay out of the 0,5% base and the Rp 4,8 miliar test. Existing rows keep the stored category until the user reclassifies them. A snapshot rebuild does not re-run the classifier. No category migration in this change.
 - [ ] NFR-Q1 labeled set of at least 40 transactions: the evaluator
       (`backend/scripts/evaluate_classifier.py`) and the dev and held-out
       workbooks exist outside the repo (98 labelled dev rows, 49 labelled

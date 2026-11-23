@@ -28,9 +28,10 @@ export const KATEGORI_DASAR_HUKUM: Record<
     rujukan: "PP 55/2022 Pasal 56 ayat (3) huruf c",
   },
   non_object: {
-    judul: "Bukan Objek Pajak (UU PPh)",
-    teks: "Aliran kas yang bukan objek omzet seperti pengembalian dana, setor modal, atau transfer antar-rekening sendiri dicatat untuk kebutuhan pembukuan dan tidak dikenai pajak penghasilan.",
-    rujukan: "UU PPh Pasal 4 ayat (3) jo. PP 55/2022 Pasal 56 ayat (3) huruf d",
+    judul: "Bukan omzet usaha.",
+    teks: "Penerimaan ini tidak masuk basis PPh final 0,5% dan tidak masuk uji peredaran bruto Rp 4,8 miliar. Pengembalian dana, setor modal, dan transfer antar-rekening sendiri bukan omzet usaha. Bunga deposito atau tabungan, dividen, dan hadiah undian juga tidak masuk uji itu, tetapi tetap mengikuti aturan PPh masing-masing. Label ini menjelaskan perhitungan, bukan bahwa uangnya bebas pajak.",
+    rujukan:
+      "UU PPh Pasal 4 ayat (3) jo. PP 55/2022 Pasal 56 ayat (3) huruf d; PP 20/2026 Pasal 58 ayat (1) huruf a",
   },
 };
 
