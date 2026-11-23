@@ -152,6 +152,8 @@ from `max(now_utc, valid_until_utc)`). Never use production keys.
       `services/classification_fallback.py` with `build_classification_messages`
       and `validate_classification`; consent and quota gated, quota refunded
       when no valid reply is stored
+- [x] The AI worker honors `RULESET_PATH` when it stores a fallback result and
+      rebuilds the month. An unset variable still uses the bundled ruleset.
 - [ ] One targeted clarifying question (model path): missing. The question on
       `GET /transactions/{id}/clarification` is a fixed template, not written
       by the model, and the model reply carries no question

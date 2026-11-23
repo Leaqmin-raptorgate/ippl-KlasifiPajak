@@ -30,6 +30,8 @@ Contract: API v1.3.3.
 
 - Verify Midtrans webhook notifications with `MIDTRANS_SIGNATURE_KEY`, falling
   back to `MIDTRANS_SERVER_KEY` when unset or empty.
+- The AI classification worker honors `RULESET_PATH` when it stores a result
+  and rebuilds the month. An unset variable still uses the bundled ruleset.
 
 ### Documentation
 

@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select, text
 
 from app.db import SessionLocal
-from app.models import QuotaCounter, Transaction
+from app.models import ClassificationEvent, MonthSnapshot, Profile, QuotaCounter, Transaction
 
 API = "/api/v1"
 PASSWORD = "PasswordMinimal10"
@@ -120,6 +120,41 @@ def _stored(user_id: str, description: str) -> tuple[str, bool, str]:
         )
         assert row is not None
         return row.source, bool(row.requires_clarification), row.category
+    finally:
+        db.close()
+
+
+def _ruleset_ids_after_ai(user_id: str) -> tuple[str, str]:
+    """Return the AI event ruleset id and the current October snapshot ruleset id."""
+    db = SessionLocal()
+    try:
+        row = db.scalar(
+            select(Transaction).where(
+                Transaction.user_id == user_id,
+                Transaction.description == AMBIGUOUS,
+            )
+        )
+        assert row is not None
+        event = db.scalar(
+            select(ClassificationEvent).where(
+                ClassificationEvent.transaction_id == row.id,
+                ClassificationEvent.source == "ai",
+            )
+        )
+        assert event is not None
+        profile = db.scalar(
+            select(Profile).where(Profile.user_id == user_id, Profile.tax_year == 2026)
+        )
+        assert profile is not None
+        snapshots = db.scalars(
+            select(MonthSnapshot).where(
+                MonthSnapshot.profile_id == profile.id,
+                MonthSnapshot.month_key == "2026-10",
+                MonthSnapshot.status == "berlaku",
+            )
+        ).all()
+        assert len(snapshots) == 1
+        return event.ruleset_id, snapshots[0].ruleset_id
     finally:
         db.close()
 
@@ -256,6 +291,55 @@ def test_consent_stores_ai_result_and_rules_skip_the_model(client, monkeypatch):
     assert needs_clarification is False
     assert category == "pekerjaan_bebas"
     assert _ai_used(client) == before + 1
+
+
+def test_ai_worker_honors_ruleset_path_and_bundled_default(client, monkeypatch, tmp_path):
+    """FR-12, FR-13: a stored AI result and the rebuilt month use RULESET_PATH, else the bundle."""
+    import shutil
+
+    from app.classify.model_client import FakeModelClient
+    from app.engine.ruleset.load import default_ruleset_path
+    from app.services import classification_fallback
+
+    destination = tmp_path / "ruleset.json"
+    shutil.copyfile(default_ruleset_path(), destination)
+    original = destination.read_text(encoding="utf-8")
+    bundled_id = json.loads(original)["ruleset_id"]
+    configured_id = f"{bundled_id}-worker"
+    assert configured_id != bundled_id
+    needle = f'"ruleset_id": "{bundled_id}"'
+    assert original.count(needle) == 1
+    destination.write_text(
+        original.replace(needle, f'"ruleset_id": "{configured_id}"', 1),
+        encoding="utf-8",
+    )
+
+    def run(email: str, username: str, invoice_no: str) -> str:
+        user_id = _register_login(client, email=email, username=username)
+        _profile(client)
+        _consent(client)
+        fake = FakeModelClient([_valid_result("pekerjaan_bebas")])
+        _patch_factory(monkeypatch, classification_fallback, fake)
+        created = _create(client, invoice_no=invoice_no)
+        assert created.status_code == 201, created.text
+        source, needs_clarification, category = _stored(user_id, AMBIGUOUS)
+        assert len(fake.calls) == 1
+        assert source == "ai"
+        assert needs_clarification is False
+        assert category == "pekerjaan_bebas"
+        return user_id
+
+    monkeypatch.setenv("RULESET_PATH", str(destination))
+    configured_user = run("ai-ruleset@example.test", "airuleset", "AI-RULESET")
+    event_id, snapshot_id = _ruleset_ids_after_ai(configured_user)
+    assert event_id == configured_id
+    assert snapshot_id == configured_id
+
+    monkeypatch.delenv("RULESET_PATH", raising=False)
+    default_user = run("ai-ruleset-default@example.test", "airulesetdef", "AI-RULESET-DEF")
+    event_id, snapshot_id = _ruleset_ids_after_ai(default_user)
+    assert event_id == bundled_id
+    assert snapshot_id == bundled_id
 
 
 @pytest.mark.parametrize(
