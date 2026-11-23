@@ -2,8 +2,8 @@
 /**
  * The workpaper stamp.
  *
- * A signed-in amount uses the dashboard metadata. While a month trace is open
- * and its snapshot is that month, the stamp uses the snapshot instead.
+ * A signed-in amount uses the dashboard metadata unless explicit snapshot
+ * metadata is passed for a trace view.
  * The public prop is only the academic ruleset identity, and it is not a
  * calculated figure.
  */
@@ -15,23 +15,18 @@ import { usePajakStore } from "@/stores/pajak";
 // `publik` is kept so existing callers still compile. The ruleset identity is
 // public either way: the dashboard returns 404 until a profile exists, and that
 // must not read as "ruleset not loaded".
-defineProps<{ publik?: boolean }>();
+const props = defineProps<{
+  publik?: boolean;
+  rulesetId?: string;
+  effectiveDate?: string;
+}>();
 const pajak = usePajakStore();
 
-const jejak = computed(() => {
-  const cuplikan = pajak.jejakCuplikan;
-  if (!pajak.jejakBulan || !cuplikan || cuplikan.month !== pajak.jejakBulan) return null;
-  return cuplikan;
-});
-
 const id = computed(
-  () => jejak.value?.ruleset_id || pajak.dashboard?.metadata.ruleset_id || PUBLIC_RULESET.id,
+  () => props.rulesetId || pajak.dashboard?.metadata.ruleset_id || PUBLIC_RULESET.id,
 );
 const berlaku = computed(
-  () =>
-    jejak.value?.effective_date ||
-    pajak.dashboard?.metadata.effective_date ||
-    PUBLIC_RULESET.berlaku,
+  () => props.effectiveDate || pajak.dashboard?.metadata.effective_date || PUBLIC_RULESET.berlaku,
 );
 </script>
 

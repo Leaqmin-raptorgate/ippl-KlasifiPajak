@@ -239,18 +239,29 @@ const jejakGalat = computed(() =>
 const jejakBaris = computed(() => {
   const cuplikan = jejakCuplikan.value;
   if (!cuplikan) return [];
+  const tidakDihitung =
+    cuplikan.scheme_eligibility_status === "scheme_ineligible" ||
+    cuplikan.scheme_eligibility_status === "unverifiable";
   const baris: { field: string; label: string; value: string }[] = [
     { field: "month", label: "Bulan", value: bulanTahun(`${cuplikan.month}-01`) },
     { field: "usaha_omzet_idr", label: "Omzet usaha", value: rupiah(cuplikan.usaha_omzet_idr) },
     { field: "porsi_bebas_idr", label: "Porsi bebas", value: rupiah(cuplikan.porsi_bebas_idr) },
     { field: "porsi_kena_idr", label: "Porsi kena", value: rupiah(cuplikan.porsi_kena_idr) },
-    { field: "tax_0_5_pct_idr", label: "Pajak 0,5%", value: rupiah(cuplikan.tax_0_5_pct_idr) },
+    {
+      field: "tax_0_5_pct_idr",
+      label: "Pajak 0,5%",
+      value: tidakDihitung ? "Tidak dihitung di sini" : rupiah(cuplikan.tax_0_5_pct_idr),
+    },
     {
       field: "withheld_tax_idr",
       label: "Pajak dipotong",
       value: rupiah(cuplikan.withheld_tax_idr),
     },
-    { field: "sisa_bayar_idr", label: "Kurang bayar", value: rupiah(cuplikan.sisa_bayar_idr) },
+    {
+      field: "sisa_bayar_idr",
+      label: "Kurang bayar",
+      value: tidakDihitung ? "Tidak dihitung di sini" : rupiah(cuplikan.sisa_bayar_idr),
+    },
     {
       field: "overwithheld_excess_idr",
       label: "Lebih potong",
@@ -296,8 +307,15 @@ const jejakBaris = computed(() => {
       value: STATUS_LABEL[cuplikan.scheme_eligibility_status] ?? cuplikan.scheme_eligibility_status,
     });
   }
-  if (cuplikan.annotation) {
-    baris.push({ field: "annotation", label: "Catatan", value: cuplikan.annotation });
+  const catatan =
+    cuplikan.annotation ||
+    (cuplikan.scheme_eligibility_status === "scheme_ineligible"
+      ? "Skema PPh Final 0,5% tidak berlaku."
+      : cuplikan.scheme_eligibility_status === "unverifiable"
+        ? "Data omzet tahun lalu belum lengkap, sehingga batas kelayakan belum dapat diperiksa."
+        : "");
+  if (catatan) {
+    baris.push({ field: "annotation", label: "Catatan", value: catatan });
   }
   return baris;
 });
@@ -616,6 +634,12 @@ onBeforeUnmount(() => {
           </dd>
         </div>
       </dl>
+      <WorkpaperNote
+        v-if="!pajak.jejakMemuat && jejakCuplikan"
+        class="jejak-stamp"
+        :ruleset-id="jejakCuplikan.ruleset_id"
+        :effective-date="jejakCuplikan.effective_date"
+      />
       <p
         v-if="!pajak.jejakMemuat && jejakCuplikan?.disclaimer"
         class="jejak-disclaimer"
@@ -1035,6 +1059,7 @@ onBeforeUnmount(() => {
   min-width: 0;
   color: var(--ink);
   font: var(--t-body-sm);
+  font-variant-numeric: tabular-nums;
 }
 
 .jejak-row dd.hash {
@@ -1060,8 +1085,12 @@ onBeforeUnmount(() => {
   margin-bottom: var(--s-1);
 }
 
+.jejak-stamp {
+  margin-top: var(--s-4);
+}
+
 .jejak-disclaimer {
-  margin-top: var(--s-3);
+  margin-top: var(--s-2);
 }
 
 @media (max-width: 639px) {

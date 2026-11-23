@@ -379,7 +379,7 @@ describe("dasbor month trace (FR-47)", () => {
     );
   });
 
-  it("keeps the month ruleset on the stamp, then drops a late response after a switch or a close", async () => {
+  it("keeps the dashboard stamp on the page, shows the month stamp in the sheet, and drops late responses", async () => {
     const oktober = tertunda<MonthSnapshot>();
     const november = tertunda<MonthSnapshot>();
     apiMock.mockImplementation((path: string) => {
@@ -395,16 +395,17 @@ describe("dasbor month trace (FR-47)", () => {
         disclaimer: "cap dasbor, bukan cap bulan",
       },
     });
-    const note = () => wrapper.get(".note").text();
+    const pageNote = () => wrapper.get(".stamp").text();
+    const sheetNote = () => dialog()?.querySelector(".jejak-stamp")?.textContent ?? "";
 
-    expect(note()).toContain("ruleset pp20-dasbor");
-    expect(note()).toContain("15 Januari 2026");
-    expect(note()).not.toContain("pp20-bulan-oktober");
-    expect(note()).not.toContain("pp20-bulan-november");
+    expect(pageNote()).toContain("ruleset pp20-dasbor");
+    expect(pageNote()).toContain("15 Januari 2026");
+    expect(pageNote()).not.toContain("pp20-bulan-oktober");
+    expect(pageNote()).not.toContain("pp20-bulan-november");
 
     await bukaJejak(wrapper, "2026-10");
-    expect(note()).toContain("ruleset pp20-dasbor");
-    expect(note()).not.toContain("pp20-bulan-oktober");
+    expect(pageNote()).toContain("ruleset pp20-dasbor");
+    expect(sheetNote()).toBe("");
 
     await bukaJejak(wrapper, "2026-11");
     oktober.resolve(
@@ -418,8 +419,9 @@ describe("dasbor month trace (FR-47)", () => {
 
     expect(document.body.textContent).not.toContain(HASH_LAMA);
     expect(document.body.textContent).not.toContain("pp20-bulan-oktober");
-    expect(note()).toContain("ruleset pp20-dasbor");
-    expect(note()).not.toContain("1 Maret 2026");
+    expect(pageNote()).toContain("ruleset pp20-dasbor");
+    expect(pageNote()).toContain("15 Januari 2026");
+    expect(sheetNote()).toBe("");
     expect(dialog()?.textContent).toContain("Memuat jejak bulan.");
 
     november.resolve(
@@ -437,10 +439,12 @@ describe("dasbor month trace (FR-47)", () => {
     expect(bidang("input_hash")).toBe(HASH_NOV);
     expect(bidang("ruleset_id")).toBe("pp20-bulan-november");
     expect(bidang("month")).toBe("Nov 2026");
-    expect(note()).toContain("ruleset pp20-bulan-november");
-    expect(note()).toContain("26 September 2026");
-    expect(note()).not.toContain("pp20-dasbor");
-    expect(note()).not.toContain("15 Januari 2026");
+    expect(sheetNote()).toContain("ruleset pp20-bulan-november");
+    expect(sheetNote()).toContain("26 September 2026");
+    expect(pageNote()).toContain("ruleset pp20-dasbor");
+    expect(pageNote()).toContain("15 Januari 2026");
+    expect(pageNote()).not.toContain("pp20-bulan-november");
+    expect(pageNote()).not.toContain("26 September 2026");
     expect(document.body.textContent).not.toContain(HASH_LAMA);
     expect(document.body.textContent).not.toContain("pp20-bulan-oktober");
 
@@ -464,11 +468,43 @@ describe("dasbor month trace (FR-47)", () => {
     expect(dialog()).toBeNull();
     expect(document.body.textContent).not.toContain(HASH_LAMA);
     expect(document.body.textContent).not.toContain("pp20-terlambat");
-    expect(note()).toContain("ruleset pp20-dasbor");
-    expect(note()).toContain("15 Januari 2026");
-    expect(note()).not.toContain("pp20-bulan-november");
-    expect(note()).not.toContain("2 April 2026");
+    expect(pageNote()).toContain("ruleset pp20-dasbor");
+    expect(pageNote()).toContain("15 Januari 2026");
+    expect(pageNote()).not.toContain("pp20-bulan-november");
+    expect(pageNote()).not.toContain("2 April 2026");
   });
+
+  it.each([
+    [
+      "scheme_ineligible",
+      "Tidak memenuhi syarat",
+      "Fasilitas PPh Final 0,5% tidak berlaku (peredaran bruto tahun lalu melebihi Rp 4,8 miliar).",
+    ],
+    [
+      "unverifiable",
+      "Belum dapat diperiksa",
+      "Data omzet tahun lalu belum lengkap, sehingga batas kelayakan belum dapat diperiksa.",
+    ],
+  ])(
+    "shows 'Tidak dihitung di sini' and the snapshot reason when %s",
+    async (status, labelStatus, annotation) => {
+      apiMock.mockResolvedValue(
+        cuplikan("2026-10", {
+          scheme_eligibility_status: status,
+          tax_0_5_pct_idr: 0,
+          sisa_bayar_idr: 0,
+          annotation,
+        }),
+      );
+      const { wrapper } = await renderDasbor(bulanTahun2026(), { lampirkan: true });
+      await bukaJejak(wrapper, "2026-10");
+
+      expect(bidang("scheme_eligibility_status")).toBe(labelStatus);
+      expect(bidang("tax_0_5_pct_idr")).toBe("Tidak dihitung di sini");
+      expect(bidang("sisa_bayar_idr")).toBe("Tidak dihitung di sini");
+      expect(bidang("annotation")).toBe(annotation);
+    },
+  );
 
   it("is keyboard-reachable, moves focus into the sheet, and returns focus on close", async () => {
     apiMock.mockResolvedValue(cuplikan("2026-10"));
