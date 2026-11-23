@@ -87,6 +87,7 @@ services:
       MIDTRANS_IS_PRODUCTION: ${MIDTRANS_IS_PRODUCTION:-false}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-}
+      RULESET_PATH: ${RULESET_PATH:-}
     volumes:
       - ./backend:/app/backend
     depends_on:

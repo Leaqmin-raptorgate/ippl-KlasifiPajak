@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import threading
+from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
@@ -16,6 +17,7 @@ from sqlalchemy import select, text
 
 from app.db import SessionLocal
 from app.models import ClassificationEvent, MonthSnapshot, Profile, QuotaCounter, Transaction
+from app.services.snapshots_store import freeze_today_jakarta
 
 API = "/api/v1"
 PASSWORD = "PasswordMinimal10"
@@ -329,17 +331,18 @@ def test_ai_worker_honors_ruleset_path_and_bundled_default(client, monkeypatch, 
         assert category == "pekerjaan_bebas"
         return user_id
 
-    monkeypatch.setenv("RULESET_PATH", str(destination))
-    configured_user = run("ai-ruleset@example.test", "airuleset", "AI-RULESET")
-    event_id, snapshot_id = _ruleset_ids_after_ai(configured_user)
-    assert event_id == configured_id
-    assert snapshot_id == configured_id
+    with freeze_today_jakarta(date(2026, 11, 2)):
+        monkeypatch.setenv("RULESET_PATH", str(destination))
+        configured_user = run("ai-ruleset@example.test", "airuleset", "AI-RULESET")
+        event_id, snapshot_id = _ruleset_ids_after_ai(configured_user)
+        assert event_id == configured_id
+        assert snapshot_id == configured_id
 
-    monkeypatch.delenv("RULESET_PATH", raising=False)
-    default_user = run("ai-ruleset-default@example.test", "airulesetdef", "AI-RULESET-DEF")
-    event_id, snapshot_id = _ruleset_ids_after_ai(default_user)
-    assert event_id == bundled_id
-    assert snapshot_id == bundled_id
+        monkeypatch.delenv("RULESET_PATH", raising=False)
+        default_user = run("ai-ruleset-default@example.test", "airulesetdef", "AI-RULESET-DEF")
+        event_id, snapshot_id = _ruleset_ids_after_ai(default_user)
+        assert event_id == bundled_id
+        assert snapshot_id == bundled_id
 
 
 @pytest.mark.parametrize(
