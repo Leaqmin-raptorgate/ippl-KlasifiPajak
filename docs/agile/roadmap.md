@@ -66,7 +66,7 @@ API confirmation and live keys.
 
 ## Why payments is sequenced carefully
 
-Payments is a lecturer requirement (D-08), so it is in scope. API v1.3.3 §5.30
+Payments is part of the owner-approved full v1 rubric target (D-08), so it is in scope. API v1.3.3 §5.30
 defines the webhook contract, rewritten for real Midtrans. Status API
 confirmation is still open.
 D-10 allows building against placeholders first; live sandbox keys come before
