@@ -39,6 +39,12 @@ Contract: API v1.3.3.
   `PAYLOAD_TOO_LARGE`, `INVALID_ORDER_AMOUNT`, `PAYMENT_GATEWAY_UNAVAILABLE` and
   `VALIDATION_ERROR` are documented, and OD-13 records the open Pasal 58(1)(a)
   question.
+- D-17 records the owner's 2026-11-23 disposition of #33 for the Friday 27
+  November 2026 freeze: there is no lecturer confirmation and none is expected,
+  the classifier and the assistant both stay in scope, and the assistant is not
+  cut because a lecturer did not reply. Rubric features are not added or removed
+  because of this issue, and this is not a claim that a lecturer approved the
+  rubric.
 
 ## [0.5.0] - 2026-11-07
 

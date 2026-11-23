@@ -68,5 +68,5 @@ requirements to close an OD-*.
 - D-14: Withholding status is `nihil` when equal, `kurang_potong` below, and `belum_diperhitungkan` above tax.
 - D-15: Developer confirmed on 8 November 2026: demo freeze is Friday 27 November 2026, 18:00 Asia/Makassar.
 - D-16: Record and acknowledge refund and chargeback notifications without changing entitlement.
-- D-17: Both classifier and assistant are in scope pending lecturer confirmation; cut the assistant first if necessary.
+- D-17: The owner decided on 2026-11-23: there is no lecturer, so there is no lecturer confirmation and none is expected. The classifier and the assistant both stay in scope. Do not cut the assistant because a lecturer did not reply, and do not add or remove rubric features because of this issue. This is the disposition of #33 against the Friday 27 November 2026 freeze. It is not a claim that a lecturer approved the rubric.
 - D-18: Developer confirmed on 8 November 2026: omitted `source_channel` defaults to `other`. Supplied values must be `marketplace`, `corporate_client`, `retail`, or `other`.
