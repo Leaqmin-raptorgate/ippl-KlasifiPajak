@@ -1,11 +1,12 @@
 <script setup lang="ts">
-/** Workspace overview. Every figure is a field from the dashboard or recap. */
-import { computed, onMounted, ref } from "vue";
+/** Workspace overview. Every figure is a field from the dashboard, a month snapshot, or the recap. */
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppCard from "@/components/ui/AppCard.vue";
 import AppMeter from "@/components/ui/AppMeter.vue";
 import AppPill from "@/components/ui/AppPill.vue";
+import AppSheet from "@/components/ui/AppSheet.vue";
 import StatCard from "@/components/app/StatCard.vue";
 import TransactionLedger from "@/components/app/TransactionLedger.vue";
 import PanduanPanel from "@/components/app/PanduanPanel.vue";
@@ -13,7 +14,7 @@ import WorkpaperNote from "@/components/app/WorkpaperNote.vue";
 import { ApiFailure } from "@/lib/api";
 import { CAPABILITIES } from "@/lib/capabilities";
 import { KATEGORI_LABEL } from "@/lib/domain";
-import { bulanTahun, persen, rupiah, rupiahPlain, rupiahShort } from "@/lib/format";
+import { bulanTahun, persen, rupiah, rupiahPlain, rupiahShort, tanggalPanjang } from "@/lib/format";
 import { usePajakStore } from "@/stores/pajak";
 import { usePanduanStore } from "@/stores/panduan";
 import { useSessionStore } from "@/stores/session";
@@ -215,6 +216,95 @@ async function unduh() {
     }
   }
 }
+
+function labelStatusCuplikan(status: string): string {
+  if (status === "berlaku") return "Berlaku";
+  if (status === "usang") return "Usang";
+  return status;
+}
+
+/** The open sheet's snapshot, ignored when it is no longer the selected month. */
+const jejakCuplikan = computed(() => {
+  const cuplikan = pajak.jejakCuplikan;
+  if (!pajak.jejakBulan || !cuplikan || cuplikan.month !== pajak.jejakBulan) return null;
+  return cuplikan;
+});
+
+const jejakGalat = computed(() =>
+  !pajak.jejakMemuat && pajak.jejakKode && pajak.jejakKode !== "SNAPSHOT_NOT_FOUND"
+    ? pajak.jejakPesan
+    : "",
+);
+
+const jejakBaris = computed(() => {
+  const cuplikan = jejakCuplikan.value;
+  if (!cuplikan) return [];
+  const baris: { field: string; label: string; value: string }[] = [
+    { field: "month", label: "Bulan", value: bulanTahun(`${cuplikan.month}-01`) },
+    { field: "usaha_omzet_idr", label: "Omzet usaha", value: rupiah(cuplikan.usaha_omzet_idr) },
+    { field: "porsi_bebas_idr", label: "Porsi bebas", value: rupiah(cuplikan.porsi_bebas_idr) },
+    { field: "porsi_kena_idr", label: "Porsi kena", value: rupiah(cuplikan.porsi_kena_idr) },
+    { field: "tax_0_5_pct_idr", label: "Pajak 0,5%", value: rupiah(cuplikan.tax_0_5_pct_idr) },
+    {
+      field: "withheld_tax_idr",
+      label: "Pajak dipotong",
+      value: rupiah(cuplikan.withheld_tax_idr),
+    },
+    { field: "sisa_bayar_idr", label: "Kurang bayar", value: rupiah(cuplikan.sisa_bayar_idr) },
+    {
+      field: "overwithheld_excess_idr",
+      label: "Lebih potong",
+      value: rupiah(cuplikan.overwithheld_excess_idr),
+    },
+    {
+      field: "overwithheld_status",
+      label: "Status lebih potong",
+      value: OVER_LABEL[cuplikan.overwithheld_status] ?? cuplikan.overwithheld_status,
+    },
+    {
+      field: "pekerjaan_bebas_omzet_idr",
+      label: "Omzet pekerjaan bebas",
+      value: rupiah(cuplikan.pekerjaan_bebas_omzet_idr),
+    },
+    {
+      field: "already_final_omzet_idr",
+      label: "Omzet final tersendiri",
+      value: rupiah(cuplikan.already_final_omzet_idr),
+    },
+    {
+      field: "non_object_omzet_idr",
+      label: "Omzet bukan objek",
+      value: rupiah(cuplikan.non_object_omzet_idr),
+    },
+    { field: "input_hash", label: "Hash masukan", value: cuplikan.input_hash },
+    { field: "ruleset_id", label: "Ruleset", value: cuplikan.ruleset_id },
+    {
+      field: "effective_date",
+      label: "Berlaku",
+      value: tanggalPanjang(cuplikan.effective_date),
+    },
+    { field: "version", label: "Versi", value: String(cuplikan.version) },
+    { field: "status", label: "Status", value: labelStatusCuplikan(cuplikan.status) },
+  ];
+  if (cuplikan.rounding_rule) {
+    baris.push({ field: "rounding_rule", label: "Pembulatan", value: cuplikan.rounding_rule });
+  }
+  if (cuplikan.scheme_eligibility_status) {
+    baris.push({
+      field: "scheme_eligibility_status",
+      label: "Kelayakan skema",
+      value: STATUS_LABEL[cuplikan.scheme_eligibility_status] ?? cuplikan.scheme_eligibility_status,
+    });
+  }
+  if (cuplikan.annotation) {
+    baris.push({ field: "annotation", label: "Catatan", value: cuplikan.annotation });
+  }
+  return baris;
+});
+
+onBeforeUnmount(() => {
+  pajak.tutupJejakBulan();
+});
 </script>
 
 <template>
@@ -404,12 +494,13 @@ async function unduh() {
               <th scope="col" class="num">Pajak</th>
               <th scope="col" class="num">Kurang bayar</th>
               <th scope="col">Status</th>
+              <th scope="col">Jejak</th>
             </tr>
           </thead>
           <tbody>
             <template v-for="baris in daftarBulan" :key="baris.key">
               <tr v-if="baris.kind === 'ringkas'" class="ringkas">
-                <td colspan="5">
+                <td colspan="6">
                   {{ baris.awal }} - {{ baris.akhir }} {{ baris.tahun }}: tidak ada omzet yang
                   terhitung
                 </td>
@@ -442,6 +533,16 @@ async function unduh() {
                     />
                   </td>
                 </template>
+                <td data-label="Jejak">
+                  <AppButton
+                    variant="ghost"
+                    size="sm"
+                    :data-month="baris.bulan.month"
+                    @click="pajak.bukaJejakBulan(baris.bulan.month)"
+                  >
+                    Lihat jejak
+                  </AppButton>
+                </td>
               </tr>
             </template>
           </tbody>
@@ -493,6 +594,36 @@ async function unduh() {
       />
       <WorkpaperNote class="stamp" />
     </section>
+
+    <AppSheet
+      :open="pajak.jejakBulan !== null"
+      title="Jejak cuplikan"
+      :subtitle="pajak.jejakBulan ? bulanTahun(pajak.jejakBulan + '-01') : ''"
+      wide
+      :error="jejakGalat"
+      @close="pajak.tutupJejakBulan()"
+    >
+      <p v-if="pajak.jejakMemuat" class="jejak-muat">Memuat jejak bulan.</p>
+      <div v-else-if="pajak.jejakKode === 'SNAPSHOT_NOT_FOUND'" class="jejak-kosong">
+        <p class="jejak-kosong-judul">Belum ada cuplikan</p>
+        <p>{{ pajak.jejakPesan }}</p>
+      </div>
+      <dl v-else-if="jejakBaris.length" class="jejak">
+        <div v-for="bidang in jejakBaris" :key="bidang.field" class="jejak-row">
+          <dt>{{ bidang.label }}</dt>
+          <dd :class="{ hash: bidang.field === 'input_hash' }" :data-field="bidang.field">
+            {{ bidang.value }}
+          </dd>
+        </div>
+      </dl>
+      <p
+        v-if="!pajak.jejakMemuat && jejakCuplikan?.disclaimer"
+        class="jejak-disclaimer"
+        data-field="disclaimer"
+      >
+        {{ jejakCuplikan.disclaimer }}
+      </p>
+    </AppSheet>
   </div>
 </template>
 
@@ -878,5 +1009,64 @@ async function unduh() {
 
 .stamp {
   margin-top: var(--s-3);
+}
+
+.jejak {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  min-width: 0;
+}
+
+.jejak-row {
+  display: grid;
+  grid-template-columns: minmax(0, 9.5rem) minmax(0, 1fr);
+  gap: var(--s-1) var(--s-3);
+  min-width: 0;
+}
+
+.jejak-row dt {
+  font: var(--t-caption);
+  letter-spacing: var(--track-caption);
+  color: var(--ink-3);
+}
+
+.jejak-row dd {
+  min-width: 0;
+  color: var(--ink);
+  font: var(--t-body-sm);
+}
+
+.jejak-row dd.hash {
+  font-family: var(--font-numeric);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.jejak-muat,
+.jejak-kosong,
+.jejak-disclaimer {
+  font: var(--t-body-sm);
+  color: var(--ink-2);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.jejak-kosong-judul {
+  font: var(--t-body);
+  color: var(--ink);
+  font-weight: 600;
+  margin-bottom: var(--s-1);
+}
+
+.jejak-disclaimer {
+  margin-top: var(--s-3);
+}
+
+@media (max-width: 639px) {
+  .jejak-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 </style>

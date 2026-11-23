@@ -2,8 +2,10 @@
 /**
  * The workpaper stamp.
  *
- * A signed-in amount uses the dashboard metadata. The public prop is only the
- * academic ruleset identity, and it is not a calculated figure.
+ * A signed-in amount uses the dashboard metadata. While a month trace is open
+ * and its snapshot is that month, the stamp uses the snapshot instead.
+ * The public prop is only the academic ruleset identity, and it is not a
+ * calculated figure.
  */
 import { computed } from "vue";
 import { PUBLIC_RULESET } from "@/lib/domain";
@@ -16,8 +18,21 @@ import { usePajakStore } from "@/stores/pajak";
 defineProps<{ publik?: boolean }>();
 const pajak = usePajakStore();
 
-const id = computed(() => pajak.dashboard?.metadata.ruleset_id || PUBLIC_RULESET.id);
-const berlaku = computed(() => pajak.dashboard?.metadata.effective_date || PUBLIC_RULESET.berlaku);
+const jejak = computed(() => {
+  const cuplikan = pajak.jejakCuplikan;
+  if (!pajak.jejakBulan || !cuplikan || cuplikan.month !== pajak.jejakBulan) return null;
+  return cuplikan;
+});
+
+const id = computed(
+  () => jejak.value?.ruleset_id || pajak.dashboard?.metadata.ruleset_id || PUBLIC_RULESET.id,
+);
+const berlaku = computed(
+  () =>
+    jejak.value?.effective_date ||
+    pajak.dashboard?.metadata.effective_date ||
+    PUBLIC_RULESET.berlaku,
+);
 </script>
 
 <template>
