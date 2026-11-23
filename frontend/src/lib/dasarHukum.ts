@@ -51,7 +51,7 @@ export function dasarHukumUntuk(
   if (perluKlarifikasi || category === undefined) {
     return {
       judul: "Penentuan Kategori Transaksi",
-      teks: "Sebelum perlakuan pajak dapat dihitung, transaksi harus dipastikan apakah berasal dari peredaran usaha, pekerjaan bebas, objek final tersendiri, atau bukan objek pajak.",
+      teks: "Sebelum perlakuan pajak dapat dihitung, transaksi harus dipastikan apakah berasal dari peredaran usaha, pekerjaan bebas, objek final tersendiri, atau bukan omzet usaha.",
       rujukan: "PP 20/2026 jo. PP 55/2022 Pasal 56",
     };
   }

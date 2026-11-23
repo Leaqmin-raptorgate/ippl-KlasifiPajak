@@ -524,3 +524,80 @@ def test_every_guidance_condition_can_be_produced():
         "cap_warning",
     }
     assert conditions <= producible
+
+
+@pytest.mark.parametrize(
+    ("description", "category", "rule_id"),
+    [
+        ("Bunga deposito dipotong PPh final", "non_object", "non_object.deposit"),
+        ("Bunga bank sudah final", "non_object", "non_object.bank"),
+        ("Bunga tabungan bertanda final", "non_object", "non_object.savings"),
+        ("Dividen pemotongan final", "non_object", "non_object.dividend"),
+        ("Hadiah undian dipotong final", "non_object", "non_object.prize"),
+        ("Sewa tanah dipotong PPh final", "already_final", "already_final.rent"),
+        ("Sewa bangunan sudah final", "already_final", "already_final.rent_building"),
+        ("Sewa kamar kos bertanda final", "already_final", "already_final.kos"),
+    ],
+)
+def test_passive_and_rent_sources_outrank_generic_final_withholding_markers(
+    description, category, rule_id
+):
+    """Generic withholding wording does not override passive-income or rent source rules."""
+    got_category, got_rule, _, needs_clarification, _ = classify(description)
+    assert needs_clarification is False
+    assert (got_category, got_rule) == (category, rule_id)
+
+
+@pytest.mark.parametrize(
+    "description",
+    [
+        "Bunga deposito dan penjualan kaos, dipotong PPh final",
+        "Dividen dan jasa penerjemahan, PPh final",
+        "Hadiah undian dan sewa tanah, dipotong PPh final",
+        "Sewa tanah dan penjualan kaos, PPh final",
+        "Sewa tanah dan gaji, dipotong PPh final",
+    ],
+)
+def test_passive_or_rent_with_withholding_and_other_source_still_clarifies(description):
+    """Generic withholding wording cannot silence a conflict between two income sources."""
+    category, _, _, needs_clarification, _ = classify(description)
+    assert needs_clarification is True
+    assert category == "usaha"
+
+
+def test_withholding_worded_dividend_with_4_75b_usaha_stays_under_cap(ruleset):
+    """Worked cap check: Rp 100M dividend with PPh final wording stays non_object and under cap."""
+    category, rule_id, _, needs_clarification, _ = classify(
+        "Dividen pemegang saham dipotong PPh final"
+    )
+    assert needs_clarification is False
+    assert (category, rule_id) == ("non_object", "non_object.dividend")
+    profile = TaxProfile(is_new_taxpayer_current_year=True)
+    snapshot = compute(
+        [
+            Transaction(id="usaha", amount=4_750_000_000, date="2026-06-01", category="usaha"),
+            Transaction(id="dividen", amount=100_000_000, date="2026-06-02", category=category),
+        ],
+        profile,
+        ruleset,
+        "2026-11-01",
+    )
+    counted = (
+        snapshot.ytd_usaha_omzet + snapshot.pekerjaan_bebas_total + snapshot.already_final_total
+    )
+    assert counted == 4_750_000_000
+    assert snapshot.non_object_total == 100_000_000
+    assert snapshot.current_year_crossed_cap is False
+
+
+def test_separate_final_income_guidance_explains_existing_rows_and_dividend_rules(client):
+    _auth(client)
+    assert _profile(client).status_code == 200
+    items = client.get("/api/v1/guidance").json()["items"]
+    item = next(entry for entry in items if entry["id"] == "separate_final_income")
+    assert "aturan PPh masing-masing" in item["text"]
+    assert "Klasifikasi ulang" in item["text"]
+    assert (
+        "dividen yang diterima sebagai pemegang saham, dan hadiah undian dikenai PPh final"
+        not in item["text"]
+    )

@@ -134,7 +134,7 @@ const tanya = [
           </h1>
           <p class="lede">
             KlasifiPajak memisahkan omzet usaha, pekerjaan bebas, penghasilan yang sudah berstatus
-            final, dan yang bukan objek pajak. Baris yang ambigu ditanyakan, bukan ditebak. Yang
+            final, dan yang bukan omzet usaha. Baris yang ambigu ditanyakan, bukan ditebak. Yang
             keluar adalah kertas kerja yang bisa Anda telusuri sampai ke sumber tiap klasifikasi.
           </p>
           <div class="cta">

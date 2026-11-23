@@ -162,18 +162,35 @@ RULES: tuple[Rule, ...] = (
 _AFFIX_PREFIX = r"(?:me(?:n|m|ng|ny)?|di|ter|pe(?:n|m|ng|ny)?|ber)?"
 _AFFIX_SUFFIX = r"(?:an|nya)?"
 
-#: Rules whose phrase states the answer itself, so a nearby ordinary phrase
-#: cannot contradict them.
-_EXPLICIT = frozenset(
+_FINAL_MARKERS = frozenset(
     {
         "already_final.marker_pph",
         "already_final.marker_tagged",
         "already_final.marker_done",
         "already_final.marker_withheld",
         "already_final.marker_cut",
-        "non_object.not_business",
     }
 )
+
+_SPECIFIC_SOURCE_RULES = frozenset(
+    {
+        "non_object.deposit",
+        "non_object.bank",
+        "non_object.savings",
+        "non_object.dividend",
+        "non_object.prize",
+        "already_final.rent",
+        "already_final.rent_land",
+        "already_final.rent_building",
+        "already_final.rent_house",
+        "already_final.rent_shophouse",
+        "already_final.kos",
+    }
+)
+
+#: Rules whose phrase states the answer itself, so a nearby ordinary phrase
+#: cannot contradict them.
+_EXPLICIT = _FINAL_MARKERS | frozenset({"non_object.not_business"})
 
 
 def _pattern(phrase: str) -> re.Pattern[str]:
@@ -199,6 +216,12 @@ def classify(text: str, threshold: float = 0.8) -> tuple[str, str, float, bool, 
         return _CLARIFY
     decisive = [rule for rule in matches if rule.decisive]
     if decisive:
+        # Generic withholding wording (e.g. "dipotong PPh final") confirms final
+        # tax on an otherwise unclassified source; when a specific passive-income
+        # or rent source also matches, that source governs both category and
+        # conflict checks.
+        if any(rule.id in _SPECIFIC_SOURCE_RULES for rule in decisive):
+            decisive = [rule for rule in decisive if rule.id not in _FINAL_MARKERS]
         chosen = decisive[0]
         if chosen.id not in _EXPLICIT:
             if len({rule.category for rule in decisive}) > 1:
