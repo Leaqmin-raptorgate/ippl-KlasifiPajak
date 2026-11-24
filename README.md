@@ -45,6 +45,7 @@ npm ci   # ALWAYS npm ci, never npm install (lockfile-locked)
 | `JWT_SECRET`           | Session signing secret (≥ 32 bytes in production).                                                                             |
 | `TRUSTED_PROXY_IPS`    | Comma-separated peer IPs/CIDRs allowed to supply `X-Forwarded-For`. Empty = trust none.                                        |
 | `TRUSTED_PROXY_COUNT`  | How many rightmost XFF hops to peel when the peer is trusted (default `0`).                                                    |
+| `RULESET_PATH`         | Optional ruleset JSON override. In Docker Compose, set a container-visible path (e.g. under `/app/backend`).                   |
 | `AI_*`                 | OpenAI-compatible client settings for receipt OCR, fallback classification, and assistant Q&A. Empty = fail closed to rules.   |
 | `MIDTRANS_*`           | Midtrans Snap server, signature, and client keys plus production flag for subscription checkout and notification verification. |
 

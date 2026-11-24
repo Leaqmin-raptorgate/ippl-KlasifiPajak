@@ -290,7 +290,12 @@ def _finish(transaction_id: str, user_id: str, version: int, result: Any) -> Non
 
 
 def _store(db: Session, transaction_id: str, user_id: str, version: int, result: Any) -> bool:
-    """Apply the category under the profile lock, then rebuild snapshots (FR-13)."""
+    """Apply the category under the profile lock, then rebuild snapshots (FR-13).
+
+    The ruleset is ``RULESET_PATH`` when set, otherwise the bundled file. Settings
+    are read here so a process-global captured at import cannot hide the variable.
+    """
+    from app.config.settings import Settings
     from app.services import transactions as tx
     from app.services.snapshot import active_ruleset
     from app.services.snapshots_store import lock_profile, today_jakarta
@@ -298,7 +303,7 @@ def _store(db: Session, transaction_id: str, user_id: str, version: int, result:
     user = db.get(User, user_id)
     if user is None or user.ai_consent_at is None:
         return False
-    ruleset = active_ruleset()
+    ruleset = active_ruleset(Settings().ruleset_path)
     profile = db.scalar(
         select(Profile).where(
             Profile.user_id == user_id,
