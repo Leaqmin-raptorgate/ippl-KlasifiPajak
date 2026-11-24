@@ -45,6 +45,9 @@ const dipotong = ref("");
 const kanal = ref<SourceChannel>("other");
 const sudahCobaSimpan = ref(false);
 const galatSimpan = ref("");
+/** Free-account upload block. The template links "Kuota" only for this exact text. */
+const PESAN_UNGGAH_BERBAYAR =
+  "Unggah struk hanya untuk akun berbayar aktif. Isi transaksi secara manual, atau lihat paket di halaman Kuota.";
 /** Server 422 field map. */
 const galatServer = reactive<Record<string, string>>({});
 const sibuk = ref(false);
@@ -158,10 +161,6 @@ function hariIni(): string {
 onMounted(async () => {
   await profil.muat();
   await kuota.muat();
-  if (profil.belumAda) {
-    galatSimpan.value =
-      "Status NIB untuk tahun pajak berjalan harus diisi sebelum mencatat transaksi pertama.";
-  }
 });
 
 function pilihBukti() {
@@ -190,8 +189,7 @@ async function unggah() {
     return;
   }
   if (!kuota.berbayar) {
-    galatSimpan.value =
-      "Unggah struk hanya untuk akun berbayar aktif. Isi transaksi secara manual, atau lihat paket di halaman Kuota.";
+    galatSimpan.value = PESAN_UNGGAH_BERBAYAR;
     return;
   }
   if (!session.persetujuanAi) {
@@ -208,7 +206,12 @@ async function unggah() {
     if (calon.invoice_no) faktur.value = calon.invoice_no;
   } catch (error) {
     imageId.value = "";
-    galatSimpan.value = error instanceof ApiFailure ? error.message : "Unggah gagal.";
+    if (error instanceof ApiFailure && error.code === "PAID_SUBSCRIPTION_REQUIRED") {
+      galatSimpan.value = PESAN_UNGGAH_BERBAYAR;
+      void kuota.muat(true);
+    } else {
+      galatSimpan.value = error instanceof ApiFailure ? error.message : "Unggah gagal.";
+    }
   }
 }
 
@@ -453,6 +456,10 @@ async function simpan() {
               </AppButton>
             </div>
           </div>
+          <p v-if="galatSimpan === PESAN_UNGGAH_BERBAYAR" class="kunci" role="alert">
+            Unggah struk hanya untuk akun berbayar aktif. Isi transaksi secara manual, atau lihat
+            paket di halaman <RouterLink to="/kuota?alasan=ocr_berbayar">Kuota</RouterLink>.
+          </p>
           <p v-else-if="galatSimpan" class="kunci" role="alert">{{ galatSimpan }}</p>
           <div class="aksi">
             <AppButton variant="ghost" size="lg" @click="batal">Batal</AppButton>

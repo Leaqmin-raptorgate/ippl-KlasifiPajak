@@ -9,19 +9,19 @@ Spec of record: **SRS v2.7**, **API v1.3.3** (mirrored under `docs/api/`),
 
 ## Approved decisions (D-01…D-11)
 
-| ID   | Topic                                                                                                             | Status                                                                                         |
-| ---- | ----------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| D-01 | Receipt photo storage: local disk under `RECEIPT_STORAGE_ROOT`, authenticated GET, EXIF strip                     | **approved** 2026-10-28 — **landed** (local disk, authenticated GET, EXIF strip, FR-06 upload) |
-| D-02 | Cross-doc naming / consistency (quota columns, profile maps, MySQL 8, `auth_rate_limits`)                         | **approved** 2026-10-28 — applied in docs                                                      |
-| D-03 | PP 20/2026 wording corrections (`already_final` toward cap, golden labels)                                        | **approved** 2026-10-28 — applied in docs                                                      |
-| D-04 | Google OIDC: design in docs, **defer build** in v1                                                                | **approved** 2026-10-28                                                                        |
-| D-05 | Security fixes (test-support fail-closed, argon2id, webhook order, prompt envelope, rate limits, …)               | **approved** 2026-10-28 — largely landed in PR #3                                              |
-| D-06 | Receipt extras from Aerial-Analytics: S1+S4 **Must**, S5 Should, S2 Could                                         | **approved** 2026-11-02 (gated on OCR staying in v1)                                           |
-| D-07 | B-08 hardening plan r2                                                                                            | **approved** 2026-11-02                                                                        |
-| D-08 | Full v1 per lecturer rubric (OCR, Midtrans, AI, recap PDF — **no feature cut**)                                   | **approved** 2026-11-02                                                                        |
-| D-09 | AI via 9router (`AI_BASE_URL` / `AI_API_KEY` / model ids); fail-closed when unset                                 | **approved** 2026-11-02 — **landed** (PR #17)                                                  |
-| D-10 | Midtrans keys deferred to placeholders; live keys before demo freeze                                              | **approved** 2026-11-02 — **adapter landed** (PR #16)                                          |
-| D-11 | Snapshot `version` UK; OCR via 9router+Gemini Vision; PDF=`fpdf2`; Midtrans `redirect_url`; FE CI gate; M50 lanes | **approved** 2026-11-02 — versioning, FE CI, OCR, PDF, and Snap **landed**                     |
+| ID   | Topic                                                                                                               | Status                                                                                         |
+| ---- | ------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| D-01 | Receipt photo storage: local disk under `RECEIPT_STORAGE_ROOT`, authenticated GET, EXIF strip                       | **approved** 2026-10-28 — **landed** (local disk, authenticated GET, EXIF strip, FR-06 upload) |
+| D-02 | Cross-doc naming / consistency (quota columns, profile maps, MySQL 8, `auth_rate_limits`)                           | **approved** 2026-10-28 — applied in docs                                                      |
+| D-03 | PP 20/2026 wording corrections (`already_final` toward cap, golden labels)                                          | **approved** 2026-10-28 — applied in docs                                                      |
+| D-04 | Google OIDC: design in docs, **defer build** in v1                                                                  | **approved** 2026-10-28                                                                        |
+| D-05 | Security fixes (test-support fail-closed, argon2id, webhook order, prompt envelope, rate limits, …)                 | **approved** 2026-10-28 — largely landed in PR #3                                              |
+| D-06 | Receipt extras from Aerial-Analytics: S1+S4 **Must**, S5 Should, S2 Could                                           | **approved** 2026-11-02 (gated on OCR staying in v1)                                           |
+| D-07 | B-08 hardening plan r2                                                                                              | **approved** 2026-11-02                                                                        |
+| D-08 | Full v1 target against the course rubric, approved by the owner (OCR, Midtrans, AI, recap PDF — **no feature cut**) | **approved** 2026-11-02                                                                        |
+| D-09 | AI via 9router (`AI_BASE_URL` / `AI_API_KEY` / model ids); fail-closed when unset                                   | **approved** 2026-11-02 — **landed** (PR #17)                                                  |
+| D-10 | Midtrans keys deferred to placeholders; live keys before demo freeze                                                | **approved** 2026-11-02 — **adapter landed** (PR #16)                                          |
+| D-11 | Snapshot `version` UK; OCR via 9router+Gemini Vision; PDF=`fpdf2`; Midtrans `redirect_url`; FE CI gate; M50 lanes   | **approved** 2026-11-02 — versioning, FE CI, OCR, PDF, and Snap **landed**                     |
 
 ### D-07 disclaimer (exact string)
 
@@ -62,11 +62,11 @@ requirements to close an OD-*.
 
 ## Decisions for the proposed SRS v2.8 changes
 
-- D-12: Use the developer-supplied 9router endpoint, with `AI_BASE_URL=https://9router.putrahomelab.com/v1`; model selection and live compatibility await evaluation.
+- D-12: Use the developer-supplied 9router endpoint, with `AI_BASE_URL=https://9router.putrahomelab.com/v1`. The model ids stay in `AI_MODEL_CLASSIFIER`, `AI_MODEL_OCR`, and `AI_MODEL_ASSISTANT`; those variables are the configuration, and the software accepts whatever ids they hold. On `main` at `bf65f27c7f25794812bf9babf0d86d1f2257fa14`, classifier fallback, receipt OCR, and the assistant each passed through that gateway with `xai/grok-4.7` ([issue #29 re-verification](https://github.com/Leaqmin-raptorgate/ippl-KlasifiPajak/issues/29#issuecomment-7056219036)). SMTP password-reset case 8 on that issue was not run.
 - Data leaves the application for the configured AI host (`AI_BASE_URL`).
 - D-13: A failed recalculation rolls back the entire transaction and retains previous figures.
 - D-14: Withholding status is `nihil` when equal, `kurang_potong` below, and `belum_diperhitungkan` above tax.
 - D-15: Developer confirmed on 8 November 2026: demo freeze is Friday 27 November 2026, 18:00 Asia/Makassar.
 - D-16: Record and acknowledge refund and chargeback notifications without changing entitlement.
-- D-17: Both classifier and assistant are in scope pending lecturer confirmation; cut the assistant first if necessary.
+- D-17: The owner decided on 2026-11-23: there is no lecturer, so there is no lecturer confirmation and none is expected. Individual UMKM owners who also freelance (`orang_pribadi`) remain the adopted v1 audience, and both the classifier and the assistant stay in scope. Do not cut the assistant because a lecturer did not reply, and do not add or remove rubric features because of this issue. This is the disposition of #33 against the Friday 27 November 2026 freeze. It is not a claim that a lecturer approved the rubric.
 - D-18: Developer confirmed on 8 November 2026: omitted `source_channel` defaults to `other`. Supplied values must be `marketplace`, `corporate_client`, `retail`, or `other`.
