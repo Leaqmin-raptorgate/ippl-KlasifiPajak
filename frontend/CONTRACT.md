@@ -85,8 +85,13 @@ Router names: `/` landing (bare), `/masuk` (bare), `/dasbor`, `/transaksi`,
   Pekerjaan bebas does not consume it. Do not imply otherwise anywhere.
 - The reference regulation is **PP 20/2026**. Older Stitch mocks said
   "PP 55/2022"; that is stale and must not appear.
-- A signed-in amount comes from `GET /tax/dashboard` or `GET /recap/{tax_year}`.
-  `PUBLIC_RULESET` is only the academic identity for pages with no session.
+- A signed-in amount comes from `GET /tax/dashboard`, `GET /recap/{tax_year}`,
+  or the active row from `GET /tax/snapshots/{tax_year}/{month}`. That month
+  response carries `month`, the money fields, `input_hash`, `ruleset_id`,
+  `effective_date`, `version`, `status`, `rounding_rule`,
+  `scheme_eligibility_status`, `annotation`, and `disclaimer`. `MonthSummary`
+  does not include version, status, or ruleset id. `PUBLIC_RULESET` is only
+  the academic identity for pages with no session.
 - Channel values are `marketplace`, `corporate_client`, `retail`, `other`.
 - All money is integer rupiah. Never a float, never a decimal point.
 - Do not present a figure as a filing or an obligation. There is no transaction

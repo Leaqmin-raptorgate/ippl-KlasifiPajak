@@ -16,6 +16,8 @@ Contract: API v1.3.3.
 
 ### Added
 
+- The dashboard can open the active snapshot for a stored month, with its
+  figures, full input hash, and ruleset stamp (FR-47).
 - `docker compose up frontend` runs the Vite dev server on `127.0.0.1:5173`
   and proxies `/api` to the `api` service. See
   [frontend/README.md](frontend/README.md#running-with-docker-compose).
@@ -30,6 +32,8 @@ Contract: API v1.3.3.
 
 - Verify Midtrans webhook notifications with `MIDTRANS_SIGNATURE_KEY`, falling
   back to `MIDTRANS_SERVER_KEY` when unset or empty.
+- The AI classification worker honors `RULESET_PATH` when it stores a result
+  and rebuilds the month. An unset variable still uses the bundled ruleset.
 
 ### Documentation
 

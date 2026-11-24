@@ -193,6 +193,7 @@ export interface Dashboard {
   monthly_summaries: MonthSummary[];
 }
 
+/** Dashboard row for one month. Not the snapshot: no version, status, or ruleset id. */
 export interface MonthSummary {
   month: string;
   scheme_eligibility_status: string;
@@ -209,6 +210,36 @@ export interface MonthSummary {
   non_object_omzet_idr: number;
   input_hash: string;
   annotation?: string;
+}
+
+/**
+ * Active month snapshot from `GET /tax/snapshots/{tax_year}/{month}` (FR-47).
+ * One berlaku row. This is not `MonthSummary` and it is not version history.
+ */
+export interface MonthSnapshot {
+  month: string;
+  version: number;
+  status: string;
+  ruleset_id: string;
+  effective_date: string;
+  rounding_rule: string;
+  scheme_eligibility_status: string;
+  next_year_ineligible: boolean;
+  prior_year_resolution_source: string;
+  input_hash: string;
+  usaha_omzet_idr: number;
+  porsi_bebas_idr: number;
+  porsi_kena_idr: number;
+  tax_0_5_pct_idr: number;
+  withheld_tax_idr: number;
+  sisa_bayar_idr: number;
+  overwithheld_excess_idr: number;
+  overwithheld_status: string;
+  pekerjaan_bebas_omzet_idr: number;
+  already_final_omzet_idr: number;
+  non_object_omzet_idr: number;
+  annotation: string;
+  disclaimer: string;
 }
 
 export interface Guidance {

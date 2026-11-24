@@ -2,8 +2,10 @@
 /**
  * The workpaper stamp.
  *
- * A signed-in amount uses the dashboard metadata. The public prop is only the
- * academic ruleset identity, and it is not a calculated figure.
+ * A signed-in amount uses the dashboard metadata unless explicit snapshot
+ * metadata is passed for a trace view.
+ * The public prop is only the academic ruleset identity, and it is not a
+ * calculated figure.
  */
 import { computed } from "vue";
 import { PUBLIC_RULESET } from "@/lib/domain";
@@ -13,11 +15,19 @@ import { usePajakStore } from "@/stores/pajak";
 // `publik` is kept so existing callers still compile. The ruleset identity is
 // public either way: the dashboard returns 404 until a profile exists, and that
 // must not read as "ruleset not loaded".
-defineProps<{ publik?: boolean }>();
+const props = defineProps<{
+  publik?: boolean;
+  rulesetId?: string;
+  effectiveDate?: string;
+}>();
 const pajak = usePajakStore();
 
-const id = computed(() => pajak.dashboard?.metadata.ruleset_id || PUBLIC_RULESET.id);
-const berlaku = computed(() => pajak.dashboard?.metadata.effective_date || PUBLIC_RULESET.berlaku);
+const id = computed(
+  () => props.rulesetId || pajak.dashboard?.metadata.ruleset_id || PUBLIC_RULESET.id,
+);
+const berlaku = computed(
+  () => props.effectiveDate || pajak.dashboard?.metadata.effective_date || PUBLIC_RULESET.berlaku,
+);
 </script>
 
 <template>
