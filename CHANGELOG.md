@@ -16,6 +16,8 @@ Contract: API v1.3.3.
 
 ### Added
 
+- The dashboard can open the active snapshot for a stored month, with its
+  figures, full input hash, and ruleset stamp (FR-47).
 - `docker compose up frontend` runs the Vite dev server on `127.0.0.1:5173`
   and proxies `/api` to the `api` service. See
   [frontend/README.md](frontend/README.md#running-with-docker-compose).
@@ -30,6 +32,8 @@ Contract: API v1.3.3.
 
 - Verify Midtrans webhook notifications with `MIDTRANS_SIGNATURE_KEY`, falling
   back to `MIDTRANS_SERVER_KEY` when unset or empty.
+- The AI classification worker honors `RULESET_PATH` when it stores a result
+  and rebuilds the month. An unset variable still uses the bundled ruleset.
 
 ### Documentation
 
@@ -39,6 +43,10 @@ Contract: API v1.3.3.
   `PAYLOAD_TOO_LARGE`, `INVALID_ORDER_AMOUNT`, `PAYMENT_GATEWAY_UNAVAILABLE` and
   `VALIDATION_ERROR` are documented, and OD-13 records the open Pasal 58(1)(a)
   question.
+- Record that classifier fallback, receipt OCR, and the assistant passed on
+  `bf65f27` with model id `xai/grok-4.7` (issue #29), and correct the
+  pre-freeze notes for Snap return URLs, the Midtrans Status API, and AI quota
+  reservation.
 - D-17 records the owner's 2026-11-23 disposition of #33 for the Friday 27
   November 2026 freeze: there is no lecturer confirmation and none is expected,
   individual UMKM owners who also freelance remain the adopted v1 audience, the
