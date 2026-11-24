@@ -265,12 +265,14 @@ const jejakBaris = computed(() => {
     {
       field: "overwithheld_excess_idr",
       label: "Lebih potong",
-      value: rupiah(cuplikan.overwithheld_excess_idr),
+      value: tidakDihitung ? "Tidak dihitung di sini" : rupiah(cuplikan.overwithheld_excess_idr),
     },
     {
       field: "overwithheld_status",
       label: "Status lebih potong",
-      value: OVER_LABEL[cuplikan.overwithheld_status] ?? cuplikan.overwithheld_status,
+      value: tidakDihitung
+        ? "Tidak dihitung di sini"
+        : (OVER_LABEL[cuplikan.overwithheld_status] ?? cuplikan.overwithheld_status),
     },
     {
       field: "pekerjaan_bebas_omzet_idr",

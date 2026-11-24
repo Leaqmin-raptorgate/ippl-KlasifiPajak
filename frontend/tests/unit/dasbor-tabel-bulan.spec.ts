@@ -492,7 +492,10 @@ describe("dasbor month trace (FR-47)", () => {
         cuplikan("2026-10", {
           scheme_eligibility_status: status,
           tax_0_5_pct_idr: 0,
+          withheld_tax_idr: 500_000,
           sisa_bayar_idr: 0,
+          overwithheld_excess_idr: 500_000,
+          overwithheld_status: "belum_diperhitungkan",
           annotation,
         }),
       );
@@ -501,7 +504,10 @@ describe("dasbor month trace (FR-47)", () => {
 
       expect(bidang("scheme_eligibility_status")).toBe(labelStatus);
       expect(bidang("tax_0_5_pct_idr")).toBe("Tidak dihitung di sini");
+      expect(bidang("withheld_tax_idr")).toBe("Rp 500.000");
       expect(bidang("sisa_bayar_idr")).toBe("Tidak dihitung di sini");
+      expect(bidang("overwithheld_excess_idr")).toBe("Tidak dihitung di sini");
+      expect(bidang("overwithheld_status")).toBe("Tidak dihitung di sini");
       expect(bidang("annotation")).toBe(annotation);
     },
   );
