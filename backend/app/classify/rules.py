@@ -75,10 +75,14 @@ RULES: tuple[Rule, ...] = (
     _d("non_object.parents", "non_object", "orang tua"),
     _d("non_object.crypto", "non_object", "kripto"),
     _d("non_object.btc", "non_object", "btc"),
-    _d("already_final.deposit", "already_final", "bunga deposito"),
-    _d("already_final.bank", "already_final", "bunga bank"),
-    _d("already_final.dividend", "already_final", "dividen"),
-    _d("already_final.prize", "already_final", "hadiah undian"),
+    # Outside the 0,5% base and the Rp 4,8 miliar test. A bare ``bunga`` or
+    # ``hadiah`` is not a phrase: lending interest and a non-lottery prize
+    # can still be business turnover.
+    _d("non_object.deposit", "non_object", "bunga deposito"),
+    _d("non_object.bank", "non_object", "bunga bank"),
+    _d("non_object.savings", "non_object", "bunga tabungan"),
+    _d("non_object.dividend", "non_object", "dividen"),
+    _d("non_object.prize", "non_object", "hadiah undian"),
     _d("non_object.salary", "non_object", "gaji"),
     _d("non_object.severance", "non_object", "pesangon"),
     _d("non_object.employer", "non_object", "pemberi kerja"),
@@ -158,18 +162,35 @@ RULES: tuple[Rule, ...] = (
 _AFFIX_PREFIX = r"(?:me(?:n|m|ng|ny)?|di|ter|pe(?:n|m|ng|ny)?|ber)?"
 _AFFIX_SUFFIX = r"(?:an|nya)?"
 
-#: Rules whose phrase states the answer itself, so a nearby ordinary phrase
-#: cannot contradict them.
-_EXPLICIT = frozenset(
+_FINAL_MARKERS = frozenset(
     {
         "already_final.marker_pph",
         "already_final.marker_tagged",
         "already_final.marker_done",
         "already_final.marker_withheld",
         "already_final.marker_cut",
-        "non_object.not_business",
     }
 )
+
+_SPECIFIC_SOURCE_RULES = frozenset(
+    {
+        "non_object.deposit",
+        "non_object.bank",
+        "non_object.savings",
+        "non_object.dividend",
+        "non_object.prize",
+        "already_final.rent",
+        "already_final.rent_land",
+        "already_final.rent_building",
+        "already_final.rent_house",
+        "already_final.rent_shophouse",
+        "already_final.kos",
+    }
+)
+
+#: Rules whose phrase states the answer itself, so a nearby ordinary phrase
+#: cannot contradict them.
+_EXPLICIT = _FINAL_MARKERS | frozenset({"non_object.not_business"})
 
 
 def _pattern(phrase: str) -> re.Pattern[str]:
@@ -195,6 +216,17 @@ def classify(text: str, threshold: float = 0.8) -> tuple[str, str, float, bool, 
         return _CLARIFY
     decisive = [rule for rule in matches if rule.decisive]
     if decisive:
+        # Generic withholding wording (e.g. "dipotong PPh final") confirms final
+        # tax on an otherwise unclassified source; when a specific passive-income
+        # or rent source also matches, that source governs both category and
+        # conflict checks.
+        if any(rule.id in _SPECIFIC_SOURCE_RULES for rule in decisive):
+            decisive = [rule for rule in decisive if rule.id not in _FINAL_MARKERS]
+            # A specific source conflict (e.g. land rent alongside "bukan usaha"
+            # or dividend + land rent) must still clarify instead of letting
+            # generic "bukan usaha" settle the row.
+            if len({rule.category for rule in decisive}) > 1:
+                return _CLARIFY
         chosen = decisive[0]
         if chosen.id not in _EXPLICIT:
             if len({rule.category for rule in decisive}) > 1:

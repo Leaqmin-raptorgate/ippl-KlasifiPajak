@@ -146,7 +146,7 @@ The annual recap has no page of its own in the frontend. The dashboard
 OCR receipt upload, the Midtrans adapter and webhook, the AI classifier and assistant, and the annual recap PDF are implemented. What is still open:
 
 - **Live Midtrans keys** — use sandbox keys only (D-10). The Status API confirmation of settlements is built and tested with a fake adapter; the live sandbox run is still to do.
-- **OD-13** — whether interest, dividends and lottery prizes count toward the Rp 4,8 miliar test is not signed off ([open decisions](docs/agile/open-decisions.md)).
+- **OD-13** (decided by the owner on 2026-11-23): ordinary bank-deposit or savings interest, personal investment dividends, and personal lottery winnings stay outside the Rp 4,8 miliar test and outside the 0,5% base. The source of the income is decisive. Pasal 58 ayat (1) huruf a counts turnover from business and independent professional services. DJP FAQ 31, pp. 32-33, is the cited basis for dividends received as a shareholder. Deposit interest and lottery prizes are the owner's application of that same source rule. This is an academic project decision, not a tax-adviser sign-off ([open decisions](docs/agile/open-decisions.md)).
 
 ## Available Scripts
 

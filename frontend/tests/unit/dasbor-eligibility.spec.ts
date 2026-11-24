@@ -123,6 +123,12 @@ describe("FR-19 dashboard eligibility", () => {
 });
 
 describe("dashboard figures (R18-W1, R18-W6)", () => {
+  it("labels non_object as outside business turnover, not as untaxed income", async () => {
+    const wrapper = await renderDashboard("scheme_eligible");
+    expect(wrapper.text()).toContain("Bukan omzet usaha.");
+    expect(wrapper.text()).not.toContain("Bukan objek");
+  });
+
   it("shows the real share of the Rp4,8 M cap, not the warning threshold", async () => {
     const wrapper = await renderDashboard("scheme_eligible", (dashboard) => {
       const now = dashboard.thresholds.monitoring_current_year_cap_4_8m;

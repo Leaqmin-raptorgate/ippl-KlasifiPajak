@@ -16,14 +16,14 @@ export const KATEGORI_LABEL: Record<Kategori, string> = {
   usaha: "Usaha",
   pekerjaan_bebas: "Pekerjaan bebas",
   already_final: "Final tersendiri",
-  non_object: "Bukan objek",
+  non_object: "Bukan omzet usaha.",
 };
 
 export const KATEGORI_RINGKAS: Record<Kategori, string> = {
   usaha: "Usaha",
   pekerjaan_bebas: "Pekerjaan bebas",
   already_final: "Final",
-  non_object: "Bukan objek",
+  non_object: "Bukan omzet usaha.",
 };
 
 export const SUMBER_LABEL: Record<Sumber, string> = {
