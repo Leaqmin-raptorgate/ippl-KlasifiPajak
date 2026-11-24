@@ -165,6 +165,8 @@ from `max(now_utc, valid_until_utc)`). Never use production keys.
 - [x] Per-transaction audit trail endpoint (PR #4)
 - [x] FR-6.x read-only assistant (rubric)
 - [x] FR-8.x annual workpaper PDF (rubric)
+- [x] FR-47: the dashboard opens the active snapshot for a stored month
+      (figures, full input hash, ruleset, version, and status)
 - [ ] Demo script, report numbers
 
 ## Frontend design — mockup v1.4.2 (25 Sep 2026)

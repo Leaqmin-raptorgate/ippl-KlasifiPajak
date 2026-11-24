@@ -1,17 +1,24 @@
-/** Dashboard and recap. Figures are the API's; this store does not add them up into tax. */
+/** Dashboard, recap, and one active month snapshot. Figures are the API's; this store does not add them up into tax. */
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import { ApiFailure, api, apiBlob } from "@/lib/api";
 import { CAPABILITIES } from "@/lib/capabilities";
 import { TAX_YEAR } from "@/lib/domain";
-import type { Dashboard, Recap } from "@/lib/wire";
+import type { Dashboard, MonthSnapshot, Recap } from "@/lib/wire";
 
 export const usePajakStore = defineStore("pajak", () => {
   const dashboard = ref<Dashboard | null>(null);
   const recap = ref<Recap | null>(null);
   const pesan = ref("");
   const recapPesan = ref("");
+  /** Month token of the open trace sheet. Null when the sheet is closed. */
+  const jejakBulan = ref<string | null>(null);
+  const jejakCuplikan = ref<MonthSnapshot | null>(null);
+  const jejakMemuat = ref(false);
+  const jejakKode = ref("");
+  const jejakPesan = ref("");
   let dimuat = false;
+  let jejakUrutan = 0;
 
   async function muat(paksa = false) {
     if (dimuat && !paksa) return;
@@ -49,6 +56,47 @@ export const usePajakStore = defineStore("pajak", () => {
     dimuat = false;
   }
 
+  /**
+   * Open the active snapshot for one stored month (FR-47).
+   * A response is kept only while its month is still the open sheet.
+   */
+  async function bukaJejakBulan(month: string) {
+    const urutan = ++jejakUrutan;
+    jejakBulan.value = month;
+    jejakCuplikan.value = null;
+    jejakKode.value = "";
+    jejakPesan.value = "";
+    jejakMemuat.value = true;
+    try {
+      const data = await api<MonthSnapshot>(
+        `/tax/snapshots/${TAX_YEAR}/${encodeURIComponent(month)}`,
+      );
+      if (urutan !== jejakUrutan || jejakBulan.value !== month || data.month !== month) return;
+      jejakCuplikan.value = data;
+    } catch (error) {
+      if (urutan !== jejakUrutan || jejakBulan.value !== month) return;
+      jejakCuplikan.value = null;
+      if (error instanceof ApiFailure) {
+        jejakKode.value = error.code;
+        jejakPesan.value = error.message;
+      } else {
+        jejakKode.value = "REQUEST_FAILED";
+        jejakPesan.value = "Jejak bulan belum tersedia.";
+      }
+    } finally {
+      if (urutan === jejakUrutan && jejakBulan.value === month) jejakMemuat.value = false;
+    }
+  }
+
+  function tutupJejakBulan() {
+    jejakUrutan += 1;
+    jejakBulan.value = null;
+    jejakCuplikan.value = null;
+    jejakMemuat.value = false;
+    jejakKode.value = "";
+    jejakPesan.value = "";
+  }
+
   async function unduhPdf() {
     const blob = await apiBlob(`/recap/${TAX_YEAR}/pdf`, { method: "POST" });
     const url = URL.createObjectURL(blob);
@@ -59,5 +107,21 @@ export const usePajakStore = defineStore("pajak", () => {
     URL.revokeObjectURL(url);
   }
 
-  return { dashboard, recap, pesan, recapPesan, muat, hitungUlang, tandaiUsang, unduhPdf };
+  return {
+    dashboard,
+    recap,
+    pesan,
+    recapPesan,
+    jejakBulan,
+    jejakCuplikan,
+    jejakMemuat,
+    jejakKode,
+    jejakPesan,
+    muat,
+    hitungUlang,
+    tandaiUsang,
+    bukaJejakBulan,
+    tutupJejakBulan,
+    unduhPdf,
+  };
 });
