@@ -556,10 +556,12 @@ def test_passive_and_rent_sources_outrank_generic_final_withholding_markers(
         "Hadiah undian dan sewa tanah, dipotong PPh final",
         "Sewa tanah dan penjualan kaos, PPh final",
         "Sewa tanah dan gaji, dipotong PPh final",
+        "Sewa tanah pribadi (bukan usaha), dipotong PPh final",
+        "Dividen bukan usaha dan sewa tanah, dipotong PPh final",
     ],
 )
 def test_passive_or_rent_with_withholding_and_other_source_still_clarifies(description):
-    """Generic withholding wording cannot silence a conflict between two income sources."""
+    """Generic withholding or bukan usaha wording cannot silence a specific source conflict."""
     category, _, _, needs_clarification, _ = classify(description)
     assert needs_clarification is True
     assert category == "usaha"

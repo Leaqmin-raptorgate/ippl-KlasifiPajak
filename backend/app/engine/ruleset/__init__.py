@@ -51,10 +51,11 @@ Today's matrix, pinned by test:
 - Gift, inheritance, loan received, or a transfer between the user's own
   accounts: not in the 0.5% base, not in the test, ``non_object``.
 
-Wording for interest, dividends and lottery prizes: dikenai PPh final
-tersendiri. The ``non_object`` label describes the computation. It does not
-say the money is untaxed. Deposit interest and lottery prizes keep their own
-PPh rules, and dividends can have separate treatment.
+Wording for deposit interest, shareholder dividends and lottery prizes: each
+follows its own PPh rules (including the possibility of a dividend exemption
+under qualifying rules, or separate final PPh). The ``non_object`` label
+describes the computation—outside the 0.5% base and outside the Rp4.8bn test
+as an academic project assumption—and does not say the money is untaxed.
 """
 
 from app.engine.ruleset.load import load_ruleset

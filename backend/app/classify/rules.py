@@ -222,6 +222,11 @@ def classify(text: str, threshold: float = 0.8) -> tuple[str, str, float, bool, 
         # conflict checks.
         if any(rule.id in _SPECIFIC_SOURCE_RULES for rule in decisive):
             decisive = [rule for rule in decisive if rule.id not in _FINAL_MARKERS]
+            # A specific source conflict (e.g. land rent alongside "bukan usaha"
+            # or dividend + land rent) must still clarify instead of letting
+            # generic "bukan usaha" settle the row.
+            if len({rule.category for rule in decisive}) > 1:
+                return _CLARIFY
         chosen = decisive[0]
         if chosen.id not in _EXPLICIT:
             if len({rule.category for rule in decisive}) > 1:
