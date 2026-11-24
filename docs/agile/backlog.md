@@ -185,6 +185,8 @@ is shown on the dashboard (`/dasbor`), with the workpaper PDF button.
       this repo; track in Plane
 - [ ] **needs-decision** residual UI gaps: there is no Pengaturan route;
       whether to add it is undecided
+- [x] A free account blocked from uploading a receipt links to
+      `/kuota?alasan=ocr_berbayar` and can still enter the transaction manually.
 
 ## Quality gates
 
