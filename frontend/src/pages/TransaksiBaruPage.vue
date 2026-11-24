@@ -161,10 +161,6 @@ function hariIni(): string {
 onMounted(async () => {
   await profil.muat();
   await kuota.muat();
-  if (profil.belumAda) {
-    galatSimpan.value =
-      "Status NIB untuk tahun pajak berjalan harus diisi sebelum mencatat transaksi pertama.";
-  }
 });
 
 function pilihBukti() {

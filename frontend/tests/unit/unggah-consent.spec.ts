@@ -351,6 +351,12 @@ describe("receipt upload without consent", () => {
     });
     await flushPromises();
 
+    expect(wrapper.findAll(".peringatan-profil")).toHaveLength(1);
+    expect(wrapper.find("[role='alert']").exists()).toBe(false);
+    expect(wrapper.text().match(/Status NIB untuk tahun pajak berjalan harus diisi/g)).toHaveLength(
+      1,
+    );
+
     const realCreate = document.createElement.bind(document);
     const input = realCreate("input");
     const spy = vi
