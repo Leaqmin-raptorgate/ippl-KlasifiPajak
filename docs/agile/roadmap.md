@@ -5,9 +5,9 @@ Goal: working demo before December. Optimize for finishing, not for completeness
 Tracking lives in Plane, project IPPL. This file explains the sequence and the
 reasoning; Plane holds the items.
 
-## Current state (3 Nov 2026)
+## Current state (23 Nov 2026)
 
-Done on `main` (M50 PRs #1–#4 merged; tip `3d5ced0`):
+Done on `main` (pre-freeze baseline `bf65f27`):
 
 - Tax engine at `backend/app/engine/`, pure Python, no framework, no model.
 - Ruleset as data at `backend/app/engine/ruleset/pp20_2026.json`.
@@ -26,8 +26,9 @@ Done on `main` (M50 PRs #1–#4 merged; tip `3d5ced0`):
 
 **Rubric features (D-08):** OCR receipt upload (FR-06*), Midtrans orders and
 webhook (FR-PAY-*), the AI classifier and assistant (9router / D-09) and the
-annual recap PDF (`fpdf2` / D-11) are implemented. Still open: Midtrans Status
-API confirmation and live keys.
+annual recap PDF (`fpdf2` / D-11) are implemented. Status API confirmation is
+built: disagreement returns `PAYMENT_STATUS_MISMATCH`, and an unreachable
+Status API returns `503`. Still open: the live sandbox run and live keys.
 
 ### Recorded deviations
 
@@ -48,8 +49,11 @@ API confirmation and live keys.
 
 ### Residual risk
 
-- The rubric four (OCR, Midtrans, AI, PDF) are implemented. What remains is
-  the demo script, report numbers and the re-measured classifier scores.
+- The rubric four (OCR, Midtrans, AI, PDF) and the demo script
+  (`docs/demo/DEMO_SCRIPT.md`) are implemented, and the 2026-11-17 rules-only
+  classifier measurements are recorded in `backend/README.md`. What remains is
+  the release rehearsal measurements (report numbers) and the developer's
+  label review / held-out v2 check.
 - Live Midtrans keys are a user task before demo freeze (Fri 27 Nov 2026
   18:00 Asia/Makassar) per D-10.
 - Coverage gate measures **engine only** (NFR-14); whole-app coverage is
@@ -67,8 +71,10 @@ API confirmation and live keys.
 ## Why payments is sequenced carefully
 
 Payments is a lecturer requirement (D-08), so it is in scope. API v1.3.3 §5.30
-defines the webhook contract, rewritten for real Midtrans. Status API
-confirmation is still open.
+defines the webhook contract, rewritten for real Midtrans. Before a settlement
+grants access, the app asks the Midtrans Status API. Disagreement returns
+`PAYMENT_STATUS_MISMATCH`, and an unreachable Status API returns `503`. The
+live sandbox run is still open.
 D-10 allows building against placeholders first; live sandbox keys come before
 demo freeze. Never run against production keys.
 

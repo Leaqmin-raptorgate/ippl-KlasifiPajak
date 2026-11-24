@@ -43,6 +43,10 @@ Contract: API v1.3.3.
   `PAYLOAD_TOO_LARGE`, `INVALID_ORDER_AMOUNT`, `PAYMENT_GATEWAY_UNAVAILABLE` and
   `VALIDATION_ERROR` are documented, and OD-13 records the open Pasal 58(1)(a)
   question.
+- Record that classifier fallback, receipt OCR, and the assistant passed on
+  `bf65f27` with model id `xai/grok-4.7` (issue #29), and correct the
+  pre-freeze notes for Snap return URLs, the Midtrans Status API, and AI quota
+  reservation.
 
 ## [0.5.0] - 2026-11-07
 
