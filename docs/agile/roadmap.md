@@ -70,8 +70,8 @@ Status API returns `503`. Still open: the live sandbox run and live keys.
 
 ## Why payments is sequenced carefully
 
-Payments is a lecturer requirement (D-08), so it is in scope. API v1.3.3 §5.30
-defines the webhook contract, rewritten for real Midtrans. Before a settlement
+Payments is part of the owner-approved full v1 rubric target (D-08). API
+v1.3.3 §5.30 defines the Midtrans webhook contract. Before a settlement
 grants access, the app asks the Midtrans Status API. Disagreement returns
 `PAYMENT_STATUS_MISMATCH`, and an unreachable Status API returns `503`. The
 live sandbox run is still open.

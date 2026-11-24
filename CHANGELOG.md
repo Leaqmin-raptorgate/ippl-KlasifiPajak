@@ -47,6 +47,14 @@ Contract: API v1.3.3.
   `bf65f27` with model id `xai/grok-4.7` (issue #29), and correct the
   pre-freeze notes for Snap return URLs, the Midtrans Status API, and AI quota
   reservation.
+- D-17 records the owner's 2026-11-23 disposition of #33 for the Friday 27
+  November 2026 freeze: there is no lecturer confirmation and none is expected,
+  individual UMKM owners who also freelance remain the adopted v1 audience, the
+  classifier and the assistant both stay in scope, and the assistant is not cut
+  because a lecturer did not reply. Rubric features are not added or removed
+  because of this issue, `D-08` and `roadmap.md` clarify that the full-v1
+  target records the owner's decision, and this is not a claim that a lecturer
+  approved the rubric.
 
 ## [0.5.0] - 2026-11-07
 
